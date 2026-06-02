@@ -1,48 +1,48 @@
 # ============================================
 # AI Model & Dataset Management Platform
-# Python 依赖包列表
+# Python Dependencies
 # ============================================
 
-# Web 框架
+# Web Framework
 Flask==3.1.0
 Flask-SQLAlchemy==3.1.1
 Flask-Login==0.6.3
 Flask-Migrate==4.1.0
 Flask-WTF==1.2.2
 
-# 数据库驱动
+# Database Driver
 PyMySQL==1.1.1
 SQLAlchemy==2.0.36
 
-# 密码加密
+# Password Hashing
 bcrypt==4.2.1
 
-# 表单验证
+# Form Validation
 WTForms==3.2.1
 email-validator==2.2.0
 
-# 文件上传处理
+# File Upload Processing
 Pillow==11.1.0
 
-# 数据处理
+# Data Processing
 pandas==2.2.3
 numpy==2.2.3
 
-# 日期时间
+# Date/Time
 python-dateutil==2.9.0
 
-# JSON Web Token (API 认证)
+# JSON Web Token (API Auth)
 PyJWT==2.10.1
 
-# 跨域支持
+# CORS Support
 Flask-CORS==5.0.1
 
-# 环境变量管理
+# Environment Variables
 python-dotenv==1.1.0
 
-# 日志
+# Logging
 colorlog==6.9.0
 
-# 测试
+# Testing
 pytest==8.3.4
 pytest-cov==6.0.0
