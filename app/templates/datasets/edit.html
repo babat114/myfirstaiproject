@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}编辑 {{ dataset.name }}{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb"><ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="{{ url_for('datasets.list_datasets') }}">数据集</a></li>
+    <li class="breadcrumb-item"><a href="{{ url_for('datasets.dataset_detail', dataset_id=dataset.id) }}">{{ dataset.name }}</a></li>
+    <li class="breadcrumb-item active">编辑</li></ol>
+</nav>
+
+<div class="row"><div class="col-lg-8"><div class="card"><div class="card-body">
+<h4>编辑数据集</h4>
+<form method="POST">
+    <div class="mb-3"><label class="form-label">名称</label><input type="text" name="name" class="form-control" value="{{ dataset.name }}" required></div>
+    <div class="mb-3"><label class="form-label">描述</label><textarea name="description" class="form-control" rows="3">{{ dataset.description or '' }}</textarea></div>
+    <div class="row">
+        <div class="col-md-6 mb-3"><label class="form-label">分类</label><select name="category" class="form-select">
+            {% for cat in ['image','text','tabular','audio','video','other'] %}
+            <option value="{{ cat }}" {% if dataset.category == cat %}selected{% endif %}>{{ cat }}</option>{% endfor %}
+        </select></div>
+        <div class="col-md-6 mb-3"><label class="form-label">版本</label><input type="text" name="version" class="form-control" value="{{ dataset.version }}"></div>
+    </div>
+    <div class="mb-3"><label class="form-label">标签 (逗号分隔)</label><input type="text" name="tags" class="form-control" value="{{ dataset.tags or '' }}"></div>
+    <div class="form-check mb-3"><input type="checkbox" name="is_public" class="form-check-input" id="isPublic" {% if dataset.is_public %}checked{% endif %}><label class="form-check-label" for="isPublic">公开数据集</label></div>
+    <button type="submit" class="btn btn-primary">保存修改</button>
+    <a href="{{ url_for('datasets.dataset_detail', dataset_id=dataset.id) }}" class="btn btn-outline-secondary">取消</a>
+</form>
+</div></div></div></div>
+{% endblock %}

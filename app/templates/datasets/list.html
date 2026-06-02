@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}我的数据集{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2><i class="bi bi-database"></i> 我的数据集</h2>
+    <a href="{{ url_for('datasets.create_dataset') }}" class="btn btn-primary">
+        <i class="bi bi-plus-circle"></i> 上传数据集
+    </a>
+</div>
+
+<!-- 搜索和筛选 -->
+<form method="GET" class="row g-2 mb-3">
+    <div class="col-md-4">
+        <input type="text" name="search" class="form-control" placeholder="搜索数据集..."
+               value="{{ search_query or '' }}">
+    </div>
+    <div class="col-md-3">
+        <select name="category" class="form-select">
+            <option value="">全部分类</option>
+            <option value="image" {% if current_category == 'image' %}selected{% endif %}>图像</option>
+            <option value="text" {% if current_category == 'text' %}selected{% endif %}>文本</option>
+            <option value="tabular" {% if current_category == 'tabular' %}selected{% endif %}>表格</option>
+            <option value="audio" {% if current_category == 'audio' %}selected{% endif %}>音频</option>
+            <option value="video" {% if current_category == 'video' %}selected{% endif %}>视频</option>
+            <option value="other" {% if current_category == 'other' %}selected{% endif %}>其他</option>
+        </select>
+    </div>
+    <div class="col-md-2">
+        <button type="submit" class="btn btn-outline-primary w-100"><i class="bi bi-search"></i> 搜索</button>
+    </div>
+</form>
+
+<!-- 数据集列表 -->
+{% if datasets %}
+<div class="table-responsive">
+    <table class="table table-hover align-middle">
+        <thead class="table-light">
+            <tr>
+                <th>名称</th><th>分类</th><th>格式</th><th>大小</th>
+                <th>行数/列数</th><th>公开</th><th>状态</th><th>操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for ds in datasets %}
+            <tr>
+                <td>
+                    <a href="{{ url_for('datasets.dataset_detail', dataset_id=ds.id) }}" class="text-decoration-none fw-bold">
+                        {{ ds.name }}
+                    </a>
+                    <br><small class="text-muted">v{{ ds.version }}</small>
+                </td>
+                <td><span class="badge bg-secondary">{{ ds.category }}</span></td>
+                <td><code>{{ ds.file_format }}</code></td>
+                <td>{{ ds.file_size_mb }} MB</td>
+                <td>{{ ds.row_count }}/{{ ds.column_count }}</td>
+                <td>{% if ds.is_public %}✅{% else %}🔒{% endif %}</td>
+                <td><span class="badge bg-{{ 'success' if ds.status == 'ready' else 'warning' }}">{{ ds.status }}</span></td>
+                <td>
+                    <a href="{{ url_for('datasets.edit_dataset', dataset_id=ds.id) }}" class="btn btn-sm btn-outline-secondary" title="编辑"><i class="bi bi-pencil"></i></a>
+                    <form method="POST" action="{{ url_for('datasets.delete_dataset', dataset_id=ds.id) }}" class="d-inline"
+                          onsubmit="return confirm('确定删除此数据集？');">
+                        <button class="btn btn-sm btn-outline-danger" title="删除"><i class="bi bi-trash"></i></button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<!-- 分页 -->
+<nav>
+    <ul class="pagination justify-content-center">
+        <li class="page-item {{ 'disabled' if not pagination.has_prev }}"><a class="page-link" href="?page={{ pagination.current_page - 1 }}">上一页</a></li>
+        {% for p in range(1, pagination.pages + 1) %}
+        <li class="page-item {{ 'active' if p == pagination.current_page }}"><a class="page-link" href="?page={{ p }}">{{ p }}</a></li>
+        {% endfor %}
+        <li class="page-item {{ 'disabled' if not pagination.has_next }}"><a class="page-link" href="?page={{ pagination.current_page + 1 }}">下一页</a></li>
+    </ul>
+</nav>
+{% else %}
+<div class="text-center py-5 text-muted">
+    <i class="bi bi-inbox" style="font-size: 3rem;"></i>
+    <p class="mt-2">暂无数据集</p>
+    <a href="{{ url_for('datasets.create_dataset') }}" class="btn btn-primary">上传第一个数据集</a>
+</div>
+{% endif %}
+{% endblock %}

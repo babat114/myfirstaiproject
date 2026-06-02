@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}模型排行榜{% endblock %}
+
+{% block content %}
+<h2><i class="bi bi-trophy"></i> 模型排行榜</h2>
+<p class="text-muted">基于性能指标的模型排名</p>
+
+<div class="row g-4 mt-2">
+    <div class="col-lg-6">
+        <div class="card"><div class="card-header bg-primary text-white"><h5 class="mb-0">🏆 准确率 Top 10</h5></div>
+            <div class="list-group list-group-flush">
+                {% if top_accuracy %}
+                    {% for m in top_accuracy %}
+                    <a href="{{ url_for('models.model_detail', model_id=m.id) }}" class="list-group-item list-group-item-action">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div><span class="badge bg-primary me-2">#{{ loop.index }}</span><strong>{{ m.name }}</strong></div>
+                            <span class="badge bg-success">{{ "%.2f"|format(m.accuracy * 100) }}%</span>
+                        </div>
+                        <small class="text-muted">{{ m.model_type }}{% if m.framework %} · {{ m.framework }}{% endif %} · by {{ m.owner_name }}</small>
+                    </a>{% endfor %}
+                {% else %}<div class="list-group-item text-muted text-center py-3">暂无排行榜数据</div>{% endif %}
+            </div></div>
+    </div>
+    <div class="col-lg-6">
+        <div class="card"><div class="card-header bg-success text-white"><h5 class="mb-0">🎯 F1 分数 Top 10</h5></div>
+            <div class="list-group list-group-flush">
+                {% if top_f1 %}
+                    {% for m in top_f1 %}
+                    <a href="{{ url_for('models.model_detail', model_id=m.id) }}" class="list-group-item list-group-item-action">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div><span class="badge bg-success me-2">#{{ loop.index }}</span><strong>{{ m.name }}</strong></div>
+                            <span class="badge bg-success">{{ "%.4f"|format(m.f1_score) }}</span>
+                        </div>
+                        <small class="text-muted">{{ m.model_type }}{% if m.framework %} · {{ m.framework }}{% endif %} · by {{ m.owner_name }}</small>
+                    </a>{% endfor %}
+                {% else %}<div class="list-group-item text-muted text-center py-3">暂无排行榜数据</div>{% endif %}
+            </div></div>
+    </div>
+</div>
+{% endblock %}

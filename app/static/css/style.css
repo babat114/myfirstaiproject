@@ -1,0 +1,202 @@
+/* ============================================
+   AI Platform - 自定义样式
+   ============================================ */
+
+/* 全局变量 */
+:root {
+    --primary: #4e73df;
+    --success: #1cc88a;
+    --info: #36b9cc;
+    --warning: #f6c23e;
+    --danger: #e74a3b;
+    --dark: #5a5c69;
+}
+
+/* 基础排版 */
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    background-color: #f8f9fc;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+main {
+    flex: 1;
+}
+
+/* 导航栏 */
+.navbar-brand {
+    font-size: 1.3rem;
+    letter-spacing: 0.5px;
+}
+
+/* 卡片样式 */
+.card {
+    border: none;
+    box-shadow: 0 0.15rem 1.75rem 0 rgba(58, 59, 69, 0.15);
+    border-radius: 0.5rem;
+    transition: box-shadow 0.2s ease;
+}
+
+.card:hover {
+    box-shadow: 0 0.15rem 1.75rem 0 rgba(58, 59, 69, 0.25);
+}
+
+.card-header {
+    background-color: #f8f9fc;
+    border-bottom: 1px solid #e3e6f0;
+    border-radius: 0.5rem 0.5rem 0 0 !important;
+}
+
+/* 统计卡片突出颜色 */
+.card.border-primary {
+    border-left: 0.25rem solid var(--primary) !important;
+}
+
+.card.border-success {
+    border-left: 0.25rem solid var(--success) !important;
+}
+
+.card.border-info {
+    border-left: 0.25rem solid var(--info) !important;
+}
+
+.card.border-warning {
+    border-left: 0.25rem solid var(--warning) !important;
+}
+
+/* 表格 */
+.table > thead {
+    border-bottom: 2px solid #e3e6f0;
+}
+
+.table-hover > tbody > tr:hover {
+    background-color: #f2f4f8;
+}
+
+/* 进度条 */
+.progress {
+    background-color: #eaecf4;
+    border-radius: 0.35rem;
+}
+
+/* 按钮 */
+.btn {
+    border-radius: 0.35rem;
+    font-weight: 500;
+}
+
+.btn-primary {
+    background-color: var(--primary);
+    border-color: var(--primary);
+}
+
+.btn-success {
+    background-color: var(--success);
+    border-color: var(--success);
+}
+
+/* 徽章 */
+.badge {
+    font-weight: 500;
+    padding: 0.35em 0.65em;
+    border-radius: 0.35rem;
+}
+
+/* 表单 */
+.form-control, .form-select {
+    border-radius: 0.35rem;
+    border-color: #d1d3e2;
+}
+
+.form-control:focus, .form-select:focus {
+    border-color: #bac8f3;
+    box-shadow: 0 0 0 0.2rem rgba(78, 115, 223, 0.25);
+}
+
+/* 用户头像 */
+.avatar-placeholder {
+    user-select: none;
+}
+
+/* 日志输出 */
+pre.bg-dark {
+    font-family: "Cascadia Code", "Fira Code", "JetBrains Mono", Consolas, monospace;
+    font-size: 0.85rem;
+    line-height: 1.5;
+}
+
+/* 加载动画 */
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+.loading-pulse {
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+/* Toast 提示 */
+.toast-container {
+    position: fixed;
+    top: 1rem;
+    right: 1rem;
+    z-index: 1060;
+}
+
+/* 响应式调整 */
+@media (max-width: 768px) {
+    .display-3 {
+        font-size: 2rem;
+    }
+
+    .navbar-brand {
+        font-size: 1.1rem;
+    }
+
+    .card-body {
+        padding: 1rem;
+    }
+}
+
+/* 深色滚动条 */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: #f1f1f1;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #c1c1c1;
+    border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #a1a1a1;
+}
+
+/* 工具提示 */
+.tooltip-custom {
+    position: relative;
+    cursor: help;
+    border-bottom: 1px dotted var(--dark);
+}
+
+/* 排行榜样式 */
+.leaderboard-item {
+    transition: transform 0.15s ease;
+}
+
+.leaderboard-item:hover {
+    transform: translateX(4px);
+}
+
+/* 标签组 */
+.tag-group .badge {
+    margin-right: 0.25rem;
+    margin-bottom: 0.25rem;
+}

@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}页面未找到{% endblock %}
+{% block content %}
+<div class="text-center py-5">
+    <h1 class="display-1 text-muted">404</h1>
+    <p class="lead">页面未找到</p>
+    <p class="text-muted">您要查找的页面不存在或已被移动。</p>
+    <a href="{{ url_for('dashboard.index') }}" class="btn btn-primary">返回首页</a>
+</div>
+{% endblock %}

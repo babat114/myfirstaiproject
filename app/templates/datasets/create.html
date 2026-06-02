@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}上传数据集{% endblock %}
+
+{% block content %}
+<h2><i class="bi bi-cloud-upload"></i> 上传新数据集</h2>
+
+<div class="row mt-4">
+    <div class="col-lg-8">
+        <div class="card">
+            <div class="card-body">
+                <form method="POST" enctype="multipart/form-data">
+                    <div class="mb-3">
+                        <label class="form-label">数据集名称 <span class="text-danger">*</span></label>
+                        <input type="text" name="name" class="form-control" required placeholder="例如: MNIST 手写数字">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">描述</label>
+                        <textarea name="description" class="form-control" rows="3"></textarea>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">分类</label>
+                            <select name="category" class="form-select">
+                                <option value="image">图像</option>
+                                <option value="text">文本</option>
+                                <option value="tabular" selected>表格</option>
+                                <option value="audio">音频</option>
+                                <option value="video">视频</option>
+                                <option value="other">其他</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">标签 (逗号分隔)</label>
+                            <input type="text" name="tags" class="form-control" placeholder="例如: 分类, 图像, MNIST">
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">数据文件 <span class="text-danger">*</span></label>
+                        <input type="file" name="file" class="form-control" required
+                               accept=".csv,.json,.txt,.xlsx,.parquet,.jpg,.png,.npy">
+                        <small class="text-muted">支持: CSV, JSON, TXT, XLSX, Parquet, JPG, PNG, NPY (最大 100MB)</small>
+                    </div>
+                    <div class="form-check mb-3">
+                        <input type="checkbox" name="is_public" class="form-check-input" id="isPublic">
+                        <label class="form-check-label" for="isPublic">公开此数据集</label>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-lg">
+                        <i class="bi bi-cloud-upload"></i> 上传数据集
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-4">
+        <div class="card"><div class="card-header">上传须知</div><div class="card-body small">
+            <ul>
+                <li>文件大小不超过 100MB</li>
+                <li>数据集名称应简洁明了</li>
+                <li>添加标签有助于搜索</li>
+                <li>公开数据集可被所有用户查看</li>
+                <li>上传后可编辑元数据</li>
+            </ul>
+        </div></div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+*.so
+
+# 虚拟环境
+venv/
+env/
+.venv/
+.env
+pip-wheel-metadata/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# 项目特定
+uploads/
+logs/
+*.log
+instance/
+
+# 环境变量文件
+.env
+.env.local
+.env.production
+
+# 数据库
+*.db
+*.sqlite3
+migrations/versions/
+
+# 测试
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# 临时文件
+tmp/
+temp/
+*.tmp

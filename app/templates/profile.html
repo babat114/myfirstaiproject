@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block title %}个人设置{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-lg-4">
+        <div class="card mb-3">
+            <div class="card-body text-center">
+                <div class="avatar-placeholder bg-primary text-white rounded-circle d-inline-flex align-items-center justify-content-center mb-3"
+                     style="width: 80px; height: 80px; font-size: 2rem;">
+                    {{ current_user.username[0].upper() }}
+                </div>
+                <h5>{{ current_user.full_name or current_user.username }}</h5>
+                <span class="badge bg-{{ 'warning' if current_user.is_admin else 'primary' }}">
+                    {{ current_user.role }}
+                </span>
+                <p class="text-muted small mt-2">注册于 {{ current_user.created_at.strftime('%Y-%m-%d') if current_user.created_at else '-' }}</p>
+                <p class="text-muted small">上次登录: {{ current_user.last_login_at.strftime('%Y-%m-%d %H:%M') if current_user.last_login_at else '首次登录' }}</p>
+
+                <hr>
+                <div class="row text-center">
+                    <div class="col-4"><strong>{{ current_user.dataset_count }}</strong><br><small>数据集</small></div>
+                    <div class="col-4"><strong>{{ current_user.model_count }}</strong><br><small>模型</small></div>
+                    <div class="col-4"><strong>{{ current_user.training_count }}</strong><br><small>训练</small></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- API 密钥 -->
+        <div class="card">
+            <div class="card-header"><h6 class="mb-0">API 密钥</h6></div>
+            <div class="card-body">
+                <div class="input-group mb-2">
+                    <input type="password" class="form-control form-control-sm" id="apiKey"
+                           value="{{ current_user.api_key or '未生成' }}" readonly>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="toggleApiKeyVisibility()">
+                        <i class="bi bi-eye"></i>
+                    </button>
+                </div>
+                <form method="POST" action="{{ url_for('auth.profile') }}">
+                    <input type="hidden" name="action" value="regenerate_api_key">
+                    <button type="submit" class="btn btn-sm btn-outline-warning w-100"
+                            onclick="return confirm('确定重新生成 API 密钥？旧的密钥将失效。');">
+                        <i class="bi bi-arrow-repeat"></i> 重新生成
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-8">
+        <!-- 编辑资料 -->
+        <div class="card mb-3">
+            <div class="card-header"><h5 class="mb-0">编辑资料</h5></div>
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('auth.profile') }}">
+                    <input type="hidden" name="action" value="update_profile">
+                    <div class="mb-3">
+                        <label class="form-label">全名</label>
+                        <input type="text" class="form-control" name="full_name"
+                               value="{{ current_user.full_name or '' }}">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">组织</label>
+                        <input type="text" class="form-control" name="organization"
+                               value="{{ current_user.organization or '' }}">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">个人简介</label>
+                        <textarea class="form-control" name="bio" rows="3">{{ current_user.bio or '' }}</textarea>
+                    </div>
+                    <button type="submit" class="btn btn-primary">保存修改</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- 修改密码 -->
+        <div class="card">
+            <div class="card-header"><h5 class="mb-0">修改密码</h5></div>
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('auth.profile') }}">
+                    <input type="hidden" name="action" value="change_password">
+                    <div class="mb-3">
+                        <label class="form-label">当前密码</label>
+                        <input type="password" class="form-control" name="old_password" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">新密码</label>
+                        <input type="password" class="form-control" name="new_password" required minlength="8">
+                    </div>
+                    <button type="submit" class="btn btn-warning">修改密码</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function toggleApiKeyVisibility() {
+    const el = document.getElementById('apiKey');
+    el.type = el.type === 'password' ? 'text' : 'password';
+}
+</script>
+{% endblock %}

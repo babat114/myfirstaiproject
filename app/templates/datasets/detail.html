@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}{{ dataset.name }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb mb-0">
+            <li class="breadcrumb-item"><a href="{{ url_for('datasets.list_datasets') }}">数据集</a></li>
+            <li class="breadcrumb-item active">{{ dataset.name }}</li>
+        </ol>
+    </nav>
+    <div>
+        <a href="{{ url_for('datasets.edit_dataset', dataset_id=dataset.id) }}" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-pencil"></i> 编辑
+        </a>
+        <form method="POST" action="{{ url_for('datasets.delete_dataset', dataset_id=dataset.id) }}" class="d-inline"
+              onsubmit="return confirm('确定删除此数据集？此操作不可逆。');">
+            <button class="btn btn-outline-danger btn-sm"><i class="bi bi-trash"></i> 删除</button>
+        </form>
+    </div>
+</div>
+
+<div class="row g-3">
+    <div class="col-lg-8">
+        <div class="card">
+            <div class="card-body">
+                <h4>{{ dataset.name }} <small class="text-muted">v{{ dataset.version }}</small></h4>
+                <span class="badge bg-{{ 'success' if dataset.status == 'ready' else 'warning' }}">{{ dataset.status }}</span>
+                <span class="badge bg-info">{{ dataset.category }}</span>
+                {% if dataset.is_public %}<span class="badge bg-success">公开</span>{% endif %}
+
+                {% if dataset.description %}
+                <p class="mt-3">{{ dataset.description }}</p>
+                {% endif %}
+
+                <hr>
+                <h6>标签</h6>
+                {% if dataset.tags_list %}
+                    {% for tag in dataset.tags_list %}
+                    <span class="badge bg-light text-dark border">{{ tag }}</span>
+                    {% endfor %}
+                {% else %}<span class="text-muted">无标签</span>{% endif %}
+            </div>
+        </div>
+
+        <!-- 关联训练任务 -->
+        <div class="card mt-3">
+            <div class="card-header"><h6 class="mb-0">关联的训练任务 ({{ dataset.training_job_count }})</h6></div>
+            <div class="list-group list-group-flush">
+                {% if dataset.training_jobs %}
+                    {% for job in dataset.training_jobs %}
+                    <a href="{{ url_for('training.job_detail', job_id=job.id) }}" class="list-group-item list-group-item-action">
+                        {{ job.name }} - {{ job.status }}
+                    </a>
+                    {% endfor %}
+                {% else %}
+                <div class="list-group-item text-muted">暂无关联训练任务</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-4">
+        <div class="card"><div class="card-header"><h6 class="mb-0">文件信息</h6></div><div class="card-body">
+            <p><strong>文件名:</strong> {{ dataset.filename }}</p>
+            <p><strong>格式:</strong> {{ dataset.file_format }}</p>
+            <p><strong>大小:</strong> {{ dataset.file_size_mb }} MB</p>
+            <p><strong>行数:</strong> {{ dataset.row_count or '-' }}</p>
+            <p><strong>列数:</strong> {{ dataset.column_count or '-' }}</p>
+        </div></div>
+
+        <div class="card mt-3"><div class="card-header"><h6 class="mb-0">元信息</h6></div><div class="card-body">
+            <p><strong>UUID:</strong> <code>{{ dataset.uuid }}</code></p>
+            <p><strong>拥有者:</strong> {{ dataset.owner.username }}</p>
+            <p><strong>创建时间:</strong> {{ dataset.created_at.strftime('%Y-%m-%d %H:%M') if dataset.created_at else '-' }}</p>
+            <p><strong>更新时间:</strong> {{ dataset.updated_at.strftime('%Y-%m-%d %H:%M') if dataset.updated_at else '-' }}</p>
+        </div></div>
+    </div>
+</div>
+{% endblock %}

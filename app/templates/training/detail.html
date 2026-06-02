@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}{{ job.name }}{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="{{ url_for('training.list_jobs') }}">训练任务</a></li><li class="breadcrumb-item active">{{ job.name }}</li></ol></nav>
+
+<!-- 任务控制 -->
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h4>{{ job.name }}</h4>
+    <div>
+        {% if job.status == 'queued' %}
+        <form method="POST" action="{{ url_for('training.start_job', job_id=job.id) }}" class="d-inline"><button class="btn btn-success"><i class="bi bi-play-fill"></i> 启动</button></form>
+        {% elif job.status == 'running' %}
+        <form method="POST" action="{{ url_for('training.pause_job', job_id=job.id) }}" class="d-inline"><button class="btn btn-warning"><i class="bi bi-pause-fill"></i> 暂停</button></form>
+        <form method="POST" action="{{ url_for('training.cancel_job', job_id=job.id) }}" class="d-inline"><button class="btn btn-danger"><i class="bi bi-stop-fill"></i> 取消</button></form>
+        {% elif job.status == 'paused' %}
+        <form method="POST" action="{{ url_for('training.start_job', job_id=job.id) }}" class="d-inline"><button class="btn btn-success"><i class="bi bi-play-fill"></i> 恢复</button></form>
+        {% endif %}
+        <form method="POST" action="{{ url_for('training.delete_job', job_id=job.id) }}" class="d-inline" onsubmit="return confirm('确定删除此任务？');"><button class="btn btn-outline-danger"><i class="bi bi-trash"></i></button></form>
+    </div>
+</div>
+
+<div class="row g-3">
+    <div class="col-lg-8">
+        <!-- 进度条 -->
+        <div class="card mb-3"><div class="card-body">
+            <h6>训练进度</h6>
+            <div class="progress" style="height:25px"><div class="progress-bar progress-bar-striped bg-{{ 'success' if job.progress_percent == 100 else 'info' }} {% if job.status == 'running' %}progress-bar-animated{% endif %}"
+                style="width:{{ job.progress_percent }}%">{{ job.progress_percent }}%</div></div>
+            <div class="d-flex justify-content-between mt-2"><small>Epoch: {{ job.current_epoch }}/{{ job.total_epochs }}</small><small>Step: {{ job.current_step }}/{{ job.total_steps }}</small></div>
+        </div></div>
+
+        <!-- 日志 -->
+        <div class="card"><div class="card-header"><h6 class="mb-0">训练日志</h6></div><div class="card-body">
+            <pre class="bg-dark text-light p-3 rounded" style="max-height:300px;overflow-y:auto;font-size:13px;">{{ job.log_text or '暂无日志输出...' }}</pre>
+        </div></div>
+    </div>
+
+    <div class="col-lg-4">
+        <div class="card mb-3"><div class="card-header"><h6 class="mb-0">任务信息</h6></div><div class="card-body">
+            <p><strong>状态:</strong> <span class="badge bg-{{ 'success' if job.status == 'completed' else 'warning' if job.status == 'running' else 'secondary' }}">{{ job.status }}</span></p>
+            <p><strong>类型:</strong> {{ job.task_type }}</p>
+            <p><strong>框架:</strong> {{ job.framework or '未指定' }}</p>
+            {% if job.dataset %}<p><strong>数据集:</strong> <a href="{{ url_for('datasets.dataset_detail', dataset_id=job.dataset.id) }}">{{ job.dataset.name }}</a></p>{% endif %}
+            <p><strong>运行时长:</strong> {{ job.duration_display }}</p>
+            <p><strong>创建时间:</strong> {{ job.created_at.strftime('%Y-%m-%d %H:%M') if job.created_at else '-' }}</p>
+            {% if job.started_at %}<p><strong>开始时间:</strong> {{ job.started_at.strftime('%Y-%m-%d %H:%M') }}</p>{% endif %}
+            {% if job.completed_at %}<p><strong>完成时间:</strong> {{ job.completed_at.strftime('%Y-%m-%d %H:%M') }}</p>{% endif %}
+        </div></div>
+
+        <div class="card"><div class="card-header"><h6 class="mb-0">资源配置</h6></div><div class="card-body">
+            <p><strong>GPU:</strong> {{ job.gpu_count }} 个</p>
+            <p><strong>CPU:</strong> {{ job.cpu_cores }} 核</p>
+            <p><strong>内存:</strong> {{ job.memory_gb }} GB</p>
+        </div></div>
+
+        {% if job.error_message %}
+        <div class="card mt-3 border-danger"><div class="card-header bg-danger text-white"><h6 class="mb-0">错误信息</h6></div><div class="card-body"><pre class="text-danger" style="white-space:pre-wrap;">{{ job.error_message }}</pre></div></div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

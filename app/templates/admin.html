@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}管理面板{% endblock %}
+
+{% block content %}
+<h2><i class="bi bi-shield-lock"></i> 管理员面板</h2>
+<p class="text-muted mb-4">全局统计概览</p>
+
+<div class="row g-3 mb-4">
+    <div class="col-md-3">
+        <div class="card bg-primary text-white"><div class="card-body text-center">
+            <h1>{{ dataset_stats.total_count }}</h1><small>数据集总数</small></div></div>
+    </div>
+    <div class="col-md-3">
+        <div class="card bg-success text-white"><div class="card-body text-center">
+            <h1>{{ model_stats.total_count }}</h1><small>模型总数</small></div></div>
+    </div>
+    <div class="col-md-3">
+        <div class="card bg-info text-white"><div class="card-body text-center">
+            <h1>{{ job_stats.total_count }}</h1><small>训练任务总数</small></div></div>
+    </div>
+    <div class="col-md-3">
+        <div class="card bg-warning"><div class="card-body text-center">
+            <h1>{{ job_stats.running_count }}</h1><small>运行中任务</small></div></div>
+    </div>
+</div>
+
+<div class="row g-3">
+    <div class="col-lg-6">
+        <div class="card"><div class="card-header">数据集分类</div><div class="card-body">
+            <canvas id="datasetCatChart" height="200"></canvas></div></div>
+    </div>
+    <div class="col-lg-6">
+        <div class="card"><div class="card-header">模型框架分布</div><div class="card-body">
+            <canvas id="frameworkChart" height="200"></canvas></div></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+new Chart(document.getElementById('datasetCatChart'), {
+    type: 'bar',
+    data: {
+        labels: Object.keys({{ dataset_stats.categories | tojson }}),
+        datasets: [{data: Object.values({{ dataset_stats.categories | tojson }}), backgroundColor: '#4e73df', borderRadius: 5}]
+    },
+    options: { responsive: true, plugins: { legend: { display: false } } }
+});
+
+new Chart(document.getElementById('frameworkChart'), {
+    type: 'pie',
+    data: {
+        labels: Object.keys({{ model_stats.frameworks | tojson }}),
+        datasets: [{data: Object.values({{ model_stats.frameworks | tojson }}), backgroundColor: ['#4e73df','#1cc88a','#36b9cc','#f6c23e','#e74a3b']}]
+    }
+});
+</script>
+{% endblock %}

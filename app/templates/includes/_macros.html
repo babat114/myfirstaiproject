@@ -1,0 +1,23 @@
+{# 可复用的 Jinja2 宏 #}
+
+{# 状态徽章宏 #}
+{% macro status_badge(status, size='') %}
+    {% set colors = {
+        'ready': 'success', 'uploading': 'warning', 'processing': 'info', 'error': 'danger',
+        'draft': 'secondary', 'trained': 'primary', 'deployed': 'success', 'archived': 'dark',
+        'failed': 'danger', 'queued': 'info', 'preparing': 'warning',
+        'running': 'primary', 'paused': 'warning', 'completed': 'success', 'cancelled': 'secondary'
+    } %}
+    <span class="badge bg-{{ colors.get(status, 'secondary') }} {{ size }}">{{ status }}</span>
+{% endmacro %}
+
+{# 空状态占位符 #}
+{% macro empty_state(icon, title, action_url, action_text) %}
+<div class="text-center py-5 text-muted">
+    <i class="bi bi-{{ icon }}" style="font-size: 3rem;"></i>
+    <p class="mt-2">{{ title }}</p>
+    {% if action_url %}
+    <a href="{{ action_url }}" class="btn btn-primary">{{ action_text }}</a>
+    {% endif %}
+</div>
+{% endmacro %}

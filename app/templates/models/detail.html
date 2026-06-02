@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}{{ model.name }}{% endblock %}
+{% from "includes/_macros.html" import status_badge %}
+
+{% block content %}
+<nav aria-label="breadcrumb"><ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="{{ url_for('models.list_models') }}">模型</a></li>
+    <li class="breadcrumb-item active">{{ model.name }}</li></ol>
+</nav>
+
+<div class="row g-3">
+    <div class="col-lg-8">
+        <div class="card"><div class="card-body">
+            <h4>{{ model.name }} <small class="text-muted">v{{ model.version }}</small></h4>
+            <span class="badge bg-{{ 'success' if model.status == 'deployed' else 'info' }}">{{ model.status }}</span>
+            <span class="badge bg-secondary">{{ model.model_type }}</span>
+            {% if model.framework %}<span class="badge bg-dark">{{ model.framework }}</span>{% endif %}
+            {% if model.description %}<p class="mt-3">{{ model.description }}</p>{% endif %}
+        </div></div>
+
+        <!-- 性能指标 -->
+        <div class="card mt-3"><div class="card-header"><h6 class="mb-0">性能指标</h6></div><div class="card-body">
+            <div class="row text-center">
+                <div class="col-3"><h4 class="text-primary">{% if model.accuracy is not none %}{{ "%.1f"|format(model.accuracy * 100) }}%{% else %}-{% endif %}</h4><small>准确率</small></div>
+                <div class="col-3"><h4 class="text-success">{% if model.precision is not none %}{{ "%.2f"|format(model.precision) }}{% else %}-{% endif %}</h4><small>精确率</small></div>
+                <div class="col-3"><h4 class="text-info">{% if model.recall is not none %}{{ "%.2f"|format(model.recall) }}{% else %}-{% endif %}</h4><small>召回率</small></div>
+                <div class="col-3"><h4 class="text-warning">{% if model.f1_score is not none %}{{ "%.2f"|format(model.f1_score) }}{% else %}-{% endif %}</h4><small>F1 分数</small></div>
+            </div>
+        </div></div>
+
+        <!-- 超参数 -->
+        {% if model.hyperparameters_dict %}
+        <div class="card mt-3"><div class="card-header"><h6 class="mb-0">超参数</h6></div><div class="card-body"><div class="row">
+            {% for key, value in model.hyperparameters_dict.items() %}
+            <div class="col-md-4 mb-2"><strong>{{ key }}:</strong> {{ value }}</div>
+            {% endfor %}
+        </div></div></div>
+        {% endif %}
+    </div>
+
+    <div class="col-lg-4">
+        <div class="card"><div class="card-header"><h6 class="mb-0">模型文件</h6></div><div class="card-body">
+            <p><strong>文件大小:</strong> {{ model.file_size_mb }} MB</p>
+            <p><strong>训练时长:</strong> {% if model.training_duration_seconds %}{{ model.training_duration_seconds }} 秒{% else %}-{% endif %}</p>
+            {% if model.deployment_url %}<p><strong>部署URL:</strong> <a href="{{ model.deployment_url }}">{{ model.deployment_url }}</a></p>{% endif %}
+        </div></div>
+
+        <div class="card mt-3"><div class="card-header"><h6 class="mb-0">上传模型文件</h6></div><div class="card-body">
+            <form method="POST" action="{{ url_for('models.upload_model_file', model_id=model.id) }}" enctype="multipart/form-data">
+                <input type="file" name="model_file" class="form-control form-control-sm mb-2" accept=".pt,.pth,.h5,.pb,.onnx,.pkl,.joblib">
+                <button type="submit" class="btn btn-sm btn-primary w-100"><i class="bi bi-cloud-upload"></i> 上传</button>
+            </form>
+        </div></div>
+
+        <div class="card mt-3"><div class="card-header"><h6 class="mb-0">元信息</h6></div><div class="card-body">
+            <p><strong>UUID:</strong> <code>{{ model.uuid }}</code></p>
+            <p><strong>拥有者:</strong> {{ model.owner.username }}</p>
+            <p><strong>创建时间:</strong> {{ model.created_at.strftime('%Y-%m-%d %H:%M') if model.created_at else '-' }}</p>
+        </div></div>
+    </div>
+</div>
+{% endblock %}

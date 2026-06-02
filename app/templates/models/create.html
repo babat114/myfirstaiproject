@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}注册模型{% endblock %}
+
+{% block content %}
+<h2><i class="bi bi-cpu"></i> 注册新 AI 模型</h2>
+
+<div class="row mt-4"><div class="col-lg-8"><div class="card"><div class="card-body">
+<form method="POST">
+    <div class="mb-3"><label class="form-label">模型名称 <span class="text-danger">*</span></label><input type="text" name="name" class="form-control" required placeholder="例如: ResNet-50 图像分类器"></div>
+    <div class="mb-3"><label class="form-label">描述</label><textarea name="description" class="form-control" rows="3"></textarea></div>
+    <div class="row">
+        <div class="col-md-4 mb-3"><label class="form-label">模型类型</label><select name="model_type" class="form-select">
+            {% for t in ['classification','regression','clustering','nlp','computer_vision','reinforcement','generative','other'] %}
+            <option value="{{ t }}">{{ t }}</option>{% endfor %}
+        </select></div>
+        <div class="col-md-4 mb-3"><label class="form-label">框架</label><select name="framework" class="form-select">
+            <option value="">不指定</option>
+            {% for f in ['PyTorch','TensorFlow','scikit-learn','Keras','JAX','ONNX','Other'] %}
+            <option value="{{ f }}">{{ f }}</option>{% endfor %}
+        </select></div>
+        <div class="col-md-4 mb-3"><label class="form-label">版本</label><input type="text" name="version" class="form-control" value="1.0.0"></div>
+    </div>
+    <hr>
+    <h6>超参数 <small class="text-muted">(可选)</small></h6>
+    <div id="hyperparams">
+        <div class="row mb-2 hp-row"><div class="col-5"><input type="text" name="hp_key[]" class="form-control form-control-sm" placeholder="参数名"></div><div class="col-5"><input type="text" name="hp_value[]" class="form-control form-control-sm" placeholder="值"></div><div class="col-2"><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('.hp-row').remove()">×</button></div></div>
+    </div>
+    <button type="button" class="btn btn-sm btn-outline-secondary mb-3" onclick="addHyperparam()">+ 添加超参数</button>
+
+    <div class="form-check mb-3"><input type="checkbox" name="is_public" class="form-check-input" id="isPublic"><label class="form-check-label" for="isPublic">公开此模型</label></div>
+    <button type="submit" class="btn btn-success btn-lg"><i class="bi bi-check-circle"></i> 注册模型</button>
+</form>
+</div></div></div></div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function addHyperparam() {
+    const row = document.querySelector('.hp-row').cloneNode(true);
+    row.querySelectorAll('input').forEach(i => i.value = '');
+    document.getElementById('hyperparams').appendChild(row);
+}
+</script>
+{% endblock %}

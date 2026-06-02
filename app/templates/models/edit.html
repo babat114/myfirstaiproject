@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}编辑 {{ model.name }}{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="{{ url_for('models.list_models') }}">模型</a></li><li class="breadcrumb-item"><a href="{{ url_for('models.model_detail', model_id=model.id) }}">{{ model.name }}</a></li><li class="breadcrumb-item active">编辑</li></ol></nav>
+
+<div class="row"><div class="col-lg-8"><div class="card"><div class="card-body">
+<h4>编辑模型</h4>
+<form method="POST">
+    <div class="mb-3"><label class="form-label">名称</label><input type="text" name="name" class="form-control" value="{{ model.name }}" required></div>
+    <div class="mb-3"><label class="form-label">描述</label><textarea name="description" class="form-control" rows="3">{{ model.description or '' }}</textarea></div>
+    <div class="row">
+        <div class="col-md-4 mb-3"><label class="form-label">类型</label><select name="model_type" class="form-select">{% for t in ['classification','regression','clustering','nlp','computer_vision','reinforcement','generative','other'] %}<option value="{{ t }}" {% if model.model_type == t %}selected{% endif %}>{{ t }}</option>{% endfor %}</select></div>
+        <div class="col-md-4 mb-3"><label class="form-label">框架</label><input type="text" name="framework" class="form-control" value="{{ model.framework or '' }}"></div>
+        <div class="col-md-4 mb-3"><label class="form-label">版本</label><input type="text" name="version" class="form-control" value="{{ model.version }}"></div>
+    </div>
+    <div class="form-check mb-3"><input type="checkbox" name="is_public" class="form-check-input" id="isPublic" {% if model.is_public %}checked{% endif %}><label class="form-check-label" for="isPublic">公开模型</label></div>
+    <button type="submit" class="btn btn-primary">保存修改</button>
+    <a href="{{ url_for('models.model_detail', model_id=model.id) }}" class="btn btn-outline-secondary">取消</a>
+</form>
+</div></div></div></div>
+{% endblock %}

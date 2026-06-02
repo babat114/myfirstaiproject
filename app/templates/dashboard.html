@@ -1,0 +1,249 @@
+{% extends "base.html" %}
+{% block title %}仪表盘{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-speedometer2"></i> 仪表盘</h2>
+    <span class="text-muted">欢迎回来，{{ current_user.full_name or current_user.username }}！</span>
+</div>
+
+<!-- 统计卡片 -->
+<div class="row g-3 mb-4">
+    <div class="col-xl-3 col-md-6">
+        <div class="card border-primary h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="text-primary text-uppercase">数据集</h6>
+                        <h2 class="fw-bold">{{ dataset_stats.total_count }}</h2>
+                    </div>
+                    <div class="text-primary">
+                        <i class="bi bi-database" style="font-size: 2.5rem;"></i>
+                    </div>
+                </div>
+                <small class="text-muted">{{ dataset_stats.total_size_gb }} GB 总大小</small>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-xl-3 col-md-6">
+        <div class="card border-success h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="text-success text-uppercase">模型</h6>
+                        <h2 class="fw-bold">{{ model_stats.total_count }}</h2>
+                    </div>
+                    <div class="text-success">
+                        <i class="bi bi-cpu" style="font-size: 2.5rem;"></i>
+                    </div>
+                </div>
+                <small class="text-muted">{{ model_stats.deployed_count }} 个已部署</small>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-xl-3 col-md-6">
+        <div class="card border-info h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="text-info text-uppercase">训练任务</h6>
+                        <h2 class="fw-bold">{{ job_stats.total_count }}</h2>
+                    </div>
+                    <div class="text-info">
+                        <i class="bi bi-play-circle" style="font-size: 2.5rem;"></i>
+                    </div>
+                </div>
+                <small class="text-muted">{{ job_stats.running_count }} 个运行中</small>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-xl-3 col-md-6">
+        <div class="card border-warning h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="text-warning text-uppercase">平均准确率</h6>
+                        <h2 class="fw-bold">
+                            {% if model_stats.avg_accuracy %}
+                                {{ "%.1f" | format(model_stats.avg_accuracy * 100) }}%
+                            {% else %}-{% endif %}
+                        </h2>
+                    </div>
+                    <div class="text-warning">
+                        <i class="bi bi-graph-up" style="font-size: 2.5rem;"></i>
+                    </div>
+                </div>
+                <small class="text-muted">
+                    最高 {{ "%.1f" | format((model_stats.max_accuracy or 0) * 100) }}%
+                </small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 图表和最近记录 -->
+<div class="row g-3">
+    <!-- 图表区域 -->
+    <div class="col-lg-8">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0">数据概览</h5>
+            </div>
+            <div class="card-body">
+                <canvas id="overviewChart" height="260"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- 模型类型分布 -->
+    <div class="col-lg-4">
+        <div class="card">
+            <div class="card-header"><h5 class="card-title mb-0">模型类型分布</h5></div>
+            <div class="card-body">
+                <canvas id="modelTypeChart" height="260"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 最近记录 -->
+<div class="row g-3 mt-2">
+    <div class="col-lg-4">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h6 class="mb-0">最近数据集</h6>
+                <a href="{{ url_for('datasets.list_datasets') }}" class="btn btn-sm btn-outline-primary">全部</a>
+            </div>
+            <div class="list-group list-group-flush">
+                {% if recent_datasets %}
+                    {% for ds in recent_datasets %}
+                    <a href="{{ url_for('datasets.dataset_detail', dataset_id=ds.id) }}"
+                       class="list-group-item list-group-item-action">
+                        <div class="d-flex justify-content-between">
+                            <strong>{{ ds.name }}</strong>
+                            <small class="text-muted">{{ ds.file_size_mb }} MB</small>
+                        </div>
+                        <small class="text-muted">{{ ds.file_format }} · {{ ds.category }}</small>
+                    </a>
+                    {% endfor %}
+                {% else %}
+                    <div class="list-group-item text-muted text-center py-3">
+                        暂无数据集，<a href="{{ url_for('datasets.create_dataset') }}">上传一个</a>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-4">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h6 class="mb-0">最近模型</h6>
+                <a href="{{ url_for('models.list_models') }}" class="btn btn-sm btn-outline-success">全部</a>
+            </div>
+            <div class="list-group list-group-flush">
+                {% if recent_models %}
+                    {% for m in recent_models %}
+                    <a href="{{ url_for('models.model_detail', model_id=m.id) }}"
+                       class="list-group-item list-group-item-action">
+                        <div class="d-flex justify-content-between">
+                            <strong>{{ m.name }}</strong>
+                            <span class="badge bg-{{ 'success' if m.status == 'deployed' else 'secondary' }}">
+                                {{ m.status }}
+                            </span>
+                        </div>
+                        <small class="text-muted">{{ m.model_type }} · v{{ m.version }}</small>
+                    </a>
+                    {% endfor %}
+                {% else %}
+                    <div class="list-group-item text-muted text-center py-3">
+                        暂无模型，<a href="{{ url_for('models.create_model') }}">注册一个</a>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-4">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h6 class="mb-0">最近训练</h6>
+                <a href="{{ url_for('training.list_jobs') }}" class="btn btn-sm btn-outline-info">全部</a>
+            </div>
+            <div class="list-group list-group-flush">
+                {% if recent_jobs %}
+                    {% for j in recent_jobs %}
+                    <a href="{{ url_for('training.job_detail', job_id=j.id) }}"
+                       class="list-group-item list-group-item-action">
+                        <div class="d-flex justify-content-between">
+                            <strong>{{ j.name }}</strong>
+                            <span class="badge bg-{{ 'warning' if j.status == 'running' else 'info' }}">
+                                {{ j.status }}
+                            </span>
+                        </div>
+                        <small class="text-muted">{{ j.progress_percent }}% · {{ j.duration_display }}</small>
+                    </a>
+                    {% endfor %}
+                {% else %}
+                    <div class="list-group-item text-muted text-center py-3">
+                        暂无训练任务，<a href="{{ url_for('training.create_job') }}">创建一个</a>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// 数据概览图表
+const overviewCtx = document.getElementById('overviewChart').getContext('2d');
+new Chart(overviewCtx, {
+    type: 'bar',
+    data: {
+        labels: ['数据集', '模型', '训练任务'],
+        datasets: [{
+            label: '总数',
+            data: [
+                {{ dataset_stats.total_count }},
+                {{ model_stats.total_count }},
+                {{ job_stats.total_count }}
+            ],
+            backgroundColor: ['#4e73df', '#1cc88a', '#36b9cc'],
+            borderRadius: 6,
+        }, {
+            label: '本月新增',
+            data: [0, 0, 0],
+            backgroundColor: ['#a0b5f0', '#8ee8c0', '#8fdce6'],
+            borderRadius: 6,
+        }]
+    },
+    options: {
+        responsive: true,
+        plugins: { legend: { position: 'top' } },
+    }
+});
+
+// 模型类型分布
+const typeCtx = document.getElementById('modelTypeChart').getContext('2d');
+const modelTypes = {{ model_stats.types | tojson }};
+new Chart(typeCtx, {
+    type: 'doughnut',
+    data: {
+        labels: Object.keys(modelTypes),
+        datasets: [{
+            data: Object.values(modelTypes),
+            backgroundColor: ['#4e73df', '#1cc88a', '#36b9cc', '#f6c23e', '#e74a3b', '#858796'],
+        }]
+    },
+    options: {
+        responsive: true,
+        plugins: { legend: { position: 'bottom' } },
+    }
+});
+</script>
+{% endblock %}

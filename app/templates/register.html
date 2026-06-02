@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}注册{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center mt-4">
+    <div class="col-md-6 col-lg-5">
+        <div class="card shadow">
+            <div class="card-body p-4">
+                <h2 class="fw-bold text-center mb-4">创建账户</h2>
+
+                <form method="POST" action="{{ url_for('auth.register') }}">
+                    <div class="mb-3">
+                        <label for="username" class="form-label">用户名 <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="username" name="username"
+                               placeholder="至少3个字符" required minlength="3">
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="email" class="form-label">邮箱 <span class="text-danger">*</span></label>
+                        <input type="email" class="form-control" id="email" name="email"
+                               placeholder="your@email.com" required>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="full_name" class="form-label">全名</label>
+                        <input type="text" class="form-control" id="full_name" name="full_name"
+                               placeholder="选填">
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="password" class="form-label">密码 <span class="text-danger">*</span></label>
+                            <input type="password" class="form-control" id="password" name="password"
+                                   placeholder="至少8个字符" required minlength="8">
+                            <small class="text-muted">需包含大写字母和数字</small>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="confirm_password" class="form-label">确认密码 <span class="text-danger">*</span></label>
+                            <input type="password" class="form-control" id="confirm_password"
+                                   name="confirm_password" placeholder="再次输入密码" required>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn btn-success w-100 btn-lg">
+                        <i class="bi bi-person-plus"></i> 注册
+                    </button>
+                </form>
+
+                <div class="text-center mt-3">
+                    <p class="text-muted">
+                        已有账户？<a href="{{ url_for('auth.login') }}">立即登录</a>
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

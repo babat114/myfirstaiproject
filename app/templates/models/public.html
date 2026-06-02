@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}公开模型{% endblock %}
+
+{% block content %}
+<h2><i class="bi bi-globe"></i> 公开模型</h2>
+<form method="GET" class="row g-2 mb-3 mt-2">
+    <div class="col-md-3"><input type="text" name="search" class="form-control" placeholder="搜索..." value="{{ search_query or '' }}"></div>
+    <div class="col-md-2"><select name="model_type" class="form-select"><option value="">全部类型</option>{% for t in ['classification','regression','clustering','nlp','computer_vision','reinforcement','generative','other'] %}<option value="{{ t }}" {% if current_type == t %}selected{% endif %}>{{ t }}</option>{% endfor %}</select></div>
+    <div class="col-md-2"><select name="framework" class="form-select"><option value="">全部框架</option>{% for f in ['PyTorch','TensorFlow','scikit-learn','Keras','JAX','ONNX','Other'] %}<option value="{{ f }}" {% if current_framework == f %}selected{% endif %}>{{ f }}</option>{% endfor %}</select></div>
+    <div class="col-md-2"><button type="submit" class="btn btn-outline-primary w-100"><i class="bi bi-search"></i> 搜索</button></div>
+</form>
+
+{% if models %}
+<div class="row g-3">{% for m in models %}
+<div class="col-md-6"><div class="card h-100"><div class="card-body">
+    <h5><a href="{{ url_for('models.model_detail', model_id=m.id) }}" class="text-decoration-none">{{ m.name }}</a></h5>
+    <p class="text-muted small">{{ m.description or '无描述' }}</p>
+    <span class="badge bg-secondary">{{ m.model_type }}</span>
+    {% if m.framework %}<span class="badge bg-dark">{{ m.framework }}</span>{% endif %}
+    <span class="badge bg-{{ 'success' if m.status == 'deployed' else 'info' }}">{{ m.status }}</span>
+    {% if m.accuracy is not none %}<span class="text-muted small ms-2">准确率: {{ "%.1f"|format(m.accuracy * 100) }}%</span>{% endif %}
+    <small class="text-muted float-end">by {{ m.owner_name }}</small>
+</div></div></div>{% endfor %}</div>
+{% with pagination=pagination %}{% include "includes/_pagination.html" %}{% endwith %}
+{% else %}<div class="text-center py-5 text-muted">暂无公开模型</div>{% endif %}
+{% endblock %}

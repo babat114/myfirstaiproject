@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}我的模型{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2><i class="bi bi-cpu"></i> 我的模型</h2>
+    <a href="{{ url_for('models.create_model') }}" class="btn btn-success">
+        <i class="bi bi-plus-circle"></i> 注册模型
+    </a>
+</div>
+
+<form method="GET" class="row g-2 mb-3">
+    <div class="col-md-3"><input type="text" name="search" class="form-control" placeholder="搜索模型..." value="{{ search_query or '' }}"></div>
+    <div class="col-md-2"><select name="model_type" class="form-select"><option value="">全部类型</option>
+        {% for t in ['classification','regression','clustering','nlp','computer_vision','reinforcement','generative','other'] %}
+        <option value="{{ t }}" {% if current_type == t %}selected{% endif %}>{{ t }}</option>{% endfor %}
+    </select></div>
+    <div class="col-md-2"><select name="framework" class="form-select"><option value="">全部框架</option>
+        {% for f in ['PyTorch','TensorFlow','scikit-learn','Keras','JAX','ONNX','Other'] %}
+        <option value="{{ f }}" {% if current_framework == f %}selected{% endif %}>{{ f }}</option>{% endfor %}
+    </select></div>
+    <div class="col-md-2"><button type="submit" class="btn btn-outline-primary w-100"><i class="bi bi-search"></i> 搜索</button></div>
+</form>
+
+{% if models %}
+<div class="table-responsive"><table class="table table-hover align-middle">
+    <thead class="table-light"><tr><th>名称</th><th>类型</th><th>框架</th><th>版本</th><th>准确率</th><th>F1</th><th>状态</th><th>操作</th></tr></thead>
+    <tbody>{% for m in models %}
+    <tr>
+        <td><a href="{{ url_for('models.model_detail', model_id=m.id) }}" class="text-decoration-none fw-bold">{{ m.name }}</a></td>
+        <td><span class="badge bg-secondary">{{ m.model_type }}</span></td>
+        <td>{{ m.framework or '-' }}</td>
+        <td>v{{ m.version }}</td>
+        <td>{% if m.accuracy is not none %}{{ "%.1f"|format(m.accuracy * 100) }}%{% else %}-{% endif %}</td>
+        <td>{% if m.f1_score is not none %}{{ "%.2f"|format(m.f1_score) }}{% else %}-{% endif %}</td>
+        <td><span class="badge bg-{{ 'success' if m.status == 'deployed' else 'info' }}">{{ m.status }}</span></td>
+        <td>
+            <a href="{{ url_for('models.edit_model', model_id=m.id) }}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></a>
+            <form method="POST" action="{{ url_for('models.delete_model', model_id=m.id) }}" class="d-inline" onsubmit="return confirm('确定删除此模型？');">
+                <button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+            </form>
+        </td>
+    </tr>{% endfor %}</tbody>
+</table></div>
+{% with pagination=pagination %}{% include "includes/_pagination.html" %}{% endwith %}
+{% else %}<div class="text-center py-5 text-muted"><i class="bi bi-cpu" style="font-size:3rem;"></i><p class="mt-2">暂无模型</p><a href="{{ url_for('models.create_model') }}" class="btn btn-success">注册第一个模型</a></div>{% endif %}
+{% endblock %}

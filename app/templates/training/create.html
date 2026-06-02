@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}新建训练任务{% endblock %}
+
+{% block content %}
+<h2><i class="bi bi-plus-circle"></i> 新建训练任务</h2>
+
+<div class="row mt-4"><div class="col-lg-8"><div class="card"><div class="card-body">
+<form method="POST">
+    <div class="mb-3"><label class="form-label">任务名称 <span class="text-danger">*</span></label><input type="text" name="name" class="form-control" required placeholder="例如: MNIST-CNN 训练"></div>
+    <div class="mb-3"><label class="form-label">描述</label><textarea name="description" class="form-control" rows="2"></textarea></div>
+    <div class="row">
+        <div class="col-md-4 mb-3"><label class="form-label">任务类型</label><select name="task_type" class="form-select">
+            <option value="training">训练</option><option value="fine_tuning">微调</option><option value="evaluation">评估</option><option value="inference">推理</option><option value="data_preprocessing">数据预处理</option>
+        </select></div>
+        <div class="col-md-4 mb-3"><label class="form-label">框架</label><select name="framework" class="form-select">
+            <option value="">不指定</option>{% for f in ['PyTorch','TensorFlow','scikit-learn','Keras','JAX','ONNX'] %}<option value="{{ f }}">{{ f }}</option>{% endfor %}
+        </select></div>
+        <div class="col-md-4 mb-3"><label class="form-label">数据集</label><select name="dataset_id" class="form-select">
+            <option value="">不指定</option>{% for ds in datasets %}<option value="{{ ds.id }}">{{ ds.name }}</option>{% endfor %}
+        </select></div>
+    </div>
+    <hr><h6>训练参数</h6>
+    <div class="row">
+        <div class="col-md-4 mb-3"><label class="form-label">Epochs</label><input type="number" name="total_epochs" class="form-control" value="0"></div>
+        <div class="col-md-4 mb-3"><label class="form-label">Steps</label><input type="number" name="total_steps" class="form-control" value="0"></div>
+    </div>
+    <hr><h6>资源配置</h6>
+    <div class="row">
+        <div class="col-md-4 mb-3"><label class="form-label">GPU 数量</label><input type="number" name="gpu_count" class="form-control" value="0" min="0"></div>
+        <div class="col-md-4 mb-3"><label class="form-label">CPU 核心数</label><input type="number" name="cpu_cores" class="form-control" value="1" min="1"></div>
+        <div class="col-md-4 mb-3"><label class="form-label">内存 (GB)</label><input type="number" name="memory_gb" class="form-control" value="4.0" step="0.5" min="0.5"></div>
+    </div>
+    <button type="submit" class="btn btn-info btn-lg"><i class="bi bi-check-circle"></i> 创建任务</button>
+</form>
+</div></div></div></div>
+{% endblock %}
