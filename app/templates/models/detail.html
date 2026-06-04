@@ -48,7 +48,7 @@
                 {% if model.metrics_dict.get('test_accuracy') is not none or model.metrics_dict.get('accuracy') is not none %}
                 <div class="alert alert-info small py-2 mb-3">
                     <i class="bi bi-info-circle me-1"></i>
-                    精确率/召回率/F1 使用 <strong>macro 平均</strong> (各类别等权), 能更真实反映模型在不同类别上的均衡表现
+                    查准率/召回率/F1 使用 <strong>macro 平均</strong> (各类别等权), 能更真实反映模型在不同类别上的均衡表现
                 </div>
                 {% endif %}
 
@@ -64,7 +64,7 @@
                             <div class="col-3">
                                 <div class="border rounded p-3 bg-light">
                                     <h3 class="text-success mb-1">{% if model.precision is not none %}{{ "%.3f"|format(model.precision) }}{% else %}-{% endif %}</h3>
-                                    <small class="text-muted">精确率 (macro)</small>
+                                    <small class="text-muted">查准率 (macro)</small>
                                 </div>
                             </div>
                             <div class="col-3">
@@ -95,11 +95,11 @@
                 <hr class="my-3">
                 <div class="row small text-center">
                     <div class="col-6">
-                        <span class="text-muted">加权精确率:</span>
+                        <span class="text-muted">加权查准率:</span>
                         <strong>{{ "%.4f"|format(mm.get('test_precision_weighted', mm.get('precision_weighted', 0))) }}</strong>
                     </div>
                     <div class="col-6">
-                        <span class="text-muted">Macro精确率:</span>
+                        <span class="text-muted">Macro查准率:</span>
                         <strong>{{ "%.4f"|format(mm.get('test_precision_macro', mm.get('precision_macro', 0))) }}</strong>
                     </div>
                     <div class="col-6 mt-1">
@@ -246,7 +246,7 @@
 <script>
 // ============ 模型详情页 — 雷达图 + 训练历史折线图 ============
 
-// 雷达图: 4维性能指标可视化 (准确率/精确率/召回率/F1)
+// 雷达图: 4维性能指标可视化 (准确率/查准率/召回率/F1)
 (function() {
     var hasMetrics = {{ 'true' if model.accuracy is not none or model.precision is not none or model.recall is not none or model.f1_score is not none else 'false' }};
     if (!hasMetrics) return;
@@ -255,7 +255,7 @@
     new Chart(ctx, {
         type: 'radar',  // 雷达图: 多维度指标一目了然
         data: {
-            labels: ['准确率', '精确率', '召回率', 'F1分数'],
+            labels: ['准确率', '查准率', '召回率', 'F1分数'],
             datasets: [{
                 label: '{{ model.name }}',
                 data: [

@@ -277,7 +277,7 @@ def compare():
     # 对比指标列表
     compare_metrics = [
         {'key': 'accuracy', 'label': '准确率 (Accuracy)', 'higher_better': True},
-        {'key': 'precision', 'label': '精确率 (Precision)', 'higher_better': True},
+        {'key': 'precision', 'label': '查准率 (Precision)', 'higher_better': True},
         {'key': 'recall', 'label': '召回率 (Recall)', 'higher_better': True},
         {'key': 'f1_score', 'label': 'F1 分数', 'higher_better': True},
         {'key': 'loss', 'label': '损失 (Loss)', 'higher_better': False},
