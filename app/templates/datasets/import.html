@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% block title %}导入公开数据集 - AI Platform{% endblock %}
+{% block content %}
+<div class="container-fluid px-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h1 class="h3 mb-1">
+                <i class="bi bi-cloud-download me-2"></i>导入公开数据集
+            </h1>
+            <p class="text-muted mb-0">从 sklearn、UCI、Kaggle 等数据源一键导入经典机器学习数据集</p>
+        </div>
+        <a href="{{ url_for('datasets.list_datasets') }}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left me-1"></i>返回我的数据集
+        </a>
+    </div>
+
+    <!-- URL 导入区域 -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="card-title mb-0"><i class="bi bi-link-45deg me-2"></i>从 URL 导入</h5>
+        </div>
+        <div class="card-body">
+            <form method="POST" action="{{ url_for('datasets.import_from_url') }}" class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label">数据集名称 <span class="text-danger">*</span></label>
+                    <input type="text" name="name" class="form-control" placeholder="如: Titanic Survival" required>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">URL <span class="text-danger">*</span></label>
+                    <input type="url" name="url" class="form-control" placeholder="https://raw.githubusercontent.com/.../dataset.csv" required>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">目标列</label>
+                    <input type="text" name="target_column" class="form-control" placeholder="如: target">
+                </div>
+                <div class="col-md-10">
+                    <label class="form-label">描述</label>
+                    <input type="text" name="description" class="form-control" placeholder="数据集简要描述 (可选)">
+                </div>
+                <div class="col-md-2 d-flex align-items-end">
+                    <button type="submit" class="btn btn-primary w-100">
+                        <i class="bi bi-download me-1"></i>导入
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 分类过滤 -->
+    <div class="mb-3">
+        <div class="btn-group flex-wrap">
+            <a href="{{ url_for('datasets.import_datasets', search=search_query) }}"
+               class="btn btn-sm {{ 'btn-primary' if not current_category else 'btn-outline-primary' }}">全部</a>
+            {% for cat in categories %}
+            <a href="{{ url_for('datasets.import_datasets', category=cat, search=search_query) }}"
+               class="btn btn-sm {{ 'btn-primary' if current_category == cat else 'btn-outline-primary' }}">
+                {{ category_labels.get(cat, cat) }}
+            </a>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- 数据集卡片 -->
+    <div class="row">
+        {% for ds in datasets %}
+        <div class="col-lg-4 col-md-6 mb-4">
+            <div class="card h-100 dataset-card">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start mb-2">
+                        <h6 class="card-title mb-0">{{ ds.name }}</h6>
+                        <span class="badge rounded-pill
+                            {% if ds.source == 'SKLEARN' %}bg-success
+                            {% elif ds.source == 'UCI' %}bg-warning
+                            {% else %}bg-info{% endif %}">
+                            {{ ds.source }}
+                        </span>
+                    </div>
+                    <p class="card-text text-muted small">{{ ds.description[:100] }}{% if ds.description|length > 100 %}...{% endif %}</p>
+                    <div class="d-flex flex-wrap gap-1 mb-2">
+                        <span class="badge bg-light text-dark">
+                            <i class="bi bi-table me-1"></i>{{ ds.n_samples }} 样本
+                        </span>
+                        <span class="badge bg-light text-dark">
+                            <i class="bi bi-columns me-1"></i>{{ ds.n_features }} 特征
+                        </span>
+                        {% if ds.n_classes %}
+                        <span class="badge bg-light text-dark">
+                            <i class="bi bi-tag me-1"></i>{{ ds.n_classes }} 类
+                        </span>
+                        {% endif %}
+                        <span class="badge
+                            {% if ds.task_type == 'classification' %}bg-primary
+                            {% else %}bg-info{% endif %}">
+                            {{ '分类' if ds.task_type == 'classification' else '回归' }}
+                        </span>
+                        {% if ds.difficulty == 'beginner' %}
+                        <span class="badge bg-success">入门</span>
+                        {% elif ds.difficulty == 'intermediate' %}
+                        <span class="badge bg-warning">中级</span>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="card-footer bg-transparent border-top-0">
+                    <form method="POST" action="{{ url_for('datasets.do_import_dataset', dataset_key=ds.key) }}" class="d-flex gap-2">
+                        <input type="text" name="name" class="form-control form-control-sm"
+                               placeholder="自定义名称 (可选)" value="{{ ds.name }}">
+                        <button type="submit" class="btn btn-primary btn-sm flex-shrink-0">
+                            <i class="bi bi-download me-1"></i>导入
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+        {% else %}
+        <div class="col-12">
+            <div class="text-center py-5 text-muted">
+                <i class="bi bi-inbox display-4"></i>
+                <p class="mt-2">没有找到匹配的数据集</p>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- 分页 -->
+    {% if pagination.pages > 1 %}
+    <nav>
+        <ul class="pagination justify-content-center">
+            <li class="page-item {{ 'disabled' if not pagination.has_prev }}">
+                <a class="page-link" href="{{ url_for('datasets.import_datasets', page=pagination.current_page - 1, category=current_category, search=search_query) }}">上一页</a>
+            </li>
+            {% for p in range(1, pagination.pages + 1) %}
+            <li class="page-item {{ 'active' if p == pagination.current_page }}">
+                <a class="page-link" href="{{ url_for('datasets.import_datasets', page=p, category=current_category, search=search_query) }}">{{ p }}</a>
+            </li>
+            {% endfor %}
+            <li class="page-item {{ 'disabled' if not pagination.has_next }}">
+                <a class="page-link" href="{{ url_for('datasets.import_datasets', page=pagination.current_page + 1, category=current_category, search=search_query) }}">下一页</a>
+            </li>
+        </ul>
+    </nav>
+    {% endif %}
+</div>
+{% endblock %}

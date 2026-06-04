@@ -1,0 +1,425 @@
+{% extends "base.html" %}
+{% block title %}测试模型 - {{ model.name }}{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="{{ url_for('models.list_models') }}">模型</a></li>
+        <li class="breadcrumb-item"><a href="{{ url_for('models.model_detail', model_id=model.id) }}">{{ model.name }}</a></li>
+        <li class="breadcrumb-item active">测试与评估</li>
+    </ol>
+</nav>
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h4><i class="bi bi-clipboard-check"></i> 模型测试: {{ model.name }} <small class="text-muted">v{{ model.version }}</small></h4>
+    <span class="badge bg-info fs-6">{{ model_type_labels.get(model.model_type, model.model_type) }} / {{ model.framework or 'sklearn' }}</span>
+</div>
+
+{% if error %}
+<div class="alert alert-danger alert-dismissible fade show">
+    <i class="bi bi-exclamation-triangle"></i> {{ error }}
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% endif %}
+
+<div class="row g-4">
+    <!-- 左侧: 操作面板 -->
+    <div class="col-lg-5">
+        <!-- 上传测试数据 -->
+        <div class="card mb-4">
+            <div class="card-header"><h6 class="mb-0"><i class="bi bi-file-earmark-arrow-up"></i> 上传测试数据</h6></div>
+            <div class="card-body">
+                <form method="POST" enctype="multipart/form-data">
+                    <input type="hidden" name="action" value="predict_file">
+                    <div class="mb-3">
+                        <label class="form-label">选择 CSV/Excel/JSON 文件</label>
+                        <input type="file" name="test_file" class="form-control" accept=".csv,.xlsx,.xls,.json">
+                    </div>
+                    {% if feature_names %}
+                    <div class="mb-3">
+                        <small class="text-muted">需要特征列: <code>{{ feature_names[:10]|join(', ') }}{% if feature_names|length > 10 %}... (共{{ feature_names|length }}列){% endif %}</code></small>
+                    </div>
+                    {% endif %}
+                    <button type="submit" class="btn btn-primary w-100">
+                        <i class="bi bi-play-fill"></i> 执行预测
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <!-- 手动输入 -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <a class="text-decoration-none d-flex justify-content-between align-items-center" data-bs-toggle="collapse" href="#manualInput">
+                    <h6 class="mb-0"><i class="bi bi-keyboard"></i> 手动输入特征值</h6>
+                    <i class="bi bi-chevron-down"></i>
+                </a>
+            </div>
+            <div class="collapse" id="manualInput">
+                <div class="card-body">
+                    <form method="POST">
+                        <input type="hidden" name="action" value="predict_manual">
+                        <input type="hidden" name="feature_count" value="{{ feature_names|length or 5 }}">
+                        {% if feature_names %}
+                            {% for name in feature_names[:10] %}
+                            <div class="mb-2">
+                                <label class="form-label small">{{ name }}</label>
+                                <input type="number" step="any" name="feature_{{ loop.index0 }}" class="form-control form-control-sm" placeholder="输入 {{ name }} 的值">
+                            </div>
+                            {% endfor %}
+                        {% else %}
+                            {% for i in range(5) %}
+                            <div class="mb-2">
+                                <label class="form-label small">特征 {{ i + 1 }}</label>
+                                <input type="number" step="any" name="feature_{{ i }}" class="form-control form-control-sm" placeholder="输入数值">
+                            </div>
+                            {% endfor %}
+                        {% endif %}
+                        <button type="submit" class="btn btn-outline-primary btn-sm w-100 mt-2">
+                            <i class="bi bi-send"></i> 预测
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- 完整评估 -->
+        <div class="card mb-4 border-success">
+            <div class="card-header bg-success text-white"><h6 class="mb-0"><i class="bi bi-clipboard-data"></i> 完整模型评估</h6></div>
+            <div class="card-body">
+                <p class="small text-muted">使用原始训练数据集进行完整评估，生成混淆矩阵、分类报告等。</p>
+                <form method="POST">
+                    <input type="hidden" name="action" value="run_test">
+                    <button type="submit" class="btn btn-success w-100">
+                        <i class="bi bi-graph-up"></i> 运行完整评估
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <!-- 特征重要性 -->
+        <div class="card mb-4 border-info">
+            <div class="card-header bg-info text-white"><h6 class="mb-0"><i class="bi bi-bar-chart-steps"></i> 特征重要性分析</h6></div>
+            <div class="card-body">
+                <p class="small text-muted">分析模型各特征的重要程度（支持树模型和线性模型）。</p>
+                <form method="POST">
+                    <input type="hidden" name="action" value="feature_importance">
+                    <button type="submit" class="btn btn-info w-100">
+                        <i class="bi bi-bar-chart"></i> 分析特征重要性
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- 右侧: 结果展示 -->
+    <div class="col-lg-7">
+        <!-- 预测结果 -->
+        {% if result and result.success %}
+        <div class="card mb-4 border-primary">
+            <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                <h6 class="mb-0"><i class="bi bi-check-circle"></i> 预测结果 ({{ result.num_samples }} 条)</h6>
+                <span class="badge bg-light text-dark">{{ result.task_type }}</span>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                    <table class="table table-hover table-sm mb-0">
+                        <thead class="table-light sticky-top">
+                            <tr>
+                                <th>#</th>
+                                <th>预测值</th>
+                                {% if result.probabilities %}
+                                <th>置信度 (Top-3)</th>
+                                {% endif %}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for pred in result.predictions[:50] %}
+                            <tr>
+                                <td>{{ loop.index }}</td>
+                                <td>
+                                    <span class="badge bg-primary fs-6">{{ pred }}</span>
+                                </td>
+                                {% if result.probabilities %}
+                                <td>
+                                    {% for prob in result.probabilities[loop.index0] %}
+                                    <span class="badge bg-secondary me-1">{{ prob.class }}: {{ '%.2f'|format(prob.probability * 100) }}%</span>
+                                    {% endfor %}
+                                </td>
+                                {% endif %}
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% if result.predictions|length > 50 %}
+                <div class="text-center py-2 text-muted small">仅显示前 50 条结果</div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- 预测分布图 -->
+        {% if result.predictions|length > 1 %}
+        <div class="card mb-4">
+            <div class="card-header"><h6 class="mb-0">预测分布</h6></div>
+            <div class="card-body">
+                <canvas id="predDistChart" height="160"></canvas>
+            </div>
+        </div>
+        {% endif %}
+        {% endif %}
+
+        <!-- 完整评估报告 -->
+        {% if test_report and test_report.success %}
+        <div class="card mb-4 border-success">
+            <div class="card-header bg-success text-white"><h6 class="mb-0"><i class="bi bi-clipboard-data"></i> 评估报告</h6></div>
+            <div class="card-body">
+                <!-- 指标卡片 -->
+                <div class="row g-2 mb-3 text-center">
+                    {% if test_report.task_type == 'classification' %}
+                    <div class="col-3">
+                        <div class="border rounded p-2"><h5 class="text-primary mb-0">{{ '%.2f'|format(test_report.accuracy * 100) }}%</h5><small>准确率</small></div>
+                    </div>
+                    <div class="col-3">
+                        <div class="border rounded p-2"><h5 class="text-success mb-0">{{ '%.3f'|format(test_report.get('precision_macro', test_report.get('precision', 0))) }}</h5><small>精确率 (macro)</small></div>
+                    </div>
+                    <div class="col-3">
+                        <div class="border rounded p-2"><h5 class="text-info mb-0">{{ '%.3f'|format(test_report.get('recall_macro', test_report.get('recall', 0))) }}</h5><small>召回率 (macro)</small></div>
+                    </div>
+                    <div class="col-3">
+                        <div class="border rounded p-2"><h5 class="text-warning mb-0">{{ '%.3f'|format(test_report.get('f1_macro', test_report.get('f1_score', 0))) }}</h5><small>F1分数 (macro)</small></div>
+                    </div>
+                    {# 对比 weighted vs macro 差异 #}
+                    {% if test_report.get('precision_weighted') is not none %}
+                    <div class="col-12"><hr class="my-1"><small class="text-muted">
+                        加权: P={{ '%.3f'|format(test_report.precision_weighted) }}
+                        R={{ '%.3f'|format(test_report.recall_weighted) }}
+                        F1={{ '%.3f'|format(test_report.f1_weighted) }}
+                        | Macro: P={{ '%.3f'|format(test_report.precision_macro) }}
+                        R={{ '%.3f'|format(test_report.recall_macro) }}
+                        F1={{ '%.3f'|format(test_report.f1_macro) }}
+                    </small></div>
+                    {% endif %}
+                    {% else %}
+                    <div class="col-3">
+                        <div class="border rounded p-2"><h5 class="text-danger mb-0">{{ '%.4f'|format(test_report.mse) }}</h5><small>MSE</small></div>
+                    </div>
+                    <div class="col-3">
+                        <div class="border rounded p-2"><h5 class="text-warning mb-0">{{ '%.4f'|format(test_report.mae) }}</h5><small>MAE</small></div>
+                    </div>
+                    <div class="col-3">
+                        <div class="border rounded p-2"><h5 class="text-info mb-0">{{ '%.4f'|format(test_report.rmse) }}</h5><small>RMSE</small></div>
+                    </div>
+                    <div class="col-3">
+                        <div class="border rounded p-2"><h5 class="text-success mb-0">{{ '%.4f'|format(test_report.r2) }}</h5><small>R²</small></div>
+                    </div>
+                    {% endif %}
+                </div>
+
+                <!-- 混淆矩阵 (分类) -->
+                {% if test_report.confusion_matrix %}
+                <div class="row">
+                    <div class="col-md-7">
+                        <canvas id="confusionMatrixChart" height="220"></canvas>
+                    </div>
+                    <div class="col-md-5">
+                        <h6 class="mb-2">混淆矩阵</h6>
+                        <div class="table-responsive" style="max-height:220px;overflow-y:auto;">
+                            <table class="table table-bordered table-sm small">
+                                <thead><tr><th></th>
+                                {% for label in test_report.confusion_matrix_labels %}
+                                <th class="text-center">{{ label }}</th>
+                                {% endfor %}
+                                </tr></thead>
+                                <tbody>
+                                {% for row in test_report.confusion_matrix %}
+                                {% set outer_idx = loop.index0 %}
+                                <tr>
+                                    <th>{{ test_report.confusion_matrix_labels[outer_idx] }}</th>
+                                    {% for val in row %}
+                                    <td class="text-center {% if loop.index0 == outer_idx %}table-primary fw-bold{% endif %}">{{ val }}</td>
+                                    {% endfor %}
+                                </tr>
+                                {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- 残差图 (回归) -->
+                {% if test_report.predictions_scatter %}
+                <canvas id="residualChart" height="220"></canvas>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- 特征重要性 -->
+        {% if feature_importance and feature_importance.success %}
+        <div class="card mb-4 border-info">
+            <div class="card-header bg-info text-white"><h6 class="mb-0"><i class="bi bi-bar-chart-steps"></i> 特征重要性</h6></div>
+            <div class="card-body">
+                <canvas id="featureImportanceChart" height="240"></canvas>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// ============ 模型测试页 — 预测分布 + 混淆矩阵 + 特征重要性 + 残差图 ============
+
+// 1. 预测分布柱状图: 展示每个类别的预测数量
+{% if result and result.success and result.predictions|length > 1 %}
+(function() {
+    const ctx = document.getElementById('predDistChart').getContext('2d');
+    const preds = {{ result.predictions | tojson }};
+    const freq = {};
+    preds.forEach(p => { freq[p] = (freq[p] || 0) + 1; });
+    const labels = Object.keys(freq);
+    const data = Object.values(freq);
+
+    new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: '预测数量',
+                data: data,
+                backgroundColor: labels.map((_, i) => {
+                    const colors = ['#4e73df','#1cc88a','#36b9cc','#f6c23e','#e74a3b','#858796','#5a5c69'];
+                    return colors[i % colors.length];
+                }),
+                borderRadius: 6,
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: { legend: { display: false } },
+            scales: { y: { beginAtZero: true, title: { display: true, text: '数量' } } }
+        }
+    });
+})();
+{% endif %}
+
+// 2. 混淆矩阵分组柱状图: 每个真实标签的预测分布 (替代热力图)
+{% if test_report and test_report.success and test_report.confusion_matrix %}
+(function() {
+    const ctx = document.getElementById('confusionMatrixChart').getContext('2d');
+    const cm = {{ test_report.confusion_matrix | tojson }};
+    const labels = {{ test_report.confusion_matrix_labels | tojson }};
+
+    // 使用分组柱状图展示每个真实标签的预测分布
+    const datasets = cm.map((row, i) => ({
+        label: '真实: ' + labels[i],
+        data: row,
+        backgroundColor: [
+            'rgba(78,115,223,0.85)', 'rgba(28,200,138,0.85)',
+            'rgba(54,185,204,0.85)', 'rgba(246,194,62,0.85)',
+            'rgba(231,74,59,0.85)', 'rgba(133,135,150,0.85)',
+            'rgba(90,92,105,0.85)', 'rgba(46,89,217,0.85)',
+        ][i % 8],
+        borderColor: '#fff',
+        borderWidth: 1,
+        borderRadius: 4,
+    }));
+
+    new Chart(ctx, {
+        type: 'bar',
+        data: { labels: labels.map(l => '预测:' + l), datasets: datasets },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: { position: 'top' },
+                title: { display: true, text: '混淆矩阵分布', font: { size: 13 } }
+            },
+            scales: {
+                x: { title: { display: true, text: '预测标签' }, stacked: false },
+                y: { title: { display: true, text: '样本数' }, beginAtZero: true },
+            }
+        }
+    });
+})();
+{% endif %}
+
+// 3. 特征重要性水平柱状图: 显示各特征对预测的贡献程度
+{% if feature_importance and feature_importance.success %}
+(function() {
+    const ctx = document.getElementById('featureImportanceChart').getContext('2d');
+    const features = {{ feature_importance.features | tojson }};
+    const importances = {{ feature_importance.importances | tojson }};
+
+    new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: features,
+            datasets: [{
+                label: '重要性/系数',
+                data: importances,
+                backgroundColor: importances.map(v => v >= 0 ? '#1cc88a' : '#e74a3b'),
+                borderRadius: 4,
+            }]
+        },
+        options: {
+            indexAxis: 'y',
+            responsive: true,
+            plugins: { legend: { display: false } },
+            scales: {
+                x: { title: { display: true, text: '重要性值' } },
+                y: { ticks: { font: { size: 11 } } }
+            }
+        }
+    });
+})();
+{% endif %}
+
+// 4. 回归残差散点图: 预测值 vs 真实值 + 完美预测对角线
+{% if test_report and test_report.success and test_report.predictions_scatter %}
+(function() {
+    const ctx = document.getElementById('residualChart').getContext('2d');
+    const scatterData = {{ test_report.predictions_scatter | tojson }};
+
+    new Chart(ctx, {
+        type: 'scatter',
+        data: {
+            datasets: [{
+                label: '预测 vs 真实',
+                data: scatterData.map(d => ({x: d.true, y: d.pred})),
+                backgroundColor: '#4e73df',
+                pointRadius: 4,
+                pointHoverRadius: 6,
+            }, {
+                label: '完美预测线',
+                data: (() => {
+                    const min = Math.min(...scatterData.map(d => d.true));
+                    const max = Math.max(...scatterData.map(d => d.true));
+                    return [{x: min, y: min}, {x: max, y: max}];
+                })(),
+                type: 'line',
+                borderColor: '#e74a3b',
+                borderDash: [6, 4],
+                borderWidth: 2,
+                pointRadius: 0,
+                fill: false,
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: { position: 'top' },
+                title: { display: true, text: '预测值 vs 真实值 (R² = {{ "%.4f"|format(test_report.r2) }})' }
+            },
+            scales: {
+                x: { title: { display: true, text: '真实值' } },
+                y: { title: { display: true, text: '预测值' } },
+            }
+        }
+    });
+})();
+{% endif %}
+</script>
+{% endblock %}

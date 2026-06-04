@@ -8,7 +8,7 @@
 import sys
 import os
 import random
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -172,11 +172,11 @@ def seed_database():
             )
 
             if j_data['status'] == 'completed':
-                j.started_at = datetime.utcnow() - timedelta(hours=2)
-                j.completed_at = datetime.utcnow()
+                j.started_at = datetime.now(timezone.utc) - timedelta(hours=2)
+                j.completed_at = datetime.now(timezone.utc)
                 j.log_text = '[2026-06-02 10:00:00] 训练开始\n[2026-06-02 11:30:00] Epoch 25/50 - loss: 0.123\n[2026-06-02 12:00:00] 训练完成 - accuracy: 0.993'
             elif j_data['status'] == 'running':
-                j.started_at = datetime.utcnow() - timedelta(hours=1)
+                j.started_at = datetime.now(timezone.utc) - timedelta(hours=1)
                 j.log_text = '[2026-06-02 11:00:00] 训练开始\n[2026-06-02 11:30:00] Epoch 15/50 - loss: 0.245'
 
             db.session.add(j)

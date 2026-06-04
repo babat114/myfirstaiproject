@@ -15,7 +15,7 @@
         </select></div>
         <div class="col-md-4 mb-3"><label class="form-label">框架</label><select name="framework" class="form-select">
             <option value="">不指定</option>
-            {% for f in ['PyTorch','TensorFlow','scikit-learn','Keras','JAX','ONNX','Other'] %}
+            {% for f in ['PyTorch','TensorFlow','sklearn','ONNX','Other'] %}
             <option value="{{ f }}">{{ f }}</option>{% endfor %}
         </select></div>
         <div class="col-md-4 mb-3"><label class="form-label">版本</label><input type="text" name="version" class="form-control" value="1.0.0"></div>

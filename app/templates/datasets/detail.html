@@ -14,7 +14,7 @@
             <i class="bi bi-pencil"></i> 编辑
         </a>
         <form method="POST" action="{{ url_for('datasets.delete_dataset', dataset_id=dataset.id) }}" class="d-inline"
-              onsubmit="return confirm('确定删除此数据集？此操作不可逆。');">
+              data-confirm="确定删除此数据集吗？此操作不可逆，关联的训练数据将受影响。">
             <button class="btn btn-outline-danger btn-sm"><i class="bi bi-trash"></i> 删除</button>
         </form>
     </div>
@@ -26,7 +26,7 @@
             <div class="card-body">
                 <h4>{{ dataset.name }} <small class="text-muted">v{{ dataset.version }}</small></h4>
                 <span class="badge bg-{{ 'success' if dataset.status == 'ready' else 'warning' }}">{{ dataset.status }}</span>
-                <span class="badge bg-info">{{ dataset.category }}</span>
+                <span class="badge el-tag-style" data-el-type="info">{{ category_labels.get(dataset.category, dataset.category) }}</span>
                 {% if dataset.is_public %}<span class="badge bg-success">公开</span>{% endif %}
 
                 {% if dataset.description %}
@@ -43,6 +43,85 @@
             </div>
         </div>
 
+        <!-- 数据预览 -->
+        {% if preview and not preview.error %}
+        <div class="card mt-3">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h6 class="mb-0">数据预览 (前 {{ preview.total_preview_rows }} 行)</h6>
+                <a href="{{ url_for('training.create_job') }}?dataset_id={{ dataset.id }}" class="btn btn-sm btn-info">
+                    <i class="bi bi-play-fill"></i> 用此数据集训练
+                </a>
+            </div>
+            <div class="table-responsive" style="max-height:400px; overflow-y:auto;">
+                <table class="table table-sm table-striped table-hover mb-0">
+                    <thead class="table-dark sticky-top">
+                        <tr>
+                            <th>#</th>
+                            {% for col in preview.columns %}
+                            <th title="{{ col.dtype }}{% if col.missing > 0 %} | 缺失: {{ col.missing }}{% endif %}">
+                                {{ col.name }}
+                                {% if col.missing > 0 %}
+                                <span class="badge bg-warning text-dark ms-1" title="缺失值">{{ col.missing }}</span>
+                                {% endif %}
+                            </th>
+                            {% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in preview.rows %}
+                        <tr>
+                            <td class="text-muted small">{{ loop.index }}</td>
+                            {% for cell in row %}
+                            <td>{{ cell }}</td>
+                            {% endfor %}
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 列信息摘要 -->
+        <div class="card mt-3">
+            <div class="card-header"><h6 class="mb-0">列信息</h6></div>
+            <div class="table-responsive">
+                <table class="table table-sm table-hover mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>列名</th>
+                            <th>数据类型</th>
+                            <th>缺失值</th>
+                            <th>唯一值数</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for col in preview.columns %}
+                        <tr>
+                            <td class="fw-bold">{{ col.name }}</td>
+                            <td><code>{{ col.dtype }}</code></td>
+                            <td>
+                                {% if col.missing > 0 %}
+                                <span class="text-warning fw-bold">{{ col.missing }}</span>
+                                {% else %}
+                                <span class="text-success">0</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ col.unique }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% elif preview and preview.error %}
+        <div class="card mt-3">
+            <div class="card-header"><h6 class="mb-0">数据预览</h6></div>
+            <div class="card-body text-muted">
+                <i class="bi bi-exclamation-triangle"></i> 无法预览数据: {{ preview.error }}
+            </div>
+        </div>
+        {% endif %}
+
         <!-- 关联训练任务 -->
         <div class="card mt-3">
             <div class="card-header"><h6 class="mb-0">关联的训练任务 ({{ dataset.training_job_count }})</h6></div>
@@ -50,7 +129,8 @@
                 {% if dataset.training_jobs %}
                     {% for job in dataset.training_jobs %}
                     <a href="{{ url_for('training.job_detail', job_id=job.id) }}" class="list-group-item list-group-item-action">
-                        {{ job.name }} - {{ job.status }}
+                        <strong>{{ job.name }}</strong>
+                        <span class="badge bg-{{ 'success' if job.status == 'completed' else 'warning' if job.status == 'running' else 'danger' if job.status == 'failed' else 'secondary' }} float-end">{{ job.status }}</span>
                     </a>
                     {% endfor %}
                 {% else %}
@@ -67,6 +147,13 @@
             <p><strong>大小:</strong> {{ dataset.file_size_mb }} MB</p>
             <p><strong>行数:</strong> {{ dataset.row_count or '-' }}</p>
             <p><strong>列数:</strong> {{ dataset.column_count or '-' }}</p>
+            {% if summary.get('missing_values') %}
+            <hr>
+            <h6>缺失值检测</h6>
+            {% for col, count in summary.missing_values.items() %}
+            <p class="mb-1"><small><strong>{{ col }}:</strong> <span class="text-warning">{{ count }} 个缺失</span></small></p>
+            {% endfor %}
+            {% endif %}
         </div></div>
 
         <div class="card mt-3"><div class="card-header"><h6 class="mb-0">元信息</h6></div><div class="card-body">
@@ -75,6 +162,106 @@
             <p><strong>创建时间:</strong> {{ dataset.created_at.strftime('%Y-%m-%d %H:%M') if dataset.created_at else '-' }}</p>
             <p><strong>更新时间:</strong> {{ dataset.updated_at.strftime('%Y-%m-%d %H:%M') if dataset.updated_at else '-' }}</p>
         </div></div>
+
+        <!-- AI 推荐分析 -->
+        <div class="card mt-3" id="recommendCard">
+            <div class="card-header d-flex justify-content-between align-items-center" style="cursor:pointer;" onclick="loadRecommendation()">
+                <h6 class="mb-0"><i class="bi bi-magic"></i> AI 智能推荐</h6>
+                <small class="text-muted" id="recStatus">点击分析</small>
+            </div>
+            <div class="card-body p-2" id="recBody" style="display:none;">
+                <div class="text-center py-2" id="recLoading">
+                    <div class="spinner-border spinner-border-sm text-primary"></div>
+                    <small class="ms-2">分析数据集中...</small>
+                </div>
+                <div id="recContent"></div>
+            </div>
+        </div>
+
+        <!-- 快捷操作 -->
+        <div class="card mt-3">
+            <div class="card-header"><h6 class="mb-0">快捷操作</h6></div>
+            <div class="card-body d-grid gap-2">
+                <a href="{{ url_for('training.create_job') }}" class="btn btn-outline-info btn-sm">
+                    <i class="bi bi-play-fill"></i> 创建训练任务
+                </a>
+            </div>
+        </div>
     </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+var recLoaded = false;
+function loadRecommendation() {
+    var body = document.getElementById('recBody');
+    var status = document.getElementById('recStatus');
+    if (!body || !status) return;
+
+    if (recLoaded) {
+        body.style.display = body.style.display === 'none' ? '' : 'none';
+        return;
+    }
+
+    body.style.display = '';
+    document.getElementById('recLoading').style.display = '';
+    document.getElementById('recContent').innerHTML = '';
+    status.textContent = '分析中...';
+
+    fetch('/api/datasets/{{ dataset.uuid }}/analyze')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            document.getElementById('recLoading').style.display = 'none';
+            recLoaded = true;
+            if (!data.success) {
+                document.getElementById('recContent').innerHTML =
+                    '<div class="alert alert-warning m-2 small">' + (data.message || '分析失败') + '</div>';
+                status.textContent = '分析失败';
+                return;
+            }
+            var d = data.data;
+            status.textContent = '推荐: ' + d.primary_type;
+
+            var html = '';
+            // 摘要
+            html += '<div class="px-2 small">' + d.summary + '</div>';
+
+            // 模型类型推荐
+            html += '<div class="px-2 pt-2"><strong class="small" style="font-size:0.75rem;">📌 推荐模型类型:</strong></div>';
+            d.recommended_types.forEach(function(t) {
+                var star = t.confidence >= 0.8 ? '⭐⭐⭐' : (t.confidence >= 0.6 ? '⭐⭐' : '⭐');
+                html += '<div class="px-2 small"><span class="badge bg-primary me-1">' + star + '</span> ';
+                html += '<strong>' + t.model_type + '</strong>';
+                html += ' <span class="text-muted">' + t.reason + '</span></div>';
+            });
+
+            // 算法推荐
+            html += '<div class="px-2 pt-2"><strong class="small" style="font-size:0.75rem;">⚙️ 推荐算法 (Top 3):</strong></div>';
+            d.recommended_algorithms.slice(0, 3).forEach(function(a) {
+                html += '<div class="px-2 small">🔹 <strong>' + (a.display || a.algorithm) + '</strong>';
+                html += ' <span class="text-muted">' + a.reason + '</span></div>';
+            });
+
+            // 参数预设
+            if (d.param_presets) {
+                html += '<div class="px-2 pt-2"><strong class="small" style="font-size:0.75rem;">🔧 推荐参数预设:</strong></div>';
+                html += '<div class="px-2 small"><code>' + JSON.stringify(d.param_presets).replace(/"/g, '').replace(/,/g, ', ') + '</code></div>';
+            }
+
+            // 快速创建训练按钮
+            html += '<div class="px-2 pt-2 pb-1">';
+            html += '<a href="/training/create?dataset_id={{ dataset.id }}" class="btn btn-sm btn-primary w-100">';
+            html += '<i class="bi bi-rocket"></i> 使用推荐配置创建训练</a></div>';
+
+            document.getElementById('recContent').innerHTML = html;
+        })
+        .catch(function(err) {
+            document.getElementById('recLoading').style.display = 'none';
+            document.getElementById('recContent').innerHTML =
+                '<div class="alert alert-danger m-2 small">加载失败</div>';
+            status.textContent = '加载失败';
+        });
+}
+</script>
 {% endblock %}

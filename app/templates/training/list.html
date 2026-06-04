@@ -2,46 +2,143 @@
 {% block title %}训练任务{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-    <h2><i class="bi bi-play-circle"></i> 训练任务</h2>
-    <a href="{{ url_for('training.create_job') }}" class="btn btn-info"><i class="bi bi-plus-circle"></i> 新建任务</a>
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2 class="mb-1"><i class="bi bi-play-circle"></i> 训练任务</h2>
+        <small class="text-muted">管理和监控 AI 模型训练</small>
+    </div>
+    <div class="d-flex gap-2">
+        <a href="{{ url_for('training.hyperparameter_tuning') }}" class="btn btn-outline-warning btn-lg">
+            <i class="bi bi-sliders"></i> 超参数调优
+        </a>
+        <a href="{{ url_for('training.create_job') }}" class="btn btn-success btn-lg">
+            <i class="bi bi-plus-circle"></i> 新建训练任务
+        </a>
+    </div>
 </div>
 
-<form method="GET" class="row g-2 mb-3">
-    <div class="col-md-3"><input type="text" name="search" class="form-control" placeholder="搜索任务..." value="{{ search_query or '' }}"></div>
-    <div class="col-md-3"><select name="status" class="form-select"><option value="">全部状态</option>
-        {% for s in ['queued','preparing','running','paused','completed','failed','cancelled'] %}
-        <option value="{{ s }}" {% if current_status == s %}selected{% endif %}>{{ s }}</option>{% endfor %}
-    </select></div>
-    <div class="col-md-2"><button type="submit" class="btn btn-outline-primary w-100"><i class="bi bi-search"></i> 搜索</button></div>
-</form>
+<!-- 搜索和筛选 -->
+<div class="card mb-4">
+    <div class="card-body py-2">
+        <form method="GET" class="row g-2 align-items-end">
+            <div class="col-md-4">
+                <label class="form-label small text-muted">搜索</label>
+                <div class="input-group">
+                    <span class="input-group-text"><i class="bi bi-search"></i></span>
+                    <input type="text" name="search" class="form-control" placeholder="搜索任务名称或描述..." value="{{ search_query or '' }}">
+                </div>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label small text-muted">状态筛选</label>
+                <select name="status" class="form-select">
+                    <option value="">全部状态</option>
+                    {% for s in ['queued','running','paused','completed','failed','cancelled'] %}
+                    <option value="{{ s }}" {% if current_status == s %}selected{% endif %}>
+                        {% if s == 'queued' %}⏳ 排队中{% elif s == 'running' %}▶️ 运行中{% elif s == 'paused' %}⏸️ 已暂停{% elif s == 'completed' %}✅ 已完成{% elif s == 'failed' %}❌ 失败{% elif s == 'cancelled' %}🚫 已取消{% endif %}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2 d-grid">
+                <button type="submit" class="btn btn-primary"><i class="bi bi-search"></i> 搜索</button>
+            </div>
+            <div class="col-md-2 d-grid">
+                <a href="{{ url_for('training.list_jobs') }}" class="btn btn-outline-secondary"><i class="bi bi-arrow-clockwise"></i> 重置</a>
+            </div>
+        </form>
+    </div>
+</div>
 
 {% if jobs %}
-<div class="table-responsive"><table class="table table-hover align-middle">
-    <thead class="table-light"><tr><th>任务名称</th><th>类型</th><th>框架</th><th>进度</th><th>状态</th><th>时长</th><th>操作</th></tr></thead>
-    <tbody>{% for j in jobs %}
-    <tr>
-        <td><a href="{{ url_for('training.job_detail', job_id=j.id) }}" class="text-decoration-none fw-bold">{{ j.name }}</a></td>
-        <td><span class="badge bg-secondary">{{ j.task_type }}</span></td>
-        <td>{{ j.framework or '-' }}</td>
-        <td>
-            <div class="progress" style="height:6px; width:100px"><div class="progress-bar bg-{{ 'success' if j.progress_percent == 100 else 'info' }}"
-                style="width:{{ j.progress_percent }}%"></div></div>
-            <small>{{ j.progress_percent }}%</small>
-        </td>
-        <td><span class="badge bg-{{ 'success' if j.status == 'completed' else 'warning' if j.status == 'running' else 'danger' if j.status == 'failed' else 'secondary' }}">{{ j.status }}</span></td>
-        <td><small>{{ j.duration_display }}</small></td>
-        <td>
-            {% if j.status == 'queued' %}
-            <form method="POST" action="{{ url_for('training.start_job', job_id=j.id) }}" class="d-inline"><button class="btn btn-sm btn-success"><i class="bi bi-play-fill"></i></button></form>
-            {% elif j.status == 'running' %}
-            <form method="POST" action="{{ url_for('training.pause_job', job_id=j.id) }}" class="d-inline"><button class="btn btn-sm btn-warning"><i class="bi bi-pause-fill"></i></button></form>
-            <form method="POST" action="{{ url_for('training.cancel_job', job_id=j.id) }}" class="d-inline"><button class="btn btn-sm btn-danger"><i class="bi bi-stop-fill"></i></button></form>
-            {% endif %}
-            <form method="POST" action="{{ url_for('training.delete_job', job_id=j.id) }}" class="d-inline" onsubmit="return confirm('确定删除此任务？');"><button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button></form>
-        </td>
-    </tr>{% endfor %}</tbody>
-</table></div>
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th style="min-width: 180px;">任务名称</th>
+                    <th>类型</th>
+                    <th>框架</th>
+                    <th style="min-width: 160px;">进度</th>
+                    <th>状态</th>
+                    <th>耗时</th>
+                    <th style="min-width: 130px;">操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for j in jobs %}
+                <tr data-href="{{ url_for('training.job_detail', job_id=j.id) }}" class="clickable-row">
+                    <td>
+                        <a href="{{ url_for('training.job_detail', job_id=j.id) }}" class="text-decoration-none fw-bold d-block">
+                            {{ j.name }}
+                        </a>
+                        {% if j.dataset_name %}
+                        <small class="text-muted">{{ j.dataset_name }}</small>
+                        {% endif %}
+                    </td>
+                    <td><span class="badge bg-secondary">{{ j.task_type }}</span></td>
+                    <td><small>{{ j.framework or '-' }}</small></td>
+                    <td>
+                        <div class="d-flex align-items-center gap-2">
+                            <div class="progress flex-grow-1" style="height: 8px;">
+                                <div class="progress-bar {% if j.status == 'running' %}progress-bar-striped progress-bar-animated{% endif %} bg-{{ 'success' if j.progress_percent == 100 else 'info' if j.progress_percent > 0 else 'secondary' }}"
+                                     style="width: {{ j.progress_percent or 0 }}%"></div>
+                            </div>
+                            <small class="text-muted" style="min-width: 42px;">{{ j.progress_percent }}%</small>
+                        </div>
+                    </td>
+                    <td>
+                        <span class="badge bg-{{ 'success' if j.status == 'completed' else 'warning' if j.status in ('running','paused') else 'danger' if j.status == 'failed' else 'info' if j.status == 'queued' else 'secondary' }}">
+                            {{ j.status }}
+                        </span>
+                    </td>
+                    <td><small>{{ j.duration_display }}</small></td>
+                    <td>
+                        <div class="btn-group btn-group-sm">
+                            {% if j.status == 'queued' %}
+                            <form method="POST" action="{{ url_for('training.start_job', job_id=j.id) }}" class="d-inline">
+                                <button class="btn btn-success btn-sm" title="启动"><i class="bi bi-play-fill"></i></button>
+                            </form>
+                            {% elif j.status == 'running' %}
+                            <form method="POST" action="{{ url_for('training.pause_job', job_id=j.id) }}" class="d-inline">
+                                <button class="btn btn-warning btn-sm" title="暂停"><i class="bi bi-pause-fill"></i></button>
+                            </form>
+                            <form method="POST" action="{{ url_for('training.cancel_job', job_id=j.id) }}" class="d-inline" data-confirm="确定要取消此训练任务吗？">
+                                <button class="btn btn-danger btn-sm" title="取消"><i class="bi bi-stop-fill"></i></button>
+                            </form>
+                            {% elif j.status == 'paused' %}
+                            <form method="POST" action="{{ url_for('training.resume_job', job_id=j.id) }}" class="d-inline">
+                                <button class="btn btn-success btn-sm" title="恢复"><i class="bi bi-play-fill"></i></button>
+                            </form>
+                            <form method="POST" action="{{ url_for('training.cancel_job', job_id=j.id) }}" class="d-inline" data-confirm="确定要取消此训练任务吗？">
+                                <button class="btn btn-danger btn-sm" title="取消"><i class="bi bi-stop-fill"></i></button>
+                            </form>
+                            {% endif %}
+                            {% if j.status in ('failed', 'cancelled') %}
+                            <form method="POST" action="{{ url_for('training.retrain_job', job_id=j.id) }}" class="d-inline">
+                                <button class="btn btn-outline-success btn-sm" title="重新训练"><i class="bi bi-arrow-repeat"></i></button>
+                            </form>
+                            {% endif %}
+                            <form method="POST" action="{{ url_for('training.delete_job', job_id=j.id) }}" class="d-inline" data-confirm="确定删除此训练任务吗？此操作不可撤销。">
+                                <button class="btn btn-outline-danger btn-sm" title="删除"><i class="bi bi-trash"></i></button>
+                            </form>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
 {% with pagination=pagination %}{% include "includes/_pagination.html" %}{% endwith %}
-{% else %}<div class="text-center py-5 text-muted"><i class="bi bi-play-circle" style="font-size:3rem;"></i><p class="mt-2">暂无训练任务</p><a href="{{ url_for('training.create_job') }}" class="btn btn-info">创建第一个训练任务</a></div>{% endif %}
+
+{% else %}
+<div class="text-center py-5">
+    <i class="bi bi-play-circle text-muted" style="font-size:4rem;"></i>
+    <h4 class="text-muted mt-3">暂无训练任务</h4>
+    <p class="text-muted">上传数据集后，创建训练任务来开始你的 AI 之旅</p>
+    <a href="{{ url_for('training.create_job') }}" class="btn btn-success btn-lg mt-2">
+        <i class="bi bi-plus-circle"></i> 创建第一个训练任务
+    </a>
+</div>
+{% endif %}
 {% endblock %}

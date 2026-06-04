@@ -4,13 +4,30 @@
 追踪AI模型训练任务的状态和结果
 ============================================
 """
+import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from app import db
 
 
 class TrainingJob(db.Model):
-    """训练任务模型 - 追踪模型训练过程"""
+    """训练任务模型 — 追踪AI模型训练的全生命周期
+
+    任务生命周期 (status):
+        queued    → running → completed  (正常流程)
+        queued    → running → failed     (训练异常)
+        queued    → running → paused → running → ...  (暂停恢复)
+        any       → cancelled            (用户取消)
+
+    进度追踪:
+        progress_percent — 0-100% 进度条
+        current_epoch / total_epochs — 训练轮次
+        metrics_history_json — 每轮指标历史 (用于训练曲线图)
+        final_metrics_json — 最终测试集指标
+
+    资源需求:
+        gpu_count, cpu_cores, memory_gb — 调度和资源分配
+    """
 
     __tablename__ = 'training_jobs'
 
@@ -76,14 +93,14 @@ class TrainingJob(db.Model):
     # 外键
     owner_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     dataset_id = db.Column(db.Integer, db.ForeignKey('datasets.id'), nullable=True)
-    model_id = db.Column(db.Integer, db.ForeignKey('model_records.id'), nullable=True)
+    model_id = db.Column(db.Integer, db.ForeignKey('model_records.id', use_alter=True, name='fk_training_jobs_model_id'), nullable=True)
 
     # 时间戳
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = db.Column(
         db.DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
         nullable=False
     )
 
@@ -98,8 +115,14 @@ class TrainingJob(db.Model):
     def duration_seconds(self) -> float | None:
         """计算已运行时长 (秒)"""
         if self.started_at:
-            end = self.completed_at or datetime.utcnow()
-            return (end - self.started_at).total_seconds()
+            end = self.completed_at or datetime.now(timezone.utc)
+            # MySQL DATETIME 不存时区，统一转为 naive 再计算
+            try:
+                s = self.started_at.replace(tzinfo=None) if self.started_at.tzinfo else self.started_at
+                e = end.replace(tzinfo=None) if end.tzinfo else end
+                return (e - s).total_seconds()
+            except Exception:
+                return None
         return None
 
     @property
@@ -127,7 +150,6 @@ class TrainingJob(db.Model):
     @property
     def metrics_history(self) -> list:
         """获取指标历史"""
-        import json
         if self.metrics_history_json:
             return json.loads(self.metrics_history_json)
         return []
@@ -137,7 +159,7 @@ class TrainingJob(db.Model):
     def start(self):
         """开始训练"""
         self.status = 'running'
-        self.started_at = datetime.utcnow()
+        self.started_at = datetime.now(timezone.utc)
         db.session.commit()
 
     def update_progress(self, epoch: int, step: int, metrics: dict = None):
@@ -148,7 +170,6 @@ class TrainingJob(db.Model):
             self.progress_percent = round((step / self.total_steps) * 100, 1)
 
         if metrics:
-            import json
             history = self.metrics_history
             history.append({'epoch': epoch, 'step': step, **metrics})
             self.metrics_history_json = json.dumps(history, ensure_ascii=False)
@@ -160,25 +181,25 @@ class TrainingJob(db.Model):
         """标记训练完成"""
         self.status = 'completed'
         self.progress_percent = 100.0
-        self.completed_at = datetime.utcnow()
+        self.completed_at = datetime.now(timezone.utc)
         db.session.commit()
 
     def fail(self, error_msg: str):
         """标记训练失败"""
         self.status = 'failed'
         self.error_message = error_msg
-        self.completed_at = datetime.utcnow()
+        self.completed_at = datetime.now(timezone.utc)
         db.session.commit()
 
     def cancel(self):
         """取消训练"""
         self.status = 'cancelled'
-        self.completed_at = datetime.utcnow()
+        self.completed_at = datetime.now(timezone.utc)
         db.session.commit()
 
     def append_log(self, message: str):
         """追加日志"""
-        timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+        timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
         line = f'[{timestamp}] {message}'
         self.log_text = (self.log_text or '') + line + '\n'
 

@@ -1,0 +1,363 @@
+{% extends "base.html" %}
+{% block title %}用户管理 - 管理员{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="{{ url_for('dashboard.admin') }}">管理面板</a></li>
+        <li class="breadcrumb-item active">用户管理</li>
+    </ol>
+</nav>
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h4 class="mb-1"><i class="bi bi-people-fill"></i> 用户管理</h4>
+        <small class="text-muted">管理系统所有用户账户、角色和权限</small>
+    </div>
+    <div>
+        <button type="button" class="btn btn-outline-secondary me-2" onclick="refreshUsers()">
+            <i class="bi bi-arrow-clockwise"></i> 刷新
+        </button>
+        <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createUserModal">
+            <i class="bi bi-person-plus"></i> 新建用户
+        </button>
+    </div>
+</div>
+
+<!-- 统计卡片 -->
+<div class="row g-3 mb-4" id="statsRow">
+    <div class="col-md-3">
+        <div class="card bg-primary text-white"><div class="card-body text-center py-3">
+            <h3 class="mb-0" id="statTotal">-</h3><small>用户总数</small></div></div>
+    </div>
+    <div class="col-md-3">
+        <div class="card bg-success text-white"><div class="card-body text-center py-3">
+            <h3 class="mb-0" id="statAdmin">-</h3><small>管理员</small></div></div>
+    </div>
+    <div class="col-md-3">
+        <div class="card bg-info text-white"><div class="card-body text-center py-3">
+            <h3 class="mb-0" id="statResearcher">-</h3><small>研究员</small></div></div>
+    </div>
+    <div class="col-md-3">
+        <div class="card bg-secondary text-white"><div class="card-body text-center py-3">
+            <h3 class="mb-0" id="statViewer">-</h3><small>观察者</small></div></div>
+    </div>
+</div>
+
+<!-- 搜索和筛选 -->
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <div class="row g-2 align-items-end">
+            <div class="col-md-4">
+                <input type="text" id="searchInput" class="form-control" placeholder="搜索用户名/邮箱/姓名..." oninput="filterUsers()">
+            </div>
+            <div class="col-md-2">
+                <select id="roleFilter" class="form-select" onchange="filterUsers()">
+                    <option value="">全部角色</option>
+                    <option value="admin">管理员</option>
+                    <option value="researcher">研究员</option>
+                    <option value="viewer">观察者</option>
+                </select>
+            </div>
+            <div class="col-md-2 d-grid">
+                <button type="button" class="btn btn-outline-secondary" onclick="document.getElementById('searchInput').value=''; document.getElementById('roleFilter').value=''; filterUsers();">
+                    <i class="bi bi-x-circle"></i> 清除筛选
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 用户列表 -->
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>用户</th>
+                    <th>角色</th>
+                    <th>组织</th>
+                    <th>状态</th>
+                    <th class="text-center">数据集</th>
+                    <th class="text-center">模型</th>
+                    <th>注册时间</th>
+                    <th>最后登录</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody id="usersTableBody">
+                <tr><td colspan="9" class="text-center py-4 text-muted">
+                    <div class="spinner-border spinner-border-sm me-2"></div>加载中...
+                </td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- 编辑用户 Modal -->
+<div class="modal fade" id="editUserModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-pencil-square"></i> 编辑用户</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="editUserId">
+                <div class="mb-3">
+                    <label class="form-label">用户名</label>
+                    <input type="text" id="editUsername" class="form-control" readonly>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">邮箱</label>
+                    <input type="email" id="editEmail" class="form-control" readonly>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">全名</label>
+                    <input type="text" id="editFullName" class="form-control">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">组织</label>
+                    <input type="text" id="editOrganization" class="form-control">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">角色</label>
+                    <select id="editRole" class="form-select">
+                        <option value="admin">管理员 (admin)</option>
+                        <option value="researcher">研究员 (researcher)</option>
+                        <option value="viewer">观察者 (viewer)</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="editIsActive">
+                        <label class="form-check-label">账户激活</label>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="editIsVerified">
+                        <label class="form-check-label">已验证</label>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-primary" onclick="saveUserEdit()">保存更改</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let allUsers = [];
+
+async function loadUsers() {
+    try {
+        const resp = await fetch('/api/users?per_page=200');
+        const data = await resp.json();
+        if (data.success) {
+            allUsers = data.data.users;
+            updateStats();
+            renderUsers(allUsers);
+        }
+    } catch (e) {
+        document.getElementById('usersTableBody').innerHTML =
+            '<tr><td colspan="9" class="text-center text-danger py-3">加载失败: ' + e.message + '</td></tr>';
+    }
+}
+
+function updateStats() {
+    document.getElementById('statTotal').textContent = allUsers.length;
+    document.getElementById('statAdmin').textContent = allUsers.filter(u => u.role === 'admin').length;
+    document.getElementById('statResearcher').textContent = allUsers.filter(u => u.role === 'researcher').length;
+    document.getElementById('statViewer').textContent = allUsers.filter(u => u.role === 'viewer').length;
+}
+
+function filterUsers() {
+    const search = document.getElementById('searchInput').value.toLowerCase();
+    const role = document.getElementById('roleFilter').value;
+    let filtered = allUsers;
+    if (search) {
+        filtered = filtered.filter(u =>
+            (u.username || '').toLowerCase().includes(search) ||
+            (u.email || '').toLowerCase().includes(search) ||
+            (u.full_name || '').toLowerCase().includes(search) ||
+            (u.organization || '').toLowerCase().includes(search)
+        );
+    }
+    if (role) {
+        filtered = filtered.filter(u => u.role === role);
+    }
+    renderUsers(filtered);
+}
+
+function renderUsers(users) {
+    const tbody = document.getElementById('usersTableBody');
+    if (!users.length) {
+        tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted py-4">暂无用户</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = users.map(u => `
+        <tr>
+            <td>
+                <div class="fw-bold">${escHtml(u.username)}</div>
+                <small class="text-muted">${escHtml(u.email)}</small>
+                ${u.full_name ? `<br><small>${escHtml(u.full_name)}</small>` : ''}
+            </td>
+            <td>
+                <span class="badge bg-${u.role === 'admin' ? 'danger' : u.role === 'researcher' ? 'primary' : 'secondary'}">
+                    ${u.role}
+                </span>
+            </td>
+            <td><small>${escHtml(u.organization || '-')}</small></td>
+            <td>
+                ${u.is_active
+                    ? '<span class="badge bg-success">激活</span>'
+                    : '<span class="badge bg-danger">禁用</span>'}
+                ${u.is_verified
+                    ? '<i class="bi bi-patch-check-fill text-primary ms-1" title="已验证"></i>'
+                    : ''}
+            </td>
+            <td class="text-center"><span class="badge bg-light text-dark">${u.dataset_count || 0}</span></td>
+            <td class="text-center"><span class="badge bg-light text-dark">${u.model_count || 0}</span></td>
+            <td><small>${formatDate(u.created_at)}</small></td>
+            <td><small>${formatDate(u.last_login_at) || '从未登录'}</small></td>
+            <td>
+                <div class="btn-group btn-group-sm">
+                    <button type="button" class="btn btn-outline-primary" onclick="editUser(${u.id})" title="编辑">
+                        <i class="bi bi-pencil"></i>
+                    </button>
+                    <button type="button" class="btn btn-outline-warning" onclick="resetApiKey(${u.id}, '${escHtml(u.username)}')" title="重置API Key">
+                        <i class="bi bi-key"></i>
+                    </button>
+                    <button type="button" class="btn btn-outline-danger" onclick="deleteUser(${u.id}, '${escHtml(u.username)}')" title="删除">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </div>
+            </td>
+        </tr>
+    `).join('');
+}
+
+async function editUser(userId) {
+    try {
+        const resp = await fetch('/api/users/' + userId);
+        const data = await resp.json();
+        if (data.success) {
+            const u = data.data;
+            document.getElementById('editUserId').value = u.id;
+            document.getElementById('editUsername').value = u.username;
+            document.getElementById('editEmail').value = u.email;
+            document.getElementById('editFullName').value = u.full_name || '';
+            document.getElementById('editOrganization').value = u.organization || '';
+            document.getElementById('editRole').value = u.role;
+            document.getElementById('editIsActive').checked = u.is_active;
+            document.getElementById('editIsVerified').checked = u.is_verified;
+            new bootstrap.Modal(document.getElementById('editUserModal')).show();
+        }
+    } catch (e) {
+        showToast('加载用户信息失败', 'danger');
+    }
+}
+
+async function saveUserEdit() {
+    const userId = document.getElementById('editUserId').value;
+    const payload = {
+        full_name: document.getElementById('editFullName').value,
+        organization: document.getElementById('editOrganization').value,
+        role: document.getElementById('editRole').value,
+        is_active: document.getElementById('editIsActive').checked,
+        is_verified: document.getElementById('editIsVerified').checked,
+    };
+
+    try {
+        const resp = await fetch('/api/users/' + userId, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        const data = await resp.json();
+        if (data.success) {
+            showToast('用户信息已更新', 'success');
+            bootstrap.Modal.getInstance(document.getElementById('editUserModal')).hide();
+            loadUsers();
+        } else {
+            showToast(data.message || '更新失败', 'danger');
+        }
+    } catch (e) {
+        showToast('请求失败: ' + e.message, 'danger');
+    }
+}
+
+async function resetApiKey(userId, username) {
+    const ok = await showConfirmModal('确定要重置用户 "' + username + '" 的 API Key 吗？旧的 Key 将立即失效。', '重置 API Key', '确认重置', 'btn-warning');
+    if (!ok) return;
+    try {
+        const resp = await fetch('/api/users/' + userId + '/api-key', { method: 'POST' });
+        const data = await resp.json();
+        if (data.success) {
+            showToast('API Key 已重置: ' + data.data.api_key, 'success');
+        } else {
+            showToast(data.message, 'danger');
+        }
+    } catch (e) {
+        showToast('请求失败', 'danger');
+    }
+}
+
+async function deleteUser(userId, username) {
+    const ok = await showConfirmModal('确定要删除用户 "' + username + '" 吗？该操作不可撤销，用户的所有数据将被删除。', '删除用户', '确认删除', 'btn-danger');
+    if (!ok) return;
+    try {
+        const resp = await fetch('/api/users/' + userId, { method: 'DELETE' });
+        const data = await resp.json();
+        if (data.success) {
+            showToast('用户已删除', 'success');
+            loadUsers();
+        } else {
+            showToast(data.message, 'danger');
+        }
+    } catch (e) {
+        showToast('请求失败', 'danger');
+    }
+}
+
+function refreshUsers() { loadUsers(); }
+
+function escHtml(s) {
+    if (!s) return '';
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+}
+
+function formatDate(iso) {
+    if (!iso) return null;
+    const d = new Date(iso);
+    return d.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' });
+}
+
+function showToast(msg, type) {
+    const container = document.getElementById('toastContainer');
+    if (!container) {
+        const div = document.createElement('div');
+        div.id = 'toastContainer';
+        div.className = 'position-fixed bottom-0 end-0 p-3';
+        div.style.zIndex = 9999;
+        document.body.appendChild(div);
+    }
+    const toast = document.createElement('div');
+    toast.className = 'toast align-items-center text-bg-' + type + ' border-0';
+    toast.innerHTML = '<div class="d-flex"><div class="toast-body">' + msg + '</div><button type="button" class="btn-close me-2 m-auto" data-bs-dismiss="toast"></button></div>';
+    document.getElementById('toastContainer').appendChild(toast);
+    new bootstrap.Toast(toast, { delay: 3000 }).show();
+    toast.addEventListener('hidden.bs.toast', () => toast.remove());
+}
+
+loadUsers();
+</script>
+{% endblock %}

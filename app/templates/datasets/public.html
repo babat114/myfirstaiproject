@@ -6,8 +6,8 @@
 <form method="GET" class="row g-2 mb-3 mt-2">
     <div class="col-md-4"><input type="text" name="search" class="form-control" placeholder="搜索..." value="{{ search_query or '' }}"></div>
     <div class="col-md-3"><select name="category" class="form-select"><option value="">全部分类</option>
-        {% for cat in ['image','text','tabular','audio','video','other'] %}
-        <option value="{{ cat }}" {% if current_category == cat %}selected{% endif %}>{{ cat }}</option>{% endfor %}
+        {% for val, label in category_labels.items() %}
+        <option value="{{ val }}" {% if current_category == val %}selected{% endif %}>{{ label }}</option>{% endfor %}
     </select></div>
     <div class="col-md-2"><button type="submit" class="btn btn-outline-primary w-100"><i class="bi bi-search"></i> 搜索</button></div>
 </form>
@@ -18,7 +18,7 @@
     <div class="card-body">
         <h5><a href="{{ url_for('datasets.dataset_detail', dataset_id=ds.id) }}" class="text-decoration-none">{{ ds.name }}</a></h5>
         <p class="text-muted small">{{ ds.description or '无描述' }}</p>
-        <span class="badge bg-secondary">{{ ds.category }}</span>
+        <span class="badge el-tag-style" data-el-type="info">{{ category_labels.get(ds.category, ds.category) }}</span>
         <code>{{ ds.file_format }}</code>
         <span class="text-muted small">{{ ds.file_size_mb }} MB</span>
         <span class="text-muted small float-end">by {{ ds.owner_name }}</span>

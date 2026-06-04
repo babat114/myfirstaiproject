@@ -4,6 +4,7 @@ AI模型 Web 路由
 模型注册表管理的页面路由
 ============================================
 """
+import json
 from flask import (
     Blueprint, render_template, request, redirect,
     url_for, flash, current_app
@@ -55,6 +56,7 @@ def public_models():
         model_type=model_type,
         framework=framework,
         search=search,
+        is_public=True,  # 仅显示公开模型
     )
 
     return render_template(
@@ -233,4 +235,178 @@ def leaderboard():
         'models/leaderboard.html',
         top_accuracy=top_by_accuracy,
         top_f1=top_by_f1,
+    )
+
+
+@models_bp.route('/compare', methods=['GET', 'POST'])
+@login_required
+def compare():
+    """模型对比页面 — 并排比较 2-4 个模型的指标 (PRD 第五节)"""
+    if request.method == 'POST':
+        model_ids = request.form.getlist('model_ids')
+        model_ids = [int(mid) for mid in model_ids if mid.isdigit()]
+    else:
+        model_ids = request.args.getlist('model_ids', type=int)
+
+    # 去重并限制 2-4 个
+    model_ids = list(dict.fromkeys(model_ids))[:4]
+
+    models_to_compare = []
+    error = None
+
+    if len(model_ids) < 2:
+        error = '请至少选择 2 个模型进行对比。'
+        models_to_compare = []
+    else:
+        for mid in model_ids:
+            m = ModelService.get_model_by_id(mid)
+            if m:
+                # 权限检查
+                if m.is_public or m.owner_id == current_user.id or current_user.is_admin:
+                    models_to_compare.append(m)
+
+        if len(models_to_compare) < 2:
+            error = '没有足够的有权限模型可供对比。'
+
+    # 获取用户的所有模型列表 (供选择)
+    user_models_result = ModelService.list_models(
+        owner_id=current_user.id, per_page=100
+    )
+    user_models = user_models_result['items']
+
+    # 对比指标列表
+    compare_metrics = [
+        {'key': 'accuracy', 'label': '准确率 (Accuracy)', 'higher_better': True},
+        {'key': 'precision', 'label': '精确率 (Precision)', 'higher_better': True},
+        {'key': 'recall', 'label': '召回率 (Recall)', 'higher_better': True},
+        {'key': 'f1_score', 'label': 'F1 分数', 'higher_better': True},
+        {'key': 'loss', 'label': '损失 (Loss)', 'higher_better': False},
+    ]
+
+    # 找出每列的最佳值
+    best_values = {}
+    if models_to_compare:
+        for metric in compare_metrics:
+            values = [(getattr(m, metric['key']), m) for m in models_to_compare
+                      if getattr(m, metric['key']) is not None]
+            if values:
+                best_values[metric['key']] = (
+                    max(values, key=lambda x: x[0])[1].id
+                    if metric['higher_better']
+                    else min(values, key=lambda x: x[0])[1].id
+                )
+
+    return render_template(
+        'models/compare.html',
+        models=models_to_compare,
+        user_models=user_models,
+        error=error,
+        compare_metrics=compare_metrics,
+        best_values=best_values,
+        selected_ids=model_ids,
+    )
+
+
+@models_bp.route('/<int:model_id>/test', methods=['GET', 'POST'])
+@login_required
+def test_model(model_id):
+    """模型测试页面 — 上传数据并执行预测"""
+    model = ModelService.get_model_by_id(model_id)
+    if not model:
+        flash('模型不存在。', 'danger')
+        return redirect(url_for('models.list_models'))
+
+    if not model.is_public and model.owner_id != current_user.id and not current_user.is_admin:
+        flash('您没有权限测试此模型。', 'danger')
+        return redirect(url_for('models.list_models'))
+
+    from app.services.inference_service import ModelInferenceService
+
+    result = None
+    feature_importance = None
+    test_report = None
+    error = None
+    preview_data = None
+    preview_columns = None
+
+    if request.method == 'POST':
+        action = request.form.get('action', 'predict')
+
+        if action == 'predict_file':
+            # 上传文件进行预测
+            file = request.files.get('test_file')
+            if file and file.filename:
+                try:
+                    import pandas as pd
+                    fmt = file.filename.rsplit('.', 1)[-1].lower()
+                    if fmt == 'csv':
+                        df = pd.read_csv(file)
+                    elif fmt in ('xlsx', 'xls'):
+                        df = pd.read_excel(file)
+                    elif fmt == 'json':
+                        df = pd.read_json(file)
+                    else:
+                        error = f'不支持的文件格式: {fmt}'
+                        df = None
+
+                    if df is not None:
+                        result = ModelInferenceService.predict(model, df)
+                        if result.get('success') and len(df) <= 100:
+                            preview_data = df.head(20).values.tolist()
+                            preview_columns = list(df.columns)
+                except Exception as e:
+                    error = f'文件解析失败: {str(e)}'
+
+        elif action == 'predict_manual':
+            # 手动输入特征值
+            try:
+                import pandas as pd
+                feature_count = int(request.form.get('feature_count', 0))
+                manual_data = {}
+                for i in range(feature_count):
+                    key = f'feature_{i}'
+                    val = request.form.get(key, '')
+                    if val:
+                        manual_data[key] = [float(val)]
+                if manual_data:
+                    df = pd.DataFrame(manual_data)
+                    result = ModelInferenceService.predict(model, df)
+            except Exception as e:
+                error = f'输入解析失败: {str(e)}'
+
+        elif action == 'run_test':
+            # 使用原始数据集进行完整测试评估
+            test_report = ModelInferenceService.test_model_with_split(model)
+            if test_report.get('success'):
+                flash('模型评估完成！', 'success')
+            else:
+                error = test_report.get('error', '评估失败')
+
+        elif action == 'feature_importance':
+            feature_importance = ModelInferenceService.get_feature_importance(model)
+            if not feature_importance.get('success'):
+                error = feature_importance.get('error')
+
+    # 获取特征名 (从模型元数据)
+    feature_names = []
+    hyperparams = model.hyperparameters_dict
+    if model.training_dataset and model.training_dataset.summary_json:
+        try:
+            summary = json.loads(model.training_dataset.summary_json) if isinstance(model.training_dataset.summary_json, str) else model.training_dataset.summary_json
+            cols = summary.get('columns', [])
+            target_col = hyperparams.get('target_column', cols[-1] if cols else None)
+            feature_names = [c for c in cols if c != target_col]
+        except Exception:
+            pass
+
+    return render_template(
+        'models/test.html',
+        model=model,
+        result=result,
+        feature_importance=feature_importance,
+        test_report=test_report,
+        error=error,
+        feature_names=feature_names,
+        preview_data=preview_data,
+        preview_columns=preview_columns,
     )

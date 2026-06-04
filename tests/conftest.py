@@ -42,37 +42,38 @@ def runner(app):
 @pytest.fixture
 def test_user(app):
     """创建测试用户"""
-    with app.app_context():
-        user = User(
-            username='testuser',
-            email='test@test.com',
-            full_name='Test User',
-            role='researcher',
-            is_active=True,
-            is_verified=True,
-        )
-        user.set_password('Test123456')
-        db.session.add(user)
-        db.session.commit()
-        return user
+    # 使用 app fixture 的上下文 (不要创建新的 context block)
+    user = User(
+        username='testuser',
+        email='test@test.com',
+        full_name='Test User',
+        role='researcher',
+        is_active=True,
+        is_verified=True,
+    )
+    user.set_password('Test123456')
+    user.api_key = 'ak_testuserkey1234567890abcdef'
+    db.session.add(user)
+    db.session.commit()
+    return user
 
 
 @pytest.fixture
 def test_admin(app):
     """创建测试管理员"""
-    with app.app_context():
-        admin = User(
-            username='testadmin',
-            email='admin@test.com',
-            full_name='Test Admin',
-            role='admin',
-            is_active=True,
-            is_verified=True,
-        )
-        admin.set_password('Admin123456')
-        db.session.add(admin)
-        db.session.commit()
-        return admin
+    user = User(
+        username='testadmin',
+        email='admin@test.com',
+        full_name='Test Admin',
+        role='admin',
+        is_active=True,
+        is_verified=True,
+    )
+    user.set_password('Admin123456')
+    user.api_key = 'ak_testadminkey1234567890abcdef'
+    db.session.add(user)
+    db.session.commit()
+    return user
 
 
 @pytest.fixture

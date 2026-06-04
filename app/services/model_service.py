@@ -6,10 +6,11 @@ AI模型服务
 """
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Tuple
 from werkzeug.utils import secure_filename
 from werkzeug.datastructures import FileStorage
+from flask import current_app
 from app import db, logger
 from app.models.model_record import ModelRecord
 from app.models.user import User
@@ -76,7 +77,6 @@ class ModelService:
             return False, f'不支持的模型文件格式。'
 
         if upload_folder is None:
-            from flask import current_app
             upload_folder = current_app.config['UPLOAD_FOLDER']
 
         model_dir = os.path.join(upload_folder, 'models')
@@ -93,7 +93,7 @@ class ModelService:
             model.model_file_path = file_path
             model.file_size = file_size
             model.status = 'trained'
-            model.updated_at = datetime.utcnow()
+            model.updated_at = datetime.now(timezone.utc)
 
             db.session.commit()
 
@@ -117,7 +117,7 @@ class ModelService:
         """
         try:
             model.set_metrics(metrics)
-            model.updated_at = datetime.utcnow()
+            model.updated_at = datetime.now(timezone.utc)
             db.session.commit()
             return True, None
         except Exception as e:
@@ -128,7 +128,7 @@ class ModelService:
     @staticmethod
     def get_model_by_id(model_id: int) -> Optional[ModelRecord]:
         """根据 ID 获取模型"""
-        return ModelRecord.query.get(model_id)
+        return db.session.get(ModelRecord, model_id)
 
     @staticmethod
     def get_model_by_uuid(model_uuid: str) -> Optional[ModelRecord]:
@@ -150,7 +150,7 @@ class ModelService:
             if 'hyperparameters' in data and isinstance(data['hyperparameters'], dict):
                 model.set_hyperparameters(data['hyperparameters'])
 
-            model.updated_at = datetime.utcnow()
+            model.updated_at = datetime.now(timezone.utc)
             db.session.commit()
             return True, None
 
@@ -161,8 +161,15 @@ class ModelService:
 
     @staticmethod
     def delete_model(model: ModelRecord) -> Tuple[bool, Optional[str]]:
-        """删除模型及其文件"""
+        """删除模型及其文件 — 先解除关联训练任务的外键约束"""
         try:
+            from app.models.training_job import TrainingJob
+
+            # 解除关联的训练任务引用 (避免外键约束报错)
+            TrainingJob.query.filter_by(model_id=model.id).update(
+                {TrainingJob.model_id: None}
+            )
+
             # 删除关联文件
             for path_attr in ['model_file_path', 'weights_file_path', 'config_file_path']:
                 path = getattr(model, path_attr)
@@ -184,9 +191,12 @@ class ModelService:
     def list_models(page: int = 1, per_page: int = 15,
                     model_type: str = None, framework: str = None,
                     owner_id: int = None, status: str = None,
-                    search: str = None) -> dict:
+                    search: str = None, is_public: bool = None) -> dict:
         """
         获取模型列表 (支持多条件筛选)
+
+        Args:
+            is_public: 按公开/私有筛选 (None=全部, True=仅公开, False=仅私有)
 
         Returns:
             分页结果字典
@@ -201,6 +211,8 @@ class ModelService:
             query = query.filter_by(owner_id=owner_id)
         if status:
             query = query.filter_by(status=status)
+        if is_public is not None:
+            query = query.filter_by(is_public=is_public)
         if search:
             term = f'%{search}%'
             query = query.filter(

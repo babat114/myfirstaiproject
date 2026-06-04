@@ -4,7 +4,7 @@
 首页和数据总览
 ============================================
 """
-from flask import Blueprint, render_template
+from flask import Blueprint, render_template, flash, redirect, url_for
 from flask_login import login_required, current_user
 from app.services.dataset_service import DatasetService
 from app.services.model_service import ModelService
@@ -50,7 +50,6 @@ def index():
 def admin():
     """管理员面板 - 全局统计 (仅管理员)"""
     if not current_user.is_admin:
-        from flask import flash, redirect, url_for
         flash('您没有管理员权限。', 'danger')
         return redirect(url_for('dashboard.index'))
 
@@ -63,4 +62,21 @@ def admin():
         dataset_stats=dataset_stats,
         model_stats=model_stats,
         job_stats=job_stats,
+    )
+
+
+@dashboard_bp.route('/admin/users')
+@login_required
+def admin_users():
+    """用户管理页面 (仅管理员)"""
+    if not current_user.is_admin:
+        flash('您没有管理员权限。', 'danger')
+        return redirect(url_for('dashboard.index'))
+
+    from app.services.auth_service import AuthService
+    users_result = AuthService.list_users(per_page=200)
+
+    return render_template(
+        'admin/users.html',
+        users=users_result['users'],
     )

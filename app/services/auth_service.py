@@ -5,7 +5,7 @@
 ============================================
 """
 import secrets
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Tuple
 from sqlalchemy import or_
 from app import db, logger
@@ -96,7 +96,7 @@ class AuthService:
             return None, '密码错误。'
 
         # 更新最后登录时间
-        user.last_login_at = datetime.utcnow()
+        user.last_login_at = datetime.now(timezone.utc)
         db.session.commit()
 
         logger.info(f"用户登录: {user.username}")
@@ -121,7 +121,7 @@ class AuthService:
                 if field in allowed_fields and hasattr(user, field):
                     setattr(user, field, value)
 
-            user.updated_at = datetime.utcnow()
+            user.updated_at = datetime.now(timezone.utc)
             db.session.commit()
             return True, None
 
@@ -192,6 +192,58 @@ class AuthService:
             'has_next': pagination.has_next,
             'has_prev': pagination.has_prev,
         }
+
+    @staticmethod
+    def login_jwt(login_id: str, password: str) -> Tuple[Optional[dict], Optional[str], int]:
+        """
+        JWT 登录 — 验证凭据并返回 Token 对
+
+        Args:
+            login_id: 用户名或邮箱
+            password: 密码
+
+        Returns:
+            (token_pair, error_message, status_code)
+            成功: ({'access_token': ..., 'refresh_token': ..., ...}, None, 200)
+            失败: (None, error_msg, 401)
+        """
+        from app.utils.jwt_helpers import generate_token_pair
+
+        user, error = AuthService.login(login_id, password)
+        if error:
+            return None, error, 401
+
+        tokens = generate_token_pair(user.id, user.username, user.role)
+        return tokens, None, 200
+
+    @staticmethod
+    def refresh_jwt(refresh_token: str) -> Tuple[Optional[dict], Optional[str], int]:
+        """
+        使用 Refresh Token 刷新 Access Token
+
+        Args:
+            refresh_token: 有效的 refresh token
+
+        Returns:
+            (new_token_pair, error_message, status_code)
+        """
+        from app.utils.jwt_helpers import decode_refresh_token, generate_token_pair
+        from app.models.user import User
+
+        payload, error = decode_refresh_token(refresh_token)
+        if error:
+            return None, error, 401
+
+        user_id = payload.get('sub')
+        user = db.session.get(User, int(user_id))
+        if not user:
+            return None, '用户不存在或已被删除。', 401
+
+        if not user.is_active:
+            return None, '账户已被禁用。', 401
+
+        tokens = generate_token_pair(user.id, user.username, user.role)
+        return tokens, None, 200
 
     @staticmethod
     def _generate_api_key() -> str:

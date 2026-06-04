@@ -4,13 +4,31 @@ AI模型注册模型
 管理已训练的AI模型版本和元数据
 ============================================
 """
+import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from app import db
 
 
 class ModelRecord(db.Model):
-    """AI模型注册 - 存储模型版本和性能指标"""
+    """AI模型注册表 — 存储模型版本元数据和性能指标
+
+    模型类型 (model_type):
+        classification — 分类任务 (二分类/多分类)
+        regression     — 回归任务 (预测连续值)
+        clustering     — 聚类任务 (无监督分组)
+        nlp            — 自然语言处理
+        computer_vision — 计算机视觉
+        reinforcement  — 强化学习
+        generative     — 生成式模型 (GAN/VAE/Diffusion)
+
+    模型状态 (status):
+        draft    — 草稿: 仅元数据, 无权重文件
+        trained  — 已训练: 有权重文件+指标
+        deployed — 已部署: 正在生产环境服务
+        archived — 已归档: 保留记录但不再使用
+        failed   — 失败: 训练或注册过程出错
+    """
 
     __tablename__ = 'model_records'
 
@@ -81,11 +99,11 @@ class ModelRecord(db.Model):
     owner_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
 
     # 时间戳
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = db.Column(
         db.DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
         nullable=False
     )
 
@@ -99,7 +117,6 @@ class ModelRecord(db.Model):
     @property
     def metrics_dict(self) -> dict:
         """获取指标字典"""
-        import json
         if self.metrics_json:
             return json.loads(self.metrics_json)
         return {}
@@ -107,7 +124,6 @@ class ModelRecord(db.Model):
     @property
     def hyperparameters_dict(self) -> dict:
         """获取超参数字典"""
-        import json
         if self.hyperparameters_json:
             return json.loads(self.hyperparameters_json)
         return {}
@@ -116,21 +132,34 @@ class ModelRecord(db.Model):
     def file_size_mb(self) -> float:
         return round(self.file_size / (1024 * 1024), 2)
 
+    @property
+    def name_slug(self) -> str:
+        """文件名友好的 slug"""
+        import re
+        return re.sub(r'[^a-zA-Z0-9_-]', '-', self.name.lower()).strip('-')
+
     # ============ 方法 ============
 
     def set_metrics(self, metrics: dict):
-        """设置性能指标"""
-        import json
-        self.metrics_json = json.dumps(metrics, ensure_ascii=False)
+        """
+        设置性能指标
+
+        存储策略:
+        - accuracy/precision/recall/f1_score 列存 macro 平均值 (各类别等权)
+        - metrics_json 存完整指标 (含 weighted/macro 两种平均方式)
+        - loss 单独存储
+        """
+        # 只在传入新的 metrics_json 时才覆盖 (否则保留已有的完整报告)
+        if 'accuracy' in metrics or 'precision_macro' in metrics:
+            self.metrics_json = json.dumps(metrics, ensure_ascii=False)
         self.accuracy = metrics.get('accuracy')
-        self.precision = metrics.get('precision')
-        self.recall = metrics.get('recall')
-        self.f1_score = metrics.get('f1_score')
+        self.precision = metrics.get('precision_macro', metrics.get('precision'))
+        self.recall = metrics.get('recall_macro', metrics.get('recall'))
+        self.f1_score = metrics.get('f1_macro', metrics.get('f1_score'))
         self.loss = metrics.get('loss')
 
     def set_hyperparameters(self, params: dict):
         """设置超参数"""
-        import json
         self.hyperparameters_json = json.dumps(params, ensure_ascii=False)
 
     def deploy(self, url: str):

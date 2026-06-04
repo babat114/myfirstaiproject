@@ -18,12 +18,9 @@
     <div class="col-md-3">
         <select name="category" class="form-select">
             <option value="">全部分类</option>
-            <option value="image" {% if current_category == 'image' %}selected{% endif %}>图像</option>
-            <option value="text" {% if current_category == 'text' %}selected{% endif %}>文本</option>
-            <option value="tabular" {% if current_category == 'tabular' %}selected{% endif %}>表格</option>
-            <option value="audio" {% if current_category == 'audio' %}selected{% endif %}>音频</option>
-            <option value="video" {% if current_category == 'video' %}selected{% endif %}>视频</option>
-            <option value="other" {% if current_category == 'other' %}selected{% endif %}>其他</option>
+            {% for val, label in category_labels.items() %}
+            <option value="{{ val }}" {% if current_category == val %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
         </select>
     </div>
     <div class="col-md-2">
@@ -50,7 +47,7 @@
                     </a>
                     <br><small class="text-muted">v{{ ds.version }}</small>
                 </td>
-                <td><span class="badge bg-secondary">{{ ds.category }}</span></td>
+                <td><span class="badge el-tag-style" data-el-type="info">{{ category_labels.get(ds.category, ds.category) }}</span></td>
                 <td><code>{{ ds.file_format }}</code></td>
                 <td>{{ ds.file_size_mb }} MB</td>
                 <td>{{ ds.row_count }}/{{ ds.column_count }}</td>
@@ -59,7 +56,7 @@
                 <td>
                     <a href="{{ url_for('datasets.edit_dataset', dataset_id=ds.id) }}" class="btn btn-sm btn-outline-secondary" title="编辑"><i class="bi bi-pencil"></i></a>
                     <form method="POST" action="{{ url_for('datasets.delete_dataset', dataset_id=ds.id) }}" class="d-inline"
-                          onsubmit="return confirm('确定删除此数据集？');">
+                          data-confirm="确定删除此数据集吗？此操作不可逆。">
                         <button class="btn btn-sm btn-outline-danger" title="删除"><i class="bi bi-trash"></i></button>
                     </form>
                 </td>

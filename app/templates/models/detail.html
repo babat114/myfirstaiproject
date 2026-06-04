@@ -8,55 +8,332 @@
     <li class="breadcrumb-item active">{{ model.name }}</li></ol>
 </nav>
 
-<div class="row g-3">
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h4 class="mb-1">{{ model.name }} <small class="text-muted">v{{ model.version }}</small></h4>
+        <span class="badge bg-{{ 'success' if model.status == 'deployed' else 'primary' if model.status == 'trained' else 'secondary' }} fs-6 me-2">{{ model.status }}</span>
+        <span class="badge bg-secondary">{{ model_type_labels.get(model.model_type, model.model_type) }}</span>
+        {% if model.framework %}<span class="badge bg-dark">{{ model.framework }}</span>{% endif %}
+    </div>
+    <div class="btn-group">
+        {% if model.status in ('trained', 'deployed') %}
+        <a href="{{ url_for('models.test_model', model_id=model.id) }}" class="btn btn-success">
+            <i class="bi bi-clipboard-check"></i> 测试模型
+        </a>
+        {% endif %}
+        <a href="{{ url_for('models.edit_model', model_id=model.id) }}" class="btn btn-outline-primary">
+            <i class="bi bi-pencil"></i> 编辑
+        </a>
+        <form method="POST" action="{{ url_for('models.delete_model', model_id=model.id) }}" class="d-inline" data-confirm="确定删除此模型？此操作不可撤销。">
+            <button class="btn btn-outline-danger"><i class="bi bi-trash"></i></button>
+        </form>
+    </div>
+</div>
+
+<div class="row g-4">
+    <!-- 左侧 -->
     <div class="col-lg-8">
-        <div class="card"><div class="card-body">
-            <h4>{{ model.name }} <small class="text-muted">v{{ model.version }}</small></h4>
-            <span class="badge bg-{{ 'success' if model.status == 'deployed' else 'info' }}">{{ model.status }}</span>
-            <span class="badge bg-secondary">{{ model.model_type }}</span>
-            {% if model.framework %}<span class="badge bg-dark">{{ model.framework }}</span>{% endif %}
-            {% if model.description %}<p class="mt-3">{{ model.description }}</p>{% endif %}
-        </div></div>
-
-        <!-- 性能指标 -->
-        <div class="card mt-3"><div class="card-header"><h6 class="mb-0">性能指标</h6></div><div class="card-body">
-            <div class="row text-center">
-                <div class="col-3"><h4 class="text-primary">{% if model.accuracy is not none %}{{ "%.1f"|format(model.accuracy * 100) }}%{% else %}-{% endif %}</h4><small>准确率</small></div>
-                <div class="col-3"><h4 class="text-success">{% if model.precision is not none %}{{ "%.2f"|format(model.precision) }}{% else %}-{% endif %}</h4><small>精确率</small></div>
-                <div class="col-3"><h4 class="text-info">{% if model.recall is not none %}{{ "%.2f"|format(model.recall) }}{% else %}-{% endif %}</h4><small>召回率</small></div>
-                <div class="col-3"><h4 class="text-warning">{% if model.f1_score is not none %}{{ "%.2f"|format(model.f1_score) }}{% else %}-{% endif %}</h4><small>F1 分数</small></div>
+        <!-- 性能指标卡片 -->
+        <div class="card mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h6 class="mb-0"><i class="bi bi-speedometer"></i> 性能指标</h6>
+                {% if model.training_job %}
+                <a href="{{ url_for('training.job_detail', job_id=model.training_job.id) }}" class="btn btn-sm btn-outline-info">
+                    <i class="bi bi-play-circle"></i> 查看训练任务
+                </a>
+                {% endif %}
             </div>
-        </div></div>
+            <div class="card-body">
+                <!-- 指标说明 -->
+                {% if model.metrics_dict.get('test_accuracy') is not none or model.metrics_dict.get('accuracy') is not none %}
+                <div class="alert alert-info small py-2 mb-3">
+                    <i class="bi bi-info-circle me-1"></i>
+                    精确率/召回率/F1 使用 <strong>macro 平均</strong> (各类别等权), 能更真实反映模型在不同类别上的均衡表现
+                </div>
+                {% endif %}
 
-        <!-- 超参数 -->
+                <div class="row g-3">
+                    <div class="col-md-7">
+                        <div class="row text-center g-2">
+                            <div class="col-3">
+                                <div class="border rounded p-3 bg-light">
+                                    <h3 class="text-primary mb-1">{% if model.accuracy is not none %}{{ "%.1f"|format(model.accuracy * 100) }}%{% else %}-{% endif %}</h3>
+                                    <small class="text-muted">准确率</small>
+                                </div>
+                            </div>
+                            <div class="col-3">
+                                <div class="border rounded p-3 bg-light">
+                                    <h3 class="text-success mb-1">{% if model.precision is not none %}{{ "%.3f"|format(model.precision) }}{% else %}-{% endif %}</h3>
+                                    <small class="text-muted">精确率 (macro)</small>
+                                </div>
+                            </div>
+                            <div class="col-3">
+                                <div class="border rounded p-3 bg-light">
+                                    <h3 class="text-info mb-1">{% if model.recall is not none %}{{ "%.3f"|format(model.recall) }}{% else %}-{% endif %}</h3>
+                                    <small class="text-muted">召回率 (macro)</small>
+                                </div>
+                            </div>
+                            <div class="col-3">
+                                <div class="border rounded p-3 bg-light">
+                                    <h3 class="text-warning mb-1">{% if model.f1_score is not none %}{{ "%.3f"|format(model.f1_score) }}{% else %}-{% endif %}</h3>
+                                    <small class="text-muted">F1 分数 (macro)</small>
+                                </div>
+                            </div>
+                        </div>
+                        {% if model.loss is not none %}
+                        <div class="text-center mt-2"><small class="text-muted">损失 (Loss): <strong>{{ "%.4f"|format(model.loss) }}</strong></small></div>
+                        {% endif %}
+                    </div>
+                    <div class="col-md-5">
+                        <canvas id="metricsRadarChart" height="180"></canvas>
+                    </div>
+                </div>
+
+                <!-- 完整指标详情 (如果metrics_json包含weighted+macro对比) -->
+                {% set mm = model.metrics_dict %}
+                {% if mm.get('test_precision_weighted') is not none or mm.get('test_precision_macro') is not none %}
+                <hr class="my-3">
+                <div class="row small text-center">
+                    <div class="col-6">
+                        <span class="text-muted">加权精确率:</span>
+                        <strong>{{ "%.4f"|format(mm.get('test_precision_weighted', mm.get('precision_weighted', 0))) }}</strong>
+                    </div>
+                    <div class="col-6">
+                        <span class="text-muted">Macro精确率:</span>
+                        <strong>{{ "%.4f"|format(mm.get('test_precision_macro', mm.get('precision_macro', 0))) }}</strong>
+                    </div>
+                    <div class="col-6 mt-1">
+                        <span class="text-muted">加权召回率:</span>
+                        <strong>{{ "%.4f"|format(mm.get('test_recall_weighted', mm.get('recall_weighted', 0))) }}</strong>
+                    </div>
+                    <div class="col-6 mt-1">
+                        <span class="text-muted">Macro召回率:</span>
+                        <strong>{{ "%.4f"|format(mm.get('test_recall_macro', mm.get('recall_macro', 0))) }}</strong>
+                    </div>
+                    <div class="col-6 mt-1">
+                        <span class="text-muted">加权F1:</span>
+                        <strong>{{ "%.4f"|format(mm.get('test_f1_weighted', mm.get('f1_weighted', 0))) }}</strong>
+                    </div>
+                    <div class="col-6 mt-1">
+                        <span class="text-muted">Macro F1:</span>
+                        <strong>{{ "%.4f"|format(mm.get('test_f1_macro', mm.get('f1_macro', 0))) }}</strong>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- 训练历史图表 -->
+        {% if model.training_job and model.training_job.metrics_history %}
+        <div class="card mb-4">
+            <div class="card-header"><h6 class="mb-0"><i class="bi bi-graph-up"></i> 训练历史</h6></div>
+            <div class="card-body">
+                <canvas id="trainingHistoryChart" height="200"></canvas>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- 描述和超参数 -->
+        {% if model.description %}
+        <div class="card mb-4">
+            <div class="card-header"><h6 class="mb-0">描述</h6></div>
+            <div class="card-body"><p class="mb-0">{{ model.description }}</p></div>
+        </div>
+        {% endif %}
+
         {% if model.hyperparameters_dict %}
-        <div class="card mt-3"><div class="card-header"><h6 class="mb-0">超参数</h6></div><div class="card-body"><div class="row">
-            {% for key, value in model.hyperparameters_dict.items() %}
-            <div class="col-md-4 mb-2"><strong>{{ key }}:</strong> {{ value }}</div>
-            {% endfor %}
-        </div></div></div>
+        <div class="card mb-4">
+            <div class="card-header"><h6 class="mb-0"><i class="bi bi-sliders"></i> 超参数</h6></div>
+            <div class="card-body">
+                <div class="row g-2">
+                    {% for key, value in model.hyperparameters_dict.items() %}
+                    <div class="col-md-4 col-sm-6">
+                        <div class="border rounded p-2">
+                            <small class="text-muted d-block">{{ key }}</small>
+                            <strong>{{ value }}</strong>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- 训练曲线 (关联训练任务) -->
+        {% if model.training_job and model.training_job.log_text %}
+        <div class="card mb-4">
+            <div class="card-header">
+                <a class="text-decoration-none d-flex justify-content-between align-items-center" data-bs-toggle="collapse" href="#trainingLog">
+                    <h6 class="mb-0"><i class="bi bi-terminal"></i> 训练日志</h6>
+                    <i class="bi bi-chevron-down"></i>
+                </a>
+            </div>
+            <div class="collapse" id="trainingLog">
+                <div class="card-body p-0">
+                    <pre class="bg-dark text-light p-3 m-0 rounded-bottom" style="max-height:300px;overflow-y:auto;font-size:12px;line-height:1.5;">{{ model.training_job.log_text }}</pre>
+                </div>
+            </div>
+        </div>
         {% endif %}
     </div>
 
+    <!-- 右侧 -->
     <div class="col-lg-4">
-        <div class="card"><div class="card-header"><h6 class="mb-0">模型文件</h6></div><div class="card-body">
-            <p><strong>文件大小:</strong> {{ model.file_size_mb }} MB</p>
-            <p><strong>训练时长:</strong> {% if model.training_duration_seconds %}{{ model.training_duration_seconds }} 秒{% else %}-{% endif %}</p>
-            {% if model.deployment_url %}<p><strong>部署URL:</strong> <a href="{{ model.deployment_url }}">{{ model.deployment_url }}</a></p>{% endif %}
-        </div></div>
+        <!-- 模型文件 -->
+        <div class="card mb-3">
+            <div class="card-header"><h6 class="mb-0"><i class="bi bi-file-earmark-zip"></i> 模型文件</h6></div>
+            <div class="card-body">
+                <p class="mb-1"><strong>文件大小:</strong> {{ model.file_size_mb }} MB</p>
+                <p class="mb-1"><strong>训练时长:</strong>
+                    {% if model.training_duration_seconds is not none %}
+                        {% if model.training_duration_seconds < 60 %}{{ model.training_duration_seconds }}秒
+                        {% elif model.training_duration_seconds < 3600 %}{{ (model.training_duration_seconds / 60)|int }}分{{ (model.training_duration_seconds % 60)|int }}秒
+                        {% else %}{{ (model.training_duration_seconds / 3600)|int }}时{{ ((model.training_duration_seconds % 3600) / 60)|int }}分{% endif %}
+                    {% else %}-{% endif %}
+                </p>
+                {% if model.deployment_url %}
+                <p class="mb-0"><strong>部署URL:</strong> <a href="{{ model.deployment_url }}" target="_blank">{{ model.deployment_url }}</a></p>
+                {% endif %}
+            </div>
+        </div>
 
-        <div class="card mt-3"><div class="card-header"><h6 class="mb-0">上传模型文件</h6></div><div class="card-body">
-            <form method="POST" action="{{ url_for('models.upload_model_file', model_id=model.id) }}" enctype="multipart/form-data">
-                <input type="file" name="model_file" class="form-control form-control-sm mb-2" accept=".pt,.pth,.h5,.pb,.onnx,.pkl,.joblib">
-                <button type="submit" class="btn btn-sm btn-primary w-100"><i class="bi bi-cloud-upload"></i> 上传</button>
-            </form>
-        </div></div>
+        <!-- 上传模型文件 -->
+        <div class="card mb-3">
+            <div class="card-header"><h6 class="mb-0"><i class="bi bi-cloud-upload"></i> 上传模型文件</h6></div>
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('models.upload_model_file', model_id=model.id) }}" enctype="multipart/form-data">
+                    <input type="file" name="model_file" class="form-control form-control-sm mb-2" accept=".pt,.pth,.h5,.pb,.onnx,.pkl,.joblib">
+                    <button type="submit" class="btn btn-sm btn-primary w-100"><i class="bi bi-cloud-upload"></i> 上传</button>
+                </form>
+            </div>
+        </div>
 
-        <div class="card mt-3"><div class="card-header"><h6 class="mb-0">元信息</h6></div><div class="card-body">
-            <p><strong>UUID:</strong> <code>{{ model.uuid }}</code></p>
-            <p><strong>拥有者:</strong> {{ model.owner.username }}</p>
-            <p><strong>创建时间:</strong> {{ model.created_at.strftime('%Y-%m-%d %H:%M') if model.created_at else '-' }}</p>
-        </div></div>
+        <!-- 元信息 -->
+        <div class="card mb-3">
+            <div class="card-header"><h6 class="mb-0"><i class="bi bi-info-circle"></i> 元信息</h6></div>
+            <div class="card-body">
+                <p class="mb-1"><strong>UUID:</strong> <code class="small">{{ model.uuid[:16] }}...</code></p>
+                <p class="mb-1"><strong>拥有者:</strong> {{ model.owner.username }}</p>
+                <p class="mb-1"><strong>创建时间:</strong> {{ model.created_at.strftime('%Y-%m-%d %H:%M') if model.created_at else '-' }}</p>
+                <p class="mb-0"><strong>更新时间:</strong> {{ model.updated_at.strftime('%Y-%m-%d %H:%M') if model.updated_at else '-' }}</p>
+            </div>
+        </div>
+
+        <!-- 快速操作 -->
+        <div class="card border-success">
+            <div class="card-header bg-success text-white"><h6 class="mb-0"><i class="bi bi-lightning"></i> 快速操作</h6></div>
+            <div class="card-body d-grid gap-2">
+                {% if model.status in ('trained', 'deployed') %}
+                <a href="{{ url_for('models.test_model', model_id=model.id) }}" class="btn btn-success">
+                    <i class="bi bi-clipboard-check"></i> 测试与评估
+                </a>
+                {% endif %}
+                <a href="{{ url_for('models.compare') }}?model_ids={{ model.id }}" class="btn btn-outline-info">
+                    <i class="bi bi-bar-chart"></i> 加入对比
+                </a>
+                {% if model.training_job %}
+                <a href="{{ url_for('training.job_detail', job_id=model.training_job.id) }}" class="btn btn-outline-primary">
+                    <i class="bi bi-play-circle"></i> 查看训练详情
+                </a>
+                {% endif %}
+            </div>
+        </div>
     </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// ============ 模型详情页 — 雷达图 + 训练历史折线图 ============
+
+// 雷达图: 4维性能指标可视化 (准确率/精确率/召回率/F1)
+(function() {
+    var hasMetrics = {{ 'true' if model.accuracy is not none or model.precision is not none or model.recall is not none or model.f1_score is not none else 'false' }};
+    if (!hasMetrics) return;
+
+    var ctx = document.getElementById('metricsRadarChart').getContext('2d');
+    new Chart(ctx, {
+        type: 'radar',  // 雷达图: 多维度指标一目了然
+        data: {
+            labels: ['准确率', '精确率', '召回率', 'F1分数'],
+            datasets: [{
+                label: '{{ model.name }}',
+                data: [
+                    {{ (model.accuracy or 0) }},
+                    {{ (model.precision or 0) }},
+                    {{ (model.recall or 0) }},
+                    {{ (model.f1_score or 0) }},
+                ],
+                backgroundColor: 'rgba(78, 115, 223, 0.2)',
+                borderColor: '#4e73df',
+                borderWidth: 2,
+                pointBackgroundColor: '#4e73df',
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: { r: { beginAtZero: true, max: 1, ticks: { stepSize: 0.2 } } },
+            plugins: { legend: { display: false } }
+        }
+    });
+})();
+
+// 训练历史折线图 (双Y轴: Accuracy + Loss 或 MSE + R²)
+{% if model.training_job and model.training_job.metrics_history %}
+(function() {
+    var ctx = document.getElementById('trainingHistoryChart').getContext('2d');
+    var history = {{ model.training_job.metrics_history | tojson }};
+    var isRegression = {{ 'true' if model.model_type == 'regression' else 'false' }};
+
+    // 通用取值函数 — 兼容多种键名 (train_accuracy/accuracy/acc 等)
+    function pickVal(m, keys) {
+        for (var i = 0; i < keys.length; i++) {
+            var v = m[keys[i]];
+            if (v !== undefined && v !== null && !isNaN(v)) return v;
+        }
+        return null;
+    }
+
+    var epochs = history.map(function(h) { return h.epoch || ''; });
+
+    var datasets;
+    var useY1 = false;
+    if (isRegression) {
+        datasets = [
+            { label: 'MSE', data: history.map(function(h) { return pickVal(h, ['train_mse', 'mse']); }), borderColor: '#e74a3b', tension: 0.3, fill: false, spanGaps: true },
+            { label: 'R²', data: history.map(function(h) { return pickVal(h, ['train_r2', 'r2']); }), borderColor: '#1cc88a', tension: 0.3, fill: false, spanGaps: true },
+        ];
+    } else {
+        var lossData = history.map(function(h) { return pickVal(h, ['loss', 'train_loss']); });
+        useY1 = lossData.some(function(v) { return v !== null; }); // 仅当有 loss 数据时才开双轴
+        datasets = [
+            { label: 'Accuracy', data: history.map(function(h) { return pickVal(h, ['train_accuracy', 'accuracy', 'acc']); }), borderColor: '#1cc88a', tension: 0.3, fill: false, spanGaps: true },
+        ];
+        if (useY1) {
+            datasets.push({ label: 'Loss', data: lossData, borderColor: '#e74a3b', tension: 0.3, fill: false, yAxisID: 'y1', spanGaps: true });
+        }
+    }
+
+    var scalesConfig = {
+        y: { beginAtZero: false, title: { display: true, text: 'Score' } }
+    };
+    if (useY1) {
+        scalesConfig.y1 = { position: 'right', beginAtZero: true, title: { display: true, text: 'Loss' }, grid: { drawOnChartArea: false } };
+    }
+
+    new Chart(ctx, {
+        type: 'line',
+        data: { labels: epochs, datasets: datasets },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { intersect: false, mode: 'index' },
+            plugins: { legend: { position: 'top' } },
+            scales: scalesConfig
+        }
+    });
+})();
+{% endif %}
+</script>
 {% endblock %}

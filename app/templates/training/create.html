@@ -1,36 +1,459 @@
 {% extends "base.html" %}
-{% block title %}新建训练任务{% endblock %}
+{% block title %}创建训练任务{% endblock %}
 
 {% block content %}
-<h2><i class="bi bi-plus-circle"></i> 新建训练任务</h2>
+<nav aria-label="breadcrumb">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="{{ url_for('training.list_jobs') }}">训练任务</a></li>
+        <li class="breadcrumb-item active">创建任务</li>
+    </ol>
+</nav>
 
-<div class="row mt-4"><div class="col-lg-8"><div class="card"><div class="card-body">
-<form method="POST">
-    <div class="mb-3"><label class="form-label">任务名称 <span class="text-danger">*</span></label><input type="text" name="name" class="form-control" required placeholder="例如: MNIST-CNN 训练"></div>
-    <div class="mb-3"><label class="form-label">描述</label><textarea name="description" class="form-control" rows="2"></textarea></div>
-    <div class="row">
-        <div class="col-md-4 mb-3"><label class="form-label">任务类型</label><select name="task_type" class="form-select">
-            <option value="training">训练</option><option value="fine_tuning">微调</option><option value="evaluation">评估</option><option value="inference">推理</option><option value="data_preprocessing">数据预处理</option>
-        </select></div>
-        <div class="col-md-4 mb-3"><label class="form-label">框架</label><select name="framework" class="form-select">
-            <option value="">不指定</option>{% for f in ['PyTorch','TensorFlow','scikit-learn','Keras','JAX','ONNX'] %}<option value="{{ f }}">{{ f }}</option>{% endfor %}
-        </select></div>
-        <div class="col-md-4 mb-3"><label class="form-label">数据集</label><select name="dataset_id" class="form-select">
-            <option value="">不指定</option>{% for ds in datasets %}<option value="{{ ds.id }}">{{ ds.name }}</option>{% endfor %}
-        </select></div>
+<h4 class="mb-4">
+    <i class="bi bi-plus-circle"></i> 创建训练任务
+    <a href="{{ url_for('training.hyperparameter_tuning') }}" class="btn btn-outline-warning btn-sm float-end">
+        <i class="bi bi-sliders me-1"></i>超参数调优
+    </a>
+</h4>
+
+<form method="POST" action="{{ url_for('training.create_job') }}" id="createJobForm">
+    <!-- 基本信息 -->
+    <div class="card mb-4">
+        <div class="card-header"><h5 class="mb-0">基本信息</h5></div>
+        <div class="card-body">
+            <div class="mb-3">
+                <label class="form-label fw-bold">任务名称 * <i id="nameAiIcon" class="bi bi-robot text-info d-none"></i></label>
+                <input type="text" name="name" id="jobNameInput" class="form-control" placeholder="例如: 鸢尾花分类-随机森林" required>
+                <small id="nameHint" class="text-muted d-none">AI 已自动填充，可手动修改</small>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">描述 <i id="descAiIcon" class="bi bi-robot text-info d-none"></i></label>
+                <textarea name="description" id="jobDescInput" class="form-control" rows="2" placeholder="任务描述 (可选)"></textarea>
+                <small id="descHint" class="text-muted d-none">AI 已自动填充，可手动修改</small>
+            </div>
+        </div>
     </div>
-    <hr><h6>训练参数</h6>
-    <div class="row">
-        <div class="col-md-4 mb-3"><label class="form-label">Epochs</label><input type="number" name="total_epochs" class="form-control" value="0"></div>
-        <div class="col-md-4 mb-3"><label class="form-label">Steps</label><input type="number" name="total_steps" class="form-control" value="0"></div>
+
+    <!-- 数据集选择 -->
+    <div class="card mb-4">
+        <div class="card-header"><h5 class="mb-0">选择数据集 *</h5></div>
+        <div class="card-body">
+            {% if datasets %}
+            <select name="dataset_id" class="form-select" id="datasetSelect" required>
+                <option value="">-- 请选择数据集 --</option>
+                {% for ds in datasets %}
+                <option value="{{ ds.id }}" data-columns="{{ ds.columns|tojson|forceescape if ds.columns else '[]' }}">
+                    {{ ds.name }} ({{ ds.file_format }}, {{ ds.file_size_mb }} MB{% if ds.row_count %}, {{ ds.row_count }} 行{% endif %})
+                </option>
+                {% endfor %}
+            </select>
+            <div id="datasetInfo" class="mt-2 text-muted small"></div>
+            {% else %}
+            <div class="alert alert-warning mb-0">
+                暂无数据集，请先<a href="{{ url_for('datasets.create_dataset') }}">上传数据集</a>。
+            </div>
+            {% endif %}
+        </div>
     </div>
-    <hr><h6>资源配置</h6>
-    <div class="row">
-        <div class="col-md-4 mb-3"><label class="form-label">GPU 数量</label><input type="number" name="gpu_count" class="form-control" value="0" min="0"></div>
-        <div class="col-md-4 mb-3"><label class="form-label">CPU 核心数</label><input type="number" name="cpu_cores" class="form-control" value="1" min="1"></div>
-        <div class="col-md-4 mb-3"><label class="form-label">内存 (GB)</label><input type="number" name="memory_gb" class="form-control" value="4.0" step="0.5" min="0.5"></div>
+
+    <!-- 模型配置 -->
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">模型配置</h5>
+            <span id="aiBadge" class="badge bg-info d-none">
+                <i class="bi bi-robot"></i> AI 智能推荐
+            </span>
+        </div>
+        <div class="card-body">
+            <!-- AI 推荐理由 -->
+            <div id="aiReasonBox" class="alert alert-info d-none mb-3 py-2">
+                <small><i class="bi bi-lightbulb-fill me-1"></i><span id="aiReasonText"></span></small>
+            </div>
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label fw-bold">任务类型 * <i id="taskTypeAiIcon" class="bi bi-robot text-info d-none"></i></label>
+                    <select name="ml_task_type" class="form-select" id="taskTypeSelect">
+                        <option value="classification">分类 (Classification)</option>
+                        <option value="regression">回归 (Regression)</option>
+                    </select>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label fw-bold">算法 * <i id="algoAiIcon" class="bi bi-robot text-info d-none"></i></label>
+                    <select name="algorithm" class="form-select" id="algorithmSelect"></select>
+                    <small id="algoRecommendBadge" class="text-info d-none"><i class="bi bi-check-circle-fill"></i> AI推荐</small>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">目标列 (target) <i id="targetAiIcon" class="bi bi-robot text-info d-none"></i></label>
+                    <select name="target_column" class="form-select" id="targetColumnSelect">
+                        <option value="">-- 自动检测 (最后一列) --</option>
+                    </select>
+                    <small class="text-muted" id="targetHint">留空则自动使用数据集最后一列</small>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">测试集比例: <strong id="testSizeLabel">0.2</strong></label>
+                    <input type="range" name="test_size" class="form-range" min="0.1" max="0.4" step="0.05" value="0.2" id="testSizeSlider">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Epoch 数</label>
+                    <input type="number" name="total_epochs" class="form-control" value="1" min="1" max="200" id="epochInput">
+                    <small class="text-muted">sklearn 模型固定为 1</small>
+                </div>
+            </div>
+            <!-- 备用算法推荐 -->
+            <div id="altAlgosBox" class="d-none mt-2">
+                <small class="text-muted">备选算法：</small>
+                <span id="altAlgosList"></span>
+            </div>
+        </div>
     </div>
-    <button type="submit" class="btn btn-info btn-lg"><i class="bi bi-check-circle"></i> 创建任务</button>
+
+    <!-- 高级选项 -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <a class="text-decoration-none d-flex justify-content-between align-items-center" data-bs-toggle="collapse" href="#advancedOptions">
+                <h5 class="mb-0">高级选项</h5>
+                <i class="bi bi-chevron-down"></i>
+            </a>
+        </div>
+        <div class="collapse" id="advancedOptions">
+            <div class="card-body">
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <label class="form-label">框架</label>
+                        <select name="framework" class="form-select">
+                            <option value="sklearn">scikit-learn</option>
+                            <option value="pytorch">PyTorch</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">任务类型标签</label>
+                        <select name="task_type" class="form-select">
+                            <option value="training">训练</option>
+                            <option value="fine_tuning">微调</option>
+                            <option value="evaluation">评估</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">GPU</label>
+                        <input type="number" name="gpu_count" class="form-control" value="0" min="0">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">CPU 核心</label>
+                        <input type="number" name="cpu_cores" class="form-control" value="2" min="1">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="d-flex gap-2 mb-5">
+        <button type="submit" class="btn btn-primary btn-lg">
+            <i class="bi bi-save"></i> 创建任务
+        </button>
+        <button type="button" class="btn btn-success btn-lg" id="createAndStartBtn">
+            <i class="bi bi-play-fill"></i> 创建并开始训练
+        </button>
+        <a href="{{ url_for('training.list_jobs') }}" class="btn btn-outline-secondary btn-lg">取消</a>
+    </div>
 </form>
-</div></div></div></div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const ALGORITHMS = {
+    classification: [
+        {value: 'random_forest', label: '随机森林 (Random Forest)'},
+        {value: 'logistic_regression', label: '逻辑回归 (Logistic Regression)'},
+        {value: 'svm', label: '支持向量机 (SVM)'},
+        {value: 'knn', label: 'K近邻 (KNN)'},
+        {value: 'gradient_boosting', label: '梯度提升 (Gradient Boosting)'},
+    ],
+    regression: [
+        {value: 'random_forest_regressor', label: '随机森林回归 (Random Forest)'},
+        {value: 'linear_regression', label: '线性回归 (Linear Regression)'},
+        {value: 'svr', label: '支持向量回归 (SVR)'},
+        {value: 'gradient_boosting_regressor', label: '梯度提升回归 (Gradient Boosting)'},
+    ]
+};
+
+const sklearnAlgos = ['random_forest', 'gradient_boosting', 'random_forest_regressor',
+    'gradient_boosting_regressor', 'svm', 'svr', 'logistic_regression', 'linear_regression', 'knn'];
+
+// 算法中文名映射
+const ALGO_LABELS = {};
+Object.values(ALGORITHMS).forEach(arr => arr.forEach(a => { ALGO_LABELS[a.value] = a.label; }));
+
+function updateAlgorithms() {
+    const taskType = document.getElementById('taskTypeSelect').value;
+    const algoSelect = document.getElementById('algorithmSelect');
+    const algos = ALGORITHMS[taskType] || ALGORITHMS.classification;
+    algoSelect.innerHTML = algos.map(a =>
+        `<option value="${a.value}">${a.label}</option>`).join('');
+    updateEpoch();
+}
+
+function updateEpoch() {
+    const algo = document.getElementById('algorithmSelect').value;
+    const epochInput = document.getElementById('epochInput');
+    if (sklearnAlgos.includes(algo)) {
+        epochInput.value = 1;
+        epochInput.disabled = true;
+    } else {
+        epochInput.disabled = false;
+        if (epochInput.value == 1) epochInput.value = 10;
+    }
+}
+
+document.getElementById('taskTypeSelect').addEventListener('change', updateAlgorithms);
+document.getElementById('algorithmSelect').addEventListener('change', updateEpoch);
+document.getElementById('testSizeSlider').addEventListener('input', function() {
+    document.getElementById('testSizeLabel').textContent = this.value;
+});
+
+// ========== AI 自动配置 ==========
+let lastAutoConfigId = null;  // 防止重复调用
+let autoConfigTimer = null;
+
+document.getElementById('datasetSelect').addEventListener('change', function() {
+    const option = this.selectedOptions[0];
+    const datasetId = this.value;
+    const targetSelect = document.getElementById('targetColumnSelect');
+    const info = document.getElementById('datasetInfo');
+
+    // 1. 更新列信息
+    if (option && option.dataset.columns) {
+        try {
+            const cols = JSON.parse(option.dataset.columns);
+            if (cols.length) {
+                info.innerHTML = '<strong>数据列 (' + cols.length + '):</strong> ' + cols.join(', ');
+                targetSelect.innerHTML = '<option value="">-- 自动检测 --</option>' +
+                    cols.map(c => '<option value="' + c + '">' + c + '</option>').join('');
+            }
+        } catch(e) { info.textContent = ''; }
+    } else {
+        info.textContent = '选择数据集后可查看列信息';
+    }
+
+    // 2. AI 自动配置
+    if (!datasetId) {
+        hideAiRecommendation();
+        return;
+    }
+
+    // 显示加载状态
+    showAiLoading();
+
+    // 防抖: 延迟300ms调用API
+    if (autoConfigTimer) clearTimeout(autoConfigTimer);
+    autoConfigTimer = setTimeout(() => fetchAutoConfig(datasetId), 300);
+});
+
+function showAiLoading() {
+    const badge = document.getElementById('aiBadge');
+    badge.classList.remove('d-none', 'bg-info');
+    badge.classList.add('bg-secondary');
+    badge.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>分析中...';
+    document.getElementById('algoRecommendBadge').classList.add('d-none');
+    document.getElementById('altAlgosBox').classList.add('d-none');
+    document.getElementById('aiReasonBox').classList.add('d-none');
+    hideAiIcons();
+}
+
+function hideAiRecommendation() {
+    document.getElementById('aiBadge').classList.add('d-none');
+    document.getElementById('algoRecommendBadge').classList.add('d-none');
+    document.getElementById('altAlgosBox').classList.add('d-none');
+    document.getElementById('aiReasonBox').classList.add('d-none');
+    hideAiIcons();
+}
+
+function hideAiIcons() {
+    ['taskTypeAiIcon', 'algoAiIcon', 'targetAiIcon', 'nameAiIcon', 'descAiIcon'].forEach(id => {
+        document.getElementById(id).classList.add('d-none');
+    });
+    document.getElementById('nameHint').classList.add('d-none');
+    document.getElementById('descHint').classList.add('d-none');
+}
+
+function fetchAutoConfig(datasetId) {
+    fetch('/api/datasets/' + datasetId + '/auto-config')
+        .then(resp => {
+            if (!resp.ok) throw new Error('API returned ' + resp.status);
+            return resp.json();
+        })
+        .then(data => {
+            if (!data.success) {
+                showAiError(data.message || '分析失败');
+                return;
+            }
+            applyAutoConfig(data.data);
+        })
+        .catch(err => {
+            console.error('Auto-config failed:', err);
+            showAiError('AI分析暂时不可用，请手动配置');
+        });
+}
+
+function applyAutoConfig(config) {
+    // 任务类型
+    const taskType = config.ml_task_type || 'classification';
+    document.getElementById('taskTypeSelect').value = taskType;
+    updateAlgorithms();  // 刷新算法下拉列表
+
+    // 算法 (小延迟确保算法列表已更新)
+    setTimeout(() => {
+        const algoSelect = document.getElementById('algorithmSelect');
+        // 检查推荐的算法是否在下拉列表中
+        if (config.algorithm && algoSelect.querySelector(`option[value="${config.algorithm}"]`)) {
+            algoSelect.value = config.algorithm;
+        }
+        updateEpoch();
+    }, 50);
+
+    // 任务名称
+    if (config.suggested_name) {
+        const nameInput = document.getElementById('jobNameInput');
+        // 仅在名称为空或之前是AI填充时覆盖
+        if (!nameInput.value || nameInput.dataset.aiFilled === 'true') {
+            nameInput.value = config.suggested_name;
+            nameInput.dataset.aiFilled = 'true';
+            document.getElementById('nameAiIcon').classList.remove('d-none');
+            document.getElementById('nameHint').classList.remove('d-none');
+        }
+    }
+
+    // 任务描述
+    if (config.suggested_description) {
+        const descInput = document.getElementById('jobDescInput');
+        if (!descInput.value || descInput.dataset.aiFilled === 'true') {
+            descInput.value = config.suggested_description;
+            descInput.dataset.aiFilled = 'true';
+            document.getElementById('descAiIcon').classList.remove('d-none');
+            document.getElementById('descHint').classList.remove('d-none');
+        }
+    }
+
+    // 目标列
+    if (config.target_column) {
+        const targetSelect = document.getElementById('targetColumnSelect');
+        if (targetSelect.querySelector(`option[value="${config.target_column}"]`)) {
+            targetSelect.value = config.target_column;
+        }
+        document.getElementById('targetHint').textContent =
+            'AI推荐: ' + config.target_column + ' (自动检测)';
+    }
+
+    // 测试集比例
+    document.getElementById('testSizeSlider').value = config.test_size || 0.2;
+    document.getElementById('testSizeLabel').textContent = config.test_size || 0.2;
+
+    // Epochs
+    const epochInput = document.getElementById('epochInput');
+    if (!epochInput.disabled) {
+        epochInput.value = config.total_epochs || 10;
+    }
+
+    // 框架
+    const frameworkSelect = document.querySelector('select[name="framework"]');
+    if (frameworkSelect && config.framework) {
+        const fwOpt = frameworkSelect.querySelector(`option[value="${config.framework}"]`);
+        if (fwOpt) frameworkSelect.value = config.framework;
+    }
+
+    // UI: 显示AI推荐标识
+    document.getElementById('aiBadge').classList.remove('d-none', 'bg-secondary');
+    document.getElementById('aiBadge').classList.add('bg-info');
+    document.getElementById('aiBadge').innerHTML = '<i class="bi bi-robot"></i> AI 智能推荐';
+
+    ['taskTypeAiIcon', 'algoAiIcon', 'targetAiIcon'].forEach(id => {
+        document.getElementById(id).classList.remove('d-none');
+    });
+    document.getElementById('algoRecommendBadge').classList.remove('d-none');
+
+    // 推荐理由
+    if (config.reason) {
+        document.getElementById('aiReasonText').textContent = config.reason;
+        const reasonBox = document.getElementById('aiReasonBox');
+        reasonBox.classList.remove('d-none');
+        // 类别警告用 warning 样式
+        if (config.category_warning) {
+            reasonBox.classList.remove('alert-info');
+            reasonBox.classList.add('alert-warning');
+        } else {
+            reasonBox.classList.remove('alert-warning');
+            reasonBox.classList.add('alert-info');
+        }
+    }
+
+    // 备选算法
+    if (config.alternative_algorithms && config.alternative_algorithms.length > 0) {
+        const altList = document.getElementById('altAlgosList');
+        altList.innerHTML = config.alternative_algorithms.map(a => {
+            const label = ALGO_LABELS[a.value] || a.display || a.value;
+            return '<button type="button" class="btn btn-outline-info btn-sm ms-1 mb-1 alt-algo-btn" ' +
+                'data-algo="' + a.value + '" data-task="' + config.ml_task_type + '" ' +
+                'title="AI推荐置信度: ' + Math.round((a.confidence||0.5)*100) + '%">' +
+                label + ' <span class="badge bg-light text-dark">' +
+                Math.round((a.confidence||0.5)*100) + '%</span></button>';
+        }).join('');
+        document.getElementById('altAlgosBox').classList.remove('d-none');
+
+        // 点击备选算法按钮切换算法
+        altList.querySelectorAll('.alt-algo-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const algo = this.dataset.algo;
+                const task = this.dataset.task;
+                document.getElementById('taskTypeSelect').value = task;
+                updateAlgorithms();
+                setTimeout(() => {
+                    document.getElementById('algorithmSelect').value = algo;
+                    updateEpoch();
+                }, 50);
+            });
+        });
+    }
+
+    // 数据集信息 tooltip
+    if (config.dataset_info) {
+        const di = config.dataset_info;
+        let infoHtml = '<strong>AI 分析:</strong> ';
+        const parts = [];
+        parts.push(di.n_samples.toLocaleString() + ' 样本');
+        if (di.n_classes > 0) parts.push(di.n_classes + ' 类');
+        if (di.missing_rate > 0) parts.push('缺失率 ' + (di.missing_rate*100).toFixed(1) + '%');
+        if (di.imbalanced) parts.push('<span class="text-warning">⚠ 不平衡</span>');
+        document.getElementById('datasetInfo').innerHTML += ' | ' + parts.join(' | ');
+    }
+}
+
+function showAiError(msg) {
+    document.getElementById('aiBadge').classList.remove('d-none', 'bg-info');
+    document.getElementById('aiBadge').classList.add('bg-warning', 'text-dark');
+    document.getElementById('aiBadge').innerHTML = '<i class="bi bi-exclamation-triangle"></i> ' + msg;
+    document.getElementById('algoRecommendBadge').classList.add('d-none');
+}
+
+document.getElementById('createAndStartBtn').addEventListener('click', function() {
+    const input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = 'start_immediately';
+    input.value = 'on';
+    document.getElementById('createJobForm').appendChild(input);
+    document.getElementById('createJobForm').submit();
+});
+
+updateAlgorithms();
+
+// 用户手动编辑名称/描述时清除AI标记，避免切换数据集后被覆盖
+document.getElementById('jobNameInput').addEventListener('input', function() {
+    this.dataset.aiFilled = 'false';
+    document.getElementById('nameAiIcon').classList.add('d-none');
+    document.getElementById('nameHint').classList.add('d-none');
+});
+document.getElementById('jobDescInput').addEventListener('input', function() {
+    this.dataset.aiFilled = 'false';
+    document.getElementById('descAiIcon').classList.add('d-none');
+    document.getElementById('descHint').classList.add('d-none');
+});
+</script>
 {% endblock %}

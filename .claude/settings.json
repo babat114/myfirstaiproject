@@ -1,0 +1,11 @@
+{
+    "hooks": {
+        "PostToolUse": [
+            {
+                "matcher": "",
+                "hooks": []
+            }
+        ]
+    },
+    "extraSystemPrompt": "你正在开发 myfirstaiproject (AI模型训练管理平台)。项目 Skill 文件位于 .claude/SKILL.md — 在执行任何开发任务前先阅读它。遵循其中记录的架构模式、已修复问题和注意事项。"
+}

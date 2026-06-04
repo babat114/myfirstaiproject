@@ -15,8 +15,8 @@
     <div class="mb-3"><label class="form-label">描述</label><textarea name="description" class="form-control" rows="3">{{ dataset.description or '' }}</textarea></div>
     <div class="row">
         <div class="col-md-6 mb-3"><label class="form-label">分类</label><select name="category" class="form-select">
-            {% for cat in ['image','text','tabular','audio','video','other'] %}
-            <option value="{{ cat }}" {% if dataset.category == cat %}selected{% endif %}>{{ cat }}</option>{% endfor %}
+            {% for val, label in category_labels.items() %}
+            <option value="{{ val }}" {% if dataset.category == val %}selected{% endif %}>{{ label }}</option>{% endfor %}
         </select></div>
         <div class="col-md-6 mb-3"><label class="form-label">版本</label><input type="text" name="version" class="form-control" value="{{ dataset.version }}"></div>
     </div>

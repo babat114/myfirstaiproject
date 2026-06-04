@@ -1,62 +1,734 @@
 {% extends "base.html" %}
-{% block title %}{{ job.name }}{% endblock %}
+{% block title %}{{ job.name }} - 训练详情{% endblock %}
 
 {% block content %}
-<nav aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="{{ url_for('training.list_jobs') }}">训练任务</a></li><li class="breadcrumb-item active">{{ job.name }}</li></ol></nav>
+<nav aria-label="breadcrumb">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="{{ url_for('training.list_jobs') }}">训练任务</a></li>
+        <li class="breadcrumb-item active">{{ job.name }}</li>
+    </ol>
+</nav>
 
-<!-- 任务控制 -->
-<div class="d-flex justify-content-between align-items-center mb-3">
-    <h4>{{ job.name }}</h4>
+<div class="d-flex justify-content-between align-items-center mb-4">
     <div>
+        <h4 class="mb-1"><i class="bi bi-play-circle"></i> {{ job.name }}</h4>
+        {% if job.description %}<small class="text-muted">{{ job.description }}</small>{% endif %}
+    </div>
+    <div class="btn-group">
         {% if job.status == 'queued' %}
-        <form method="POST" action="{{ url_for('training.start_job', job_id=job.id) }}" class="d-inline"><button class="btn btn-success"><i class="bi bi-play-fill"></i> 启动</button></form>
+        <form method="POST" action="{{ url_for('training.start_job', job_id=job.id) }}" class="d-inline">
+            <button type="submit" class="btn btn-success btn-lg"><i class="bi bi-play-fill"></i> 启动训练</button>
+        </form>
         {% elif job.status == 'running' %}
-        <form method="POST" action="{{ url_for('training.pause_job', job_id=job.id) }}" class="d-inline"><button class="btn btn-warning"><i class="bi bi-pause-fill"></i> 暂停</button></form>
-        <form method="POST" action="{{ url_for('training.cancel_job', job_id=job.id) }}" class="d-inline"><button class="btn btn-danger"><i class="bi bi-stop-fill"></i> 取消</button></form>
+        <button type="button" class="btn btn-warning btn-lg" id="pauseBtn" onclick="controlJob('pause')">
+            <i class="bi bi-pause-fill"></i> <span id="pauseBtnText">暂停</span>
+        </button>
+        <button type="button" class="btn btn-outline-danger btn-lg" id="cancelBtn" onclick="controlJob('cancel')">
+            <i class="bi bi-stop-fill"></i> 取消
+        </button>
         {% elif job.status == 'paused' %}
-        <form method="POST" action="{{ url_for('training.start_job', job_id=job.id) }}" class="d-inline"><button class="btn btn-success"><i class="bi bi-play-fill"></i> 恢复</button></form>
+        <button type="button" class="btn btn-success btn-lg" id="resumeBtn" onclick="controlJob('resume')">
+            <i class="bi bi-play-fill"></i> 恢复训练
+        </button>
+        <button type="button" class="btn btn-outline-danger btn-lg" id="cancelBtn" onclick="controlJob('cancel')">
+            <i class="bi bi-stop-fill"></i> 取消
+        </button>
         {% endif %}
-        <form method="POST" action="{{ url_for('training.delete_job', job_id=job.id) }}" class="d-inline" onsubmit="return confirm('确定删除此任务？');"><button class="btn btn-outline-danger"><i class="bi bi-trash"></i></button></form>
+        {# 重新训练按钮 — 适用于已完成/失败/取消/暂停状态 #}
+        {% if job.status in ('completed', 'failed', 'cancelled') %}
+        <button type="button" class="btn btn-success" onclick="confirmRetrain()" title="使用原参数重新训练">
+            <i class="bi bi-arrow-repeat"></i> 重新训练
+        </button>
+        {% endif %}
+        {% if job.status in ('completed', 'failed', 'cancelled', 'paused') %}
+        <button type="button" class="btn btn-outline-success" onclick="toggleParamForm()" title="调整参数后重新训练">
+            <i class="bi bi-sliders"></i> 调参重训
+        </button>
+        {% endif %}
+        {% if job.model %}
+        <a href="{{ url_for('models.model_detail', model_id=job.model.id) }}" class="btn btn-outline-primary">
+            <i class="bi bi-cpu"></i> 查看模型
+        </a>
+        {% endif %}
+        <form method="POST" action="{{ url_for('training.delete_job', job_id=job.id) }}" class="d-inline" data-confirm="确定删除此训练任务吗？此操作不可撤销。">
+            <button type="submit" class="btn btn-outline-danger"><i class="bi bi-trash"></i></button>
+        </form>
     </div>
 </div>
 
-<div class="row g-3">
-    <div class="col-lg-8">
-        <!-- 进度条 -->
-        <div class="card mb-3"><div class="card-body">
-            <h6>训练进度</h6>
-            <div class="progress" style="height:25px"><div class="progress-bar progress-bar-striped bg-{{ 'success' if job.progress_percent == 100 else 'info' }} {% if job.status == 'running' %}progress-bar-animated{% endif %}"
-                style="width:{{ job.progress_percent }}%">{{ job.progress_percent }}%</div></div>
-            <div class="d-flex justify-content-between mt-2"><small>Epoch: {{ job.current_epoch }}/{{ job.total_epochs }}</small><small>Step: {{ job.current_step }}/{{ job.total_steps }}</small></div>
-        </div></div>
+{# 参数调整表单 (默认隐藏) #}
+<div class="card mb-4" id="paramFormCard" style="display:none;">
+    <div class="card-header bg-light d-flex justify-content-between align-items-center">
+        <h6 class="mb-0"><i class="bi bi-sliders"></i> 调整训练参数</h6>
+        <button type="button" class="btn-close" onclick="toggleParamForm()" aria-label="关闭"></button>
+    </div>
+    <div class="card-body">
+        {% set hparams = (job.model.hyperparameters_dict if job.model else {}) %}
+        <form method="POST" action="{{ url_for('training.retrain_job_with_params', job_id=job.id) }}" id="paramRetrainForm">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label">Learning Rate <small class="text-muted">(学习率)</small></label>
+                    <input type="number" class="form-control form-control-sm" name="learning_rate" step="0.0001"
+                           placeholder="如 0.001" value="{{ hparams.get('learning_rate', '') }}">
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Batch Size <small class="text-muted">(批大小)</small></label>
+                    <input type="number" class="form-control form-control-sm" name="batch_size"
+                           placeholder="如 64" value="{{ hparams.get('batch_size', '') }}">
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Epochs <small class="text-muted">(训练轮数)</small></label>
+                    <input type="number" class="form-control form-control-sm" name="epochs"
+                           placeholder="如 10" value="{{ job.total_epochs }}">
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Hidden Layers <small class="text-muted">(逗号分隔, 如 128,64,32)</small></label>
+                    <input type="text" class="form-control form-control-sm" name="hidden_layers_str"
+                           placeholder="128,64,32" value="{{ hparams.get('hidden_layers', [])|join(',') }}">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Dropout <small class="text-muted">(0~1)</small></label>
+                    <input type="number" class="form-control form-control-sm" name="dropout" step="0.05" min="0" max="0.9"
+                           placeholder="如 0.3" value="{{ hparams.get('dropout', '') }}">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Test Size <small class="text-muted">(0~1)</small></label>
+                    <input type="number" class="form-control form-control-sm" name="test_size" step="0.05" min="0.1" max="0.5"
+                           placeholder="如 0.2" value="{{ hparams.get('test_size', '') }}">
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Algorithm <small class="text-muted">(算法)</small></label>
+                    <select class="form-select form-select-sm" name="algorithm">
+                        <option value="">保持原算法</option>
+                        <optgroup label="分类">
+                            <option value="random_forest">Random Forest</option>
+                            <option value="gradient_boosting">Gradient Boosting</option>
+                            <option value="logistic_regression">Logistic Regression</option>
+                            <option value="svm">SVM</option>
+                            <option value="knn">KNN</option>
+                            <option value="decision_tree">Decision Tree</option>
+                        </optgroup>
+                        <optgroup label="回归">
+                            <option value="random_forest_regressor">RF Regressor</option>
+                            <option value="gradient_boosting_regressor">GB Regressor</option>
+                            <option value="ridge">Ridge</option>
+                            <option value="knn_regressor">KNN Regressor</option>
+                        </optgroup>
+                        <optgroup label="深度学习">
+                            <option value="mlp">PyTorch MLP</option>
+                        </optgroup>
+                    </select>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Framework <small class="text-muted">(框架)</small></label>
+                    <select class="form-select form-select-sm" name="framework">
+                        <option value="">保持原框架</option>
+                        <option value="sklearn">scikit-learn</option>
+                        <option value="pytorch">PyTorch</option>
+                        <option value="tensorflow">TensorFlow</option>
+                    </select>
+                </div>
+            </div>
+            <div class="d-flex gap-2 mt-3">
+                <button type="submit" class="btn btn-primary">
+                    <i class="bi bi-arrow-repeat"></i> 使用新参数重新训练
+                </button>
+                <button type="button" class="btn btn-outline-secondary" onclick="toggleParamForm()">取消</button>
+            </div>
+        </form>
+    </div>
+</div>
 
-        <!-- 日志 -->
-        <div class="card"><div class="card-header"><h6 class="mb-0">训练日志</h6></div><div class="card-body">
-            <pre class="bg-dark text-light p-3 rounded" style="max-height:300px;overflow-y:auto;font-size:13px;">{{ job.log_text or '暂无日志输出...' }}</pre>
-        </div></div>
+<div class="row g-4">
+    <!-- 左侧: 进度 + 图表 + 日志 -->
+    <div class="col-lg-8">
+        <!-- 进度卡片 -->
+        <div class="card mb-4">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h6 class="mb-0">训练进度</h6>
+                    <span id="statusBadge" class="badge fs-6 bg-{{ 'success' if job.status == 'completed' else 'warning' if job.status == 'running' else 'danger' if job.status == 'failed' else 'info' if job.status == 'queued' else 'secondary' }}">
+                        {{ job.status }}
+                    </span>
+                </div>
+                <div class="progress mb-2" style="height: 32px;">
+                    <div id="progressBar" class="progress-bar progress-bar-striped {% if job.status == 'running' %}progress-bar-animated{% endif %} bg-gradient"
+                         style="width:{{ job.progress_percent }}%; transition: width 0.5s ease;">
+                        <span id="progressText" class="fw-bold">{{ job.progress_percent }}%</span>
+                    </div>
+                </div>
+                <div class="d-flex justify-content-between text-muted small">
+                    <span>Epoch: <strong id="epochInfo">{{ job.current_epoch }} / {{ job.total_epochs }}</strong></span>
+                    <span>耗时: <strong id="durationInfo">{{ job.duration_display }}</strong></span>
+                    <span id="liveIndicator" class="{% if job.status != 'running' %}d-none{% endif %}">
+                        <span class="loading-pulse text-success">●</span> 实时更新中
+                    </span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 关键帧时间线 (epoch级进度快照) -->
+        <div class="card mb-4" id="keyframesCard">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h6 class="mb-0"><i class="bi bi-film"></i> 训练关键帧</h6>
+                <small class="text-muted" id="keyframeCount">-</small>
+            </div>
+            <div class="card-body p-2">
+                <div id="keyframeTimeline" class="d-flex flex-wrap gap-2" style="min-height:48px; align-items:center;">
+                    <span class="text-muted small">{% if job.status in ('running', 'queued') %}等待训练数据...{% elif not job.metrics_history %}暂无关键帧数据{% else %}加载中...{% endif %}</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 图表区域 -->
+        <div class="card mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h6 class="mb-0"><i class="bi bi-graph-up"></i> 训练曲线</h6>
+                <div class="btn-group btn-group-sm" role="group">
+                    <button type="button" class="btn btn-outline-secondary active" onclick="switchChartTab('metrics')" id="tabMetrics">指标</button>
+                    <button type="button" class="btn btn-outline-secondary" onclick="switchChartTab('loss')" id="tabLoss">Loss</button>
+                </div>
+            </div>
+            <div class="card-body">
+                <div id="chartMetricsContainer">
+                    <canvas id="metricsChart" height="200"></canvas>
+                </div>
+                <div id="chartLossContainer" style="display:none;">
+                    <canvas id="lossChart" height="200"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- 日志区域 -->
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h6 class="mb-0"><i class="bi bi-terminal"></i> 训练日志</h6>
+                <div>
+                    <button type="button" class="btn btn-sm btn-outline-secondary me-1" onclick="toggleAutoScroll()" id="autoScrollBtn" title="自动滚屏">
+                        <i class="bi bi-arrow-down-circle"></i>
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="clearLog()" title="清空显示">
+                        <i class="bi bi-eraser"></i>
+                    </button>
+                    <small class="text-muted ms-2" id="logStatus">
+                        {% if job.status == 'running' %}<span class="loading-pulse text-success">●</span> 实时{% endif %}
+                    </small>
+                </div>
+            </div>
+            <div class="card-body p-0">
+                <pre id="logArea" class="bg-dark text-light p-3 m-0 rounded-bottom"
+                     style="max-height: 380px; overflow-y: auto; font-size: 12.5px; line-height: 1.65; font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace;">{{ job.log_text or '等待训练开始...' }}</pre>
+            </div>
+        </div>
     </div>
 
+    <!-- 右侧: 信息面板 -->
     <div class="col-lg-4">
-        <div class="card mb-3"><div class="card-header"><h6 class="mb-0">任务信息</h6></div><div class="card-body">
-            <p><strong>状态:</strong> <span class="badge bg-{{ 'success' if job.status == 'completed' else 'warning' if job.status == 'running' else 'secondary' }}">{{ job.status }}</span></p>
-            <p><strong>类型:</strong> {{ job.task_type }}</p>
-            <p><strong>框架:</strong> {{ job.framework or '未指定' }}</p>
-            {% if job.dataset %}<p><strong>数据集:</strong> <a href="{{ url_for('datasets.dataset_detail', dataset_id=job.dataset.id) }}">{{ job.dataset.name }}</a></p>{% endif %}
-            <p><strong>运行时长:</strong> {{ job.duration_display }}</p>
-            <p><strong>创建时间:</strong> {{ job.created_at.strftime('%Y-%m-%d %H:%M') if job.created_at else '-' }}</p>
-            {% if job.started_at %}<p><strong>开始时间:</strong> {{ job.started_at.strftime('%Y-%m-%d %H:%M') }}</p>{% endif %}
-            {% if job.completed_at %}<p><strong>完成时间:</strong> {{ job.completed_at.strftime('%Y-%m-%d %H:%M') }}</p>{% endif %}
-        </div></div>
+        <!-- 状态面板 -->
+        <div class="card mb-3">
+            <div class="card-header"><h6 class="mb-0"><i class="bi bi-info-circle"></i> 任务信息</h6></div>
+            <div class="card-body">
+                <table class="table table-sm table-borderless mb-0">
+                    <tr><td class="text-muted">状态</td><td><span id="sideStatus" class="badge bg-{{ 'success' if job.status == 'completed' else 'warning' if job.status == 'running' else 'info' }}">{{ job.status }}</span></td></tr>
+                    <tr><td class="text-muted">类型</td><td>{{ job.task_type }}</td></tr>
+                    <tr><td class="text-muted">框架</td><td>{{ job.framework or '未指定' }}</td></tr>
+                    {% if job.dataset %}
+                    <tr><td class="text-muted">数据集</td><td><a href="{{ url_for('datasets.dataset_detail', dataset_id=job.dataset.id) }}">{{ job.dataset.name }}</a></td></tr>
+                    {% endif %}
+                    {% if job.model %}
+                    <tr><td class="text-muted">算法</td><td>{{ job.model.hyperparameters_dict.get('algorithm', '-') }}</td></tr>
+                    <tr><td class="text-muted">ML任务</td><td>{{ job.model.hyperparameters_dict.get('task_type', '-') }}</td></tr>
+                    {% endif %}
+                    <tr><td class="text-muted">耗时</td><td><strong id="sideDuration">{{ job.duration_display }}</strong></td></tr>
+                    <tr><td class="text-muted">创建</td><td>{{ job.created_at.strftime('%m/%d %H:%M') if job.created_at else '-' }}</td></tr>
+                    {% if job.started_at %}<tr><td class="text-muted">开始</td><td>{{ job.started_at.strftime('%m/%d %H:%M') }}</td></tr>{% endif %}
+                    {% if job.completed_at %}<tr><td class="text-muted">完成</td><td>{{ job.completed_at.strftime('%m/%d %H:%M') }}</td></tr>{% endif %}
+                </table>
+            </div>
+        </div>
 
-        <div class="card"><div class="card-header"><h6 class="mb-0">资源配置</h6></div><div class="card-body">
-            <p><strong>GPU:</strong> {{ job.gpu_count }} 个</p>
-            <p><strong>CPU:</strong> {{ job.cpu_cores }} 核</p>
-            <p><strong>内存:</strong> {{ job.memory_gb }} GB</p>
-        </div></div>
+        <!-- 资源 -->
+        <div class="card mb-3">
+            <div class="card-header"><h6 class="mb-0"><i class="bi bi-cpu"></i> 资源配置</h6></div>
+            <div class="card-body">
+                <div class="d-flex justify-content-around text-center">
+                    <div>
+                        <div class="text-muted small">GPU</div>
+                        <strong>{{ job.gpu_count }}</strong>
+                    </div>
+                    <div>
+                        <div class="text-muted small">CPU</div>
+                        <strong>{{ job.cpu_cores }}核</strong>
+                    </div>
+                    <div>
+                        <div class="text-muted small">内存</div>
+                        <strong>{{ job.memory_gb }}GB</strong>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 最终指标 -->
+        <div class="card mb-3" id="finalMetricsCard" style="{% if not job.final_metrics_json %}display:none;{% endif %}">
+            <div class="card-header bg-success text-white"><h6 class="mb-0"><i class="bi bi-trophy"></i> 最终指标</h6></div>
+            <div class="card-body" id="finalMetricsBody">
+                {% if job.final_metrics_json %}
+                <div id="finalMetricsDisplay"></div>
+                {% endif %}
+            </div>
+        </div>
+
+        {# 参数调优引导面板 #}
+        {% if job.status in ('completed', 'failed') and job.metrics_history %}
+        <div class="card mb-3" id="guidanceCard">
+            <div class="card-header d-flex justify-content-between align-items-center" style="cursor:pointer;" onclick="loadGuidance()">
+                <h6 class="mb-0"><i class="bi bi-lightbulb"></i> AI 调参建议</h6>
+                <small class="text-muted" id="guidanceStatus">点击加载</small>
+            </div>
+            <div class="card-body p-2" id="guidanceBody" style="display:none;">
+                <div class="text-center py-3" id="guidanceLoading">
+                    <div class="spinner-border spinner-border-sm text-primary"></div>
+                    <small class="ms-2">分析训练结果中...</small>
+                </div>
+                <div id="guidanceContent"></div>
+            </div>
+        </div>
+        {% endif %}
 
         {% if job.error_message %}
-        <div class="card mt-3 border-danger"><div class="card-header bg-danger text-white"><h6 class="mb-0">错误信息</h6></div><div class="card-body"><pre class="text-danger" style="white-space:pre-wrap;">{{ job.error_message }}</pre></div></div>
+        <div class="card border-danger">
+            <div class="card-header bg-danger text-white"><h6 class="mb-0"><i class="bi bi-exclamation-triangle"></i> 错误</h6></div>
+            <div class="card-body"><pre class="text-danger mb-0 small" style="white-space:pre-wrap;">{{ job.error_message }}</pre></div>
+        </div>
         {% endif %}
     </div>
 </div>
+
+<!-- 隐藏的 CSRF 表单 -->
+<form id="controlForm" method="POST" style="display:none;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+</form>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// ============ 训练详情页 — 实时进度监控 + Chart.js 可视化 ============
+const jobId = {{ job.id }};                           // 训练任务ID
+const isActive = {{ 'true' if job.status in ('running', 'paused') else 'false' }};  // 任务是否活跃 (用于SSE连接)
+const isRegression = {{ 'true' if job.model and job.model.hyperparameters_dict.get('task_type') == 'regression' else 'false' }}; // 回归/分类任务
+let charts = {};           // Chart.js 实例缓存
+let autoScroll = true;     // 日志自动滚屏
+let eventSource = null;    // SSE 事件源
+// 服务端预渲染的历史数据 (避免首屏空白)
+const serverHistory = {{ (job.metrics_history or []) | tojson }};
+
+async function controlJob(action) {
+    if (action === 'cancel') {
+        const ok = await showConfirmModal('确定要取消此训练任务吗？', '取消训练', '确认取消', 'btn-warning');
+        if (!ok) return;
+    }
+    const form = document.getElementById('controlForm');
+    form.action = '/training/' + jobId + '/' + action;
+    form.submit();
+}
+
+async function confirmRetrain() {
+    const ok = await showConfirmModal('确定使用原参数重新训练此任务吗？\n\n这将重置所有进度和指标。', '重新训练', '确认重训', 'btn-warning');
+    if (!ok) return;
+    const form = document.getElementById('controlForm');
+    form.action = '/training/' + jobId + '/retrain';
+    form.submit();
+}
+
+async function submitRetrainWithParams() {
+    const ok = await showConfirmModal('确定使用调整后的参数重新训练吗？\n\n这将使用新参数重置并重启训练。', '调参重训', '确认执行', 'btn-primary');
+    if (!ok) return;
+    document.getElementById('retrainParamsForm').submit();
+}
+
+function toggleParamForm() {
+    var card = document.getElementById('paramFormCard');
+    if (card.style.display === 'none' || !card.style.display) {
+        card.style.display = '';
+        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    } else {
+        card.style.display = 'none';
+    }
+}
+
+/** 渲染关键帧时间线 — 每个epoch一个彩色pill徽章显示指标快照 */
+function renderKeyframes(historyArr) {
+    var container = document.getElementById('keyframeTimeline');
+    var countEl = document.getElementById('keyframeCount');
+    if (!container || !countEl) return;
+    if (!historyArr || historyArr.length === 0) {
+        container.innerHTML = '<span class="text-muted small">暂无关键帧数据</span>';
+        countEl.textContent = '0 帧';
+        return;
+    }
+    countEl.textContent = historyArr.length + ' 帧';
+    var html = '';
+    for (var i = 0; i < historyArr.length; i++) {
+        var m = historyArr[i];
+        var epoch = m.epoch || (i + 1);
+        var acc = pickValue(m, ['train_accuracy', 'accuracy', 'acc']);
+        var loss = pickValue(m, ['train_loss', 'loss']);
+        var r2 = pickValue(m, ['train_r2', 'r2']);
+        // 颜色: 根据准确率 (或 R²) 渐变
+        var score = acc !== null ? acc : (r2 !== null ? Math.max(0, r2) : 0.5);
+        var hue = Math.round(120 * Math.min(1, score)); // 0→红, 1→绿
+        var badgeClass = score >= 0.8 ? 'bg-success' : (score >= 0.6 ? 'bg-info' : (score >= 0.4 ? 'bg-warning text-dark' : 'bg-danger'));
+        html += '<span class="badge ' + badgeClass + ' keyframe-pill" title="Epoch ' + epoch;
+        if (acc !== null) html += ' | Acc: ' + (acc*100).toFixed(1) + '%';
+        if (loss !== null) html += ' | Loss: ' + loss.toFixed(4);
+        if (r2 !== null) html += ' | R²: ' + r2.toFixed(4);
+        html += '" style="cursor:default; font-size:0.78rem;">Ep ' + epoch + '</span>';
+    }
+    container.innerHTML = html;
+}
+
+function switchChartTab(tab) {
+    document.getElementById('tabMetrics').classList.toggle('active', tab === 'metrics');
+    document.getElementById('tabLoss').classList.toggle('active', tab === 'loss');
+    var metricsEl = document.getElementById('chartMetricsContainer');
+    var lossEl = document.getElementById('chartLossContainer');
+    metricsEl.style.display = tab === 'metrics' ? '' : 'none';
+    lossEl.style.display = tab === 'loss' ? '' : 'none';
+    // 切换到 Loss 标签时 resize 图表
+    if (tab === 'loss' && charts.loss) {
+        charts.loss.resize();
+    }
+}
+
+function toggleAutoScroll() { autoScroll = !autoScroll; }
+function clearLog() {
+    document.getElementById('logArea').textContent = '';
+}
+
+/** 从一条训练历史记录中提取指标值 — 兼容多种 key 命名 (train_accuracy/accuracy/acc 等) */
+function pickValue(m, keys) {
+    for (var i = 0; i < keys.length; i++) {
+        var v = m[keys[i]];
+        if (v !== undefined && v !== null && !isNaN(v)) return v;
+    }
+    return null;
+}
+
+/** 构建训练图表数据 — {labels: [epoch], datasets: [score1, score2]} */
+function buildChartData(historyArr) {
+    var labels = [];
+    var ds0 = [], ds1 = [];
+    for (var i = 0; i < historyArr.length; i++) {
+        var m = historyArr[i];
+        labels.push(m.epoch || (i + 1));
+        if (isRegression) {
+            ds0.push(pickValue(m, ['train_mse', 'mse']));
+            ds1.push(pickValue(m, ['train_r2', 'r2']));
+        } else {
+            ds0.push(pickValue(m, ['train_accuracy', 'accuracy', 'acc']));
+            ds1.push(pickValue(m, ['train_f1_score', 'f1_score', 'f1']));
+        }
+    }
+    return { labels: labels, datasets: [ds0, ds1] };
+}
+
+/** 构建 Loss 数据 — 独立于指标数据, 用于Loss标签页 */
+function buildLossData(historyArr) {
+    var labels = [], data = [];
+    for (var i = 0; i < historyArr.length; i++) {
+        var m = historyArr[i];
+        labels.push(m.epoch || (i + 1));
+        data.push(pickValue(m, ['loss', 'train_loss']));
+    }
+    return { labels: labels, data: data };
+}
+
+// ========== 初始化 Chart.js 图表 (Metrics + Loss 双图) ==========
+function initCharts() {
+    try {
+        // 先让 Loss 容器可见再初始化 (避免 0x0 canvas)
+        var lossContainer = document.getElementById('chartLossContainer');
+        var wasHidden = lossContainer.style.display === 'none';
+        if (wasHidden) lossContainer.style.display = '';
+
+        // 主指标图
+        var ctx1 = document.getElementById('metricsChart').getContext('2d');
+        var metricDatasets = isRegression ? [
+            { label: 'MSE', data: [], borderColor: '#e74a3b', backgroundColor: 'rgba(231,74,59,0.1)', tension: 0.3, fill: true, pointRadius: 3, spanGaps: true },
+            { label: 'R²', data: [], borderColor: '#1cc88a', backgroundColor: 'rgba(28,200,138,0.1)', tension: 0.3, fill: true, pointRadius: 3, spanGaps: true },
+        ] : [
+            { label: 'Accuracy', data: [], borderColor: '#1cc88a', backgroundColor: 'rgba(28,200,138,0.1)', tension: 0.3, fill: true, pointRadius: 3, spanGaps: true },
+            { label: 'F1 Score', data: [], borderColor: '#4e73df', backgroundColor: 'rgba(78,115,223,0.1)', tension: 0.3, fill: true, pointRadius: 3, spanGaps: true },
+        ];
+
+        charts.metrics = new Chart(ctx1, {
+            type: 'line',
+            data: { labels: [], datasets: metricDatasets },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { intersect: false, mode: 'index' },
+                plugins: { legend: { position: 'top' } },
+                scales: {
+                    y: { beginAtZero: false, title: { display: true, text: 'Score' }, min: 0, max: 1 }
+                }
+            }
+        });
+
+        // Loss 图
+        var ctx2 = document.getElementById('lossChart').getContext('2d');
+        charts.loss = new Chart(ctx2, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Loss', data: [], borderColor: '#e74a3b',
+                    backgroundColor: 'rgba(231,74,59,0.15)', tension: 0.3,
+                    fill: true, pointRadius: 3, spanGaps: true,
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { position: 'top' } },
+                scales: { y: { beginAtZero: true, title: { display: true, text: 'Loss' } } }
+            }
+        });
+
+        // 恢复 Loss 容器隐藏状态
+        if (wasHidden) lossContainer.style.display = 'none';
+
+        // 加载服务端历史数据
+        if (serverHistory.length > 0) {
+            loadHistoryData(serverHistory);
+        }
+
+        console.log('Charts initialized OK. History points:', serverHistory.length);
+    } catch(e) {
+        console.error('Chart init error:', e);
+    }
+}
+
+/** 用服务端历史数据填充图表 */
+function loadHistoryData(historyArr) {
+    try {
+        var cd = buildChartData(historyArr);
+        charts.metrics.data.labels = cd.labels;
+        charts.metrics.data.datasets[0].data = cd.datasets[0];
+        charts.metrics.data.datasets[1].data = cd.datasets[1];
+        charts.metrics.update();
+
+        var ld = buildLossData(historyArr);
+        charts.loss.data.labels = ld.labels;
+        charts.loss.data.datasets[0].data = ld.data;
+        charts.loss.update();
+    } catch(e) {
+        console.error('loadHistoryData error:', e);
+    }
+}
+
+// ========== SSE (Server-Sent Events) 实时推送 ==========
+// 每1秒从服务端推送训练进度/日志/指标，更新进度条+图表+日志
+function startStream() {
+    eventSource = new EventSource('/api/stream/training/' + jobId + '/stream');
+
+    eventSource.onmessage = function(e) {
+        try {
+            var data = JSON.parse(e.data);
+            updateUI(data);
+
+            if (data.is_finished) {
+                eventSource.close();
+                document.getElementById('logStatus').textContent = '已完成';
+                document.getElementById('liveIndicator').classList.add('d-none');
+                document.getElementById('progressBar').classList.remove('progress-bar-animated');
+                if (data.final_metrics) showFinalMetrics(data.final_metrics);
+                setTimeout(function() { location.reload(); }, 4000);
+            }
+        } catch(err) { console.error('SSE error:', err); }
+    };
+
+    eventSource.onerror = function() {
+        document.getElementById('logStatus').textContent = '连接中断 (重试中...)';
+        document.getElementById('liveIndicator').classList.add('d-none');
+    };
+}
+
+/** 根据SSE推送数据更新整个页面UI — 进度条/状态/日志/图表 */
+function updateUI(data) {
+    // 进度条更新
+    var pct = data.progress_percent || 0;
+    document.getElementById('progressBar').style.width = pct + '%';
+    document.getElementById('progressText').textContent = pct + '%';
+    document.getElementById('epochInfo').textContent = (data.current_epoch || 0) + ' / ' + (data.total_epochs || 0);
+    document.getElementById('durationInfo').textContent = data.duration_display || '';
+    document.getElementById('sideDuration').textContent = data.duration_display || '';
+
+    // 状态
+    var statusColors = {completed:'success', failed:'danger', cancelled:'secondary',
+        running:'warning', paused:'warning', queued:'info'};
+    var color = statusColors[data.status] || 'secondary';
+    ['statusBadge', 'sideStatus'].forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) { el.textContent = data.status; el.className = 'badge fs-6 bg-' + color; }
+    });
+
+    // 日志
+    if (data.new_logs) {
+        var logArea = document.getElementById('logArea');
+        logArea.textContent = (logArea.textContent + data.new_logs).slice(-20000);
+        if (autoScroll) logArea.scrollTop = logArea.scrollHeight;
+    }
+
+    // 图表增量更新 — 仅在历史数据点数量变化时刷新 (避免每帧重绘)
+    if (data.metrics_history && data.metrics_history.length > 0 && charts.metrics) {
+        if (charts.metrics.data.labels.length !== data.metrics_history.length) {
+            try {
+                var cd = buildChartData(data.metrics_history);
+                charts.metrics.data.labels = cd.labels;
+                charts.metrics.data.datasets[0].data = cd.datasets[0];
+                charts.metrics.data.datasets[1].data = cd.datasets[1];
+                charts.metrics.update('none');
+
+                var ld = buildLossData(data.metrics_history);
+                charts.loss.data.labels = ld.labels;
+                charts.loss.data.datasets[0].data = ld.data;
+                charts.loss.update('none');
+
+                // 渲染关键帧
+                renderKeyframes(data.metrics_history);
+            } catch(e) { console.error('Chart update error:', e); }
+        }
+    }
+
+    // 关键帧增量更新 (SSE推送了new_keyframes)
+    if (data.new_keyframes && data.new_keyframes.length > 0) {
+        renderKeyframes(data.metrics_history || []);
+    }
+}
+
+/** 训练完成后展示最终指标卡片 (解析JSON并渲染Bootstrap卡片) */
+function showFinalMetrics(metricsStr) {
+    try {
+        var metrics = typeof metricsStr === 'string' ? JSON.parse(metricsStr) : metricsStr;
+        var card = document.getElementById('finalMetricsCard');
+        var body = document.getElementById('finalMetricsBody');
+        if (!card || !body) return;
+        card.style.display = '';
+        var html = '<div class="row g-2 small">';
+        Object.entries(metrics).forEach(function(entry) {
+            var k = entry[0], v = entry[1];
+            var val = typeof v === 'number' ? v.toFixed(4) : v;
+            html += '<div class="col-6"><span class="text-muted">' + k + ':</span> <strong>' + val + '</strong></div>';
+        });
+        html += '</div>';
+        body.innerHTML = html;
+    } catch(e) {}
+}
+
+// ========== 参数调优引导 ==========
+let guidanceLoaded = false;
+function loadGuidance() {
+    var body = document.getElementById('guidanceBody');
+    var status = document.getElementById('guidanceStatus');
+    if (!body || !status) return;
+
+    if (guidanceLoaded) {
+        body.style.display = body.style.display === 'none' ? '' : 'none';
+        return;
+    }
+
+    body.style.display = '';
+    document.getElementById('guidanceLoading').style.display = '';
+    document.getElementById('guidanceContent').innerHTML = '';
+    status.textContent = '分析中...';
+
+    fetch('/api/training/' + jobId + '/guidance')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            document.getElementById('guidanceLoading').style.display = 'none';
+            guidanceLoaded = true;
+            if (!data.success) {
+                document.getElementById('guidanceContent').innerHTML =
+                    '<div class="alert alert-warning m-2 small">' + data.message + '</div>';
+                status.textContent = '无法分析';
+                return;
+            }
+            var g = data.data;
+            status.textContent = '健康度: ' + g.health_score + '/100';
+
+            var html = '';
+            // 诊断
+            html += '<div class="px-3 pt-2"><strong>' + g.diagnosis + '</strong></div>';
+
+            // 健康度条
+            var barColor = g.health_score >= 80 ? 'bg-success' : (g.health_score >= 50 ? 'bg-warning' : 'bg-danger');
+            html += '<div class="px-3 py-1"><div class="progress" style="height:6px;">';
+            html += '<div class="progress-bar ' + barColor + '" style="width:' + g.health_score + '%"></div></div>';
+            html += '<small class="text-muted px-3">健康度 ' + g.health_score + '/100</small></div>';
+
+            // 问题列表
+            if (g.issues && g.issues.length > 0) {
+                html += '<div class="px-3 pt-2"><strong class="small">⚠️ 检测到的问题:</strong></div>';
+                html += '<ul class="small mb-0 px-3">';
+                g.issues.forEach(function(issue) {
+                    html += '<li class="' + (issue.severity === 'high' ? 'text-danger' : 'text-warning') + '">' + issue.message + '</li>';
+                });
+                html += '</ul>';
+            }
+
+            // 建议
+            if (g.suggestions && g.suggestions.length > 0) {
+                html += '<div class="px-3 pt-2"><strong class="small">💡 参数调整建议:</strong></div>';
+                html += '<div class="table-responsive px-2"><table class="table table-sm table-borderless small mb-0">';
+                html += '<thead><tr><th>参数</th><th>操作</th><th>原因</th></tr></thead><tbody>';
+                g.suggestions.forEach(function(s) {
+                    var actionIcon = s.action === 'increase' ? '↗' : (s.action === 'decrease' ? '↘' : '→');
+                    var suggestedVal = s.suggested !== undefined ? ' → ' + JSON.stringify(s.suggested) : '';
+                    html += '<tr><td><code>' + s.param + '</code></td>';
+                    html += '<td>' + actionIcon + ' <strong>' + s.action + '</strong>' + suggestedVal + '</td>';
+                    html += '<td class="text-muted">' + s.reason + '</td></tr>';
+                });
+                html += '</tbody></table></div>';
+            }
+
+            // 下一步
+            if (g.next_steps && g.next_steps.length > 0) {
+                html += '<div class="px-3 py-2"><strong class="small">📋 建议操作:</strong></div>';
+                html += '<ol class="small mb-0 px-3">';
+                g.next_steps.forEach(function(s) { html += '<li>' + s + '</li>'; });
+                html += '</ol>';
+            }
+
+            document.getElementById('guidanceContent').innerHTML = html;
+        })
+        .catch(function(err) {
+            document.getElementById('guidanceLoading').style.display = 'none';
+            document.getElementById('guidanceContent').innerHTML =
+                '<div class="alert alert-danger m-2 small">加载失败: ' + err + '</div>';
+            status.textContent = '加载失败';
+        });
+}
+
+// ========== 页面启动入口 ==========
+// DOM加载完成后: 初始化图表 → 加载历史数据 → 关键帧 → 如果活跃则连接SSE
+document.addEventListener('DOMContentLoaded', function() {
+    initCharts();
+    // 加载初始关键帧
+    if (serverHistory.length > 0) {
+        renderKeyframes(serverHistory);
+    }
+    if (isActive) startStream();
+    {% if job.final_metrics_json %}
+    showFinalMetrics({{ job.final_metrics_json | tojson }});
+    {% endif %}
+    // 初始化进度条动画 (如果正在运行)
+    {% if job.status == 'running' %}
+    var pct = {{ job.progress_percent or 0 }};
+    document.getElementById('progressBar').style.width = pct + '%';
+    document.getElementById('progressText').textContent = pct + '%';
+    {% endif %}
+});
+</script>
 {% endblock %}

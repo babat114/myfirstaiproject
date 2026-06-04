@@ -16,7 +16,7 @@
                             <div><span class="badge bg-primary me-2">#{{ loop.index }}</span><strong>{{ m.name }}</strong></div>
                             <span class="badge bg-success">{{ "%.2f"|format(m.accuracy * 100) }}%</span>
                         </div>
-                        <small class="text-muted">{{ m.model_type }}{% if m.framework %} · {{ m.framework }}{% endif %} · by {{ m.owner_name }}</small>
+                        <small class="text-muted">{{ model_type_labels.get(m.model_type, m.model_type) }}{% if m.framework %} · {{ m.framework }}{% endif %} · by {{ m.owner_name }}</small>
                     </a>{% endfor %}
                 {% else %}<div class="list-group-item text-muted text-center py-3">暂无排行榜数据</div>{% endif %}
             </div></div>
@@ -31,7 +31,7 @@
                             <div><span class="badge bg-success me-2">#{{ loop.index }}</span><strong>{{ m.name }}</strong></div>
                             <span class="badge bg-success">{{ "%.4f"|format(m.f1_score) }}</span>
                         </div>
-                        <small class="text-muted">{{ m.model_type }}{% if m.framework %} · {{ m.framework }}{% endif %} · by {{ m.owner_name }}</small>
+                        <small class="text-muted">{{ model_type_labels.get(m.model_type, m.model_type) }}{% if m.framework %} · {{ m.framework }}{% endif %} · by {{ m.owner_name }}</small>
                     </a>{% endfor %}
                 {% else %}<div class="list-group-item text-muted text-center py-3">暂无排行榜数据</div>{% endif %}
             </div></div>

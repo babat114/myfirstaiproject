@@ -4,7 +4,7 @@
 管理用户账户、角色和认证信息
 ============================================
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
 from app import db, login_manager
@@ -42,11 +42,11 @@ class User(UserMixin, db.Model):
     api_key = db.Column(db.String(128), unique=True, nullable=True)
 
     # 时间戳
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = db.Column(
         db.DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
         nullable=False
     )
     last_login_at = db.Column(db.DateTime, nullable=True)
@@ -141,4 +141,5 @@ class User(UserMixin, db.Model):
 @login_manager.user_loader
 def load_user(user_id: str) -> User | None:
     """Flask-Login 用户加载器"""
-    return User.query.get(int(user_id))
+    from app import db
+    return db.session.get(User, int(user_id))

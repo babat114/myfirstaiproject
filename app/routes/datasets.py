@@ -4,6 +4,8 @@
 数据集管理的页面路由
 ============================================
 """
+import json
+import os
 from flask import (
     Blueprint, render_template, request, redirect,
     url_for, flash, current_app
@@ -12,6 +14,53 @@ from flask_login import login_required, current_user
 from app.services.dataset_service import DatasetService
 
 datasets_bp = Blueprint('datasets', __name__)
+
+
+def _get_data_preview(dataset, max_rows=20):
+    """读取数据集文件，返回前 N 行预览数据和列信息"""
+    try:
+        import pandas as pd
+
+        file_path = dataset.file_path
+        if not file_path or not os.path.exists(file_path):
+            return None
+
+        fmt = dataset.file_format.lower()
+        if fmt == 'csv':
+            df = pd.read_csv(file_path, nrows=max_rows)
+        elif fmt in ('xlsx', 'xls'):
+            df = pd.read_excel(file_path, nrows=max_rows)
+        elif fmt == 'json':
+            df = pd.read_json(file_path, nrows=max_rows)
+        elif fmt == 'parquet':
+            df = pd.read_parquet(file_path)
+            df = df.head(max_rows)
+        elif fmt == 'txt':
+            df = pd.read_csv(file_path, sep='\t', nrows=max_rows)
+        else:
+            return None
+
+        # 列类型信息
+        columns_info = []
+        for col in df.columns:
+            dtype_str = str(df[col].dtype)
+            missing = int(df[col].isna().sum())
+            unique = int(df[col].nunique())
+            columns_info.append({
+                'name': col,
+                'dtype': dtype_str,
+                'missing': missing,
+                'unique': unique,
+            })
+
+        return {
+            'columns': columns_info,
+            'rows': df.values.tolist(),
+            'total_preview_rows': len(df),
+            'shape': (dataset.row_count, dataset.column_count) if dataset.row_count else (len(df), len(df.columns)),
+        }
+    except Exception as e:
+        return {'error': str(e)}
 
 
 @datasets_bp.route('/')
@@ -119,7 +168,23 @@ def dataset_detail(dataset_id):
         flash('您没有权限查看此数据集。', 'danger')
         return redirect(url_for('datasets.list_datasets'))
 
-    return render_template('datasets/detail.html', dataset=dataset)
+    # 获取数据预览
+    preview = _get_data_preview(dataset)
+
+    # 解析 summary_json
+    summary = {}
+    if dataset.summary_json:
+        try:
+            summary = json.loads(dataset.summary_json) if isinstance(dataset.summary_json, str) else dataset.summary_json
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    return render_template(
+        'datasets/detail.html',
+        dataset=dataset,
+        preview=preview,
+        summary=summary,
+    )
 
 
 @datasets_bp.route('/<int:dataset_id>/edit', methods=['GET', 'POST'])
@@ -152,6 +217,87 @@ def edit_dataset(dataset_id):
             flash(error, 'danger')
 
     return render_template('datasets/edit.html', dataset=dataset)
+
+
+@datasets_bp.route('/import', methods=['GET'])
+@login_required
+def import_datasets():
+    """公开数据集导入页面"""
+    from app.services.dataset_import_service import DatasetImportService
+    page = request.args.get('page', 1, type=int)
+    category = request.args.get('category')
+    search = request.args.get('search', '').strip().lower()
+
+    all_datasets = DatasetImportService.get_available_datasets(category=category or None)
+    all_categories = DatasetImportService.get_categories()
+
+    # 搜索过滤
+    if search:
+        all_datasets = [
+            d for d in all_datasets
+            if search in d['name'].lower() or search in d['description'].lower() or search in d['key'].lower()
+        ]
+
+    # 简单分页
+    per_page = 12
+    total = len(all_datasets)
+    pages = max(1, (total + per_page - 1) // per_page)
+    start = (page - 1) * per_page
+    end = start + per_page
+    paginated = all_datasets[start:end]
+
+    return render_template(
+        'datasets/import.html',
+        datasets=paginated,
+        categories=all_categories,
+        current_category=category,
+        search_query=search,
+        pagination={
+            'total': total,
+            'pages': pages,
+            'current_page': page,
+            'has_next': page < pages,
+            'has_prev': page > 1,
+        }
+    )
+
+
+@datasets_bp.route('/import/<dataset_key>', methods=['POST'])
+@login_required
+def do_import_dataset(dataset_key):
+    """执行公开数据集导入"""
+    from app.services.dataset_import_service import DatasetImportService
+    name = request.form.get('name', '').strip() or None
+    dataset, error = DatasetImportService.import_dataset(current_user, dataset_key, name=name)
+    if error:
+        flash(error, 'danger')
+    else:
+        flash(f'数据集 "{dataset.name}" 导入成功！({dataset.row_count} 行, {dataset.column_count} 列)', 'success')
+    return redirect(url_for('datasets.import_datasets'))
+
+
+@datasets_bp.route('/import/url', methods=['POST'])
+@login_required
+def import_from_url():
+    """从 URL 导入数据集"""
+    from app.services.dataset_import_service import DatasetImportService
+    url = request.form.get('url', '').strip()
+    name = request.form.get('name', '').strip()
+    target_column = request.form.get('target_column', '').strip() or None
+    description = request.form.get('description', '').strip() or None
+
+    if not url or not name:
+        flash('请填写URL和数据集名称。', 'danger')
+        return redirect(url_for('datasets.import_datasets'))
+
+    dataset, error = DatasetImportService.import_from_url(
+        current_user, url, name, target_column=target_column, description=description
+    )
+    if error:
+        flash(error, 'danger')
+    else:
+        flash(f'URL数据集 "{dataset.name}" 导入成功！({dataset.row_count} 行)', 'success')
+    return redirect(url_for('datasets.import_datasets'))
 
 
 @datasets_bp.route('/<int:dataset_id>/delete', methods=['POST'])

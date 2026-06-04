@@ -6,13 +6,94 @@
 """
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Tuple
 from werkzeug.utils import secure_filename
+from flask import current_app
 from werkzeug.datastructures import FileStorage
 from app import db, logger
 from app.models.dataset import Dataset
 from app.models.user import User
+
+
+# ========== 智能分类推断 ==========
+
+# 关键词 → 分类映射 (按优先级排序)
+_CATEGORY_KEYWORDS = [
+    # (关键词列表, 分类)
+    (['nlp', 'text', 'language', 'corpus', 'sentiment', 'word', 'document',
+      '自然语言', '文本', '语料', '情感', '词向量'], 'nlp'),
+    (['vision', 'image', 'mnist', 'fashion', 'cifar', 'cifar10', 'cifar100',
+      'photo', 'picture', 'pixel', '图像', '图片', '视觉', '手写'], 'vision'),
+    (['time_series', 'timeseries', 'temporal', 'stock', 'weather', 'temperature',
+      '时序', '时间序列', '股票', '天气', '传感器', 'sensor'], 'time_series'),
+    (['regression', 'reg', 'price', 'housing', 'california', 'boston',
+      'predict', 'forecast', '回归', '房价', '预测'], 'regression'),
+    (['cluster', 'clustering', 'blob', 'segment', 'group',
+      '聚类', '分群', '分段'], 'clustering'),
+    (['biology', 'bio', 'gene', 'cancer', 'breast', 'diabetes', 'disease',
+      'medical', 'health', 'patient', 'cell', 'protein', 'dna',
+      '医疗', '生物', '基因', '癌症', '疾病', '糖尿病'], 'biology'),
+    (['finance', 'fin', 'credit', 'loan', 'bank', 'income', 'census', 'adult',
+      'economic', 'financial', 'payment', 'salary', 'revenue',
+      '金融', '经济', '信贷', '银行', '收入', '贷款'], 'finance'),
+    (['synthetic', 'syn', 'generate', 'make_class', 'make_reg', 'artificial',
+      'fake', 'simulated', '合成', '生成', '人工', '模拟'], 'synthetic'),
+    (['classification', 'class', 'classify', 'binary', 'multiclass',
+      'label', 'target', 'category',
+      '分类', '二分类', '多分类', '标签'], 'classification'),
+]
+
+
+def _infer_category(name: str, df, file_ext: str) -> str:
+    """
+    智能推断数据集分类
+
+    推断优先级:
+    1. 文件名关键词匹配
+    2. 列名关键词匹配
+    3. 数据特征 (列数/类型/目标列)
+    4. 兜底: tabular (表格) 或 other
+    """
+    name_lower = name.lower().replace('_', ' ').replace('-', ' ')
+
+    # 1. 文件名关键词匹配
+    for keywords, category in _CATEGORY_KEYWORDS:
+        for kw in keywords:
+            if kw in name_lower:
+                return category
+
+    # 2. 列名关键词匹配
+    if df is not None:
+        cols_lower = ' '.join(str(c).lower() for c in df.columns)
+        for keywords, category in _CATEGORY_KEYWORDS:
+            for kw in keywords:
+                if kw in cols_lower:
+                    return category
+
+        # 3. 数据特征推断
+        num_cols = len(df.select_dtypes(include=['number']).columns)
+        total_cols = len(df.columns)
+
+        # 图像数据: 大量列+像素列名
+        pixel_cols = sum(1 for c in df.columns
+                        if str(c).lower().startswith(('pixel', 'px')))
+        if pixel_cols > 10:
+            return 'vision'
+
+    # 4. 图像文件格式
+    if file_ext in ('jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'tiff'):
+        return 'vision'
+
+    # 5. 文本文件
+    if file_ext in ('txt', 'json', 'jsonl'):
+        return 'nlp'
+
+    # 6. 兜底: 通用表格
+    if file_ext in ('csv', 'xlsx', 'xls', 'parquet'):
+        return 'tabular'
+
+    return 'other'
 
 
 class DatasetService:
@@ -50,7 +131,6 @@ class DatasetService:
 
         # 确定保存路径
         if upload_folder is None:
-            from flask import current_app
             upload_folder = current_app.config['UPLOAD_FOLDER']
 
         dataset_dir = os.path.join(upload_folder, 'datasets')
@@ -80,9 +160,18 @@ class DatasetService:
                 dataset.tags_list = tags
 
             db.session.add(dataset)
+            db.session.flush()  # 获取 dataset.id
+
+            # 自动解析文件统计信息
+            try:
+                _analyze_dataset_file(dataset, file_path, file_ext)
+            except Exception as parse_err:
+                logger.warning(f"数据集自动解析失败 (非致命): {parse_err}")
+
             db.session.commit()
 
-            logger.info(f"数据集创建成功: {name} ({file_size} bytes) by {user.username}")
+            logger.info(f"数据集创建成功: {name} ({file_size} bytes, "
+                        f"{dataset.row_count}行x{dataset.column_count}列) by {user.username}")
             return dataset, None
 
         except Exception as e:
@@ -96,7 +185,7 @@ class DatasetService:
     @staticmethod
     def get_dataset_by_id(dataset_id: int) -> Optional[Dataset]:
         """根据 ID 获取数据集"""
-        return Dataset.query.get(dataset_id)
+        return db.session.get(Dataset, dataset_id)
 
     @staticmethod
     def get_dataset_by_uuid(dataset_uuid: str) -> Optional[Dataset]:
@@ -124,7 +213,7 @@ class DatasetService:
                     else:
                         setattr(dataset, field, value)
 
-            dataset.updated_at = datetime.utcnow()
+            dataset.updated_at = datetime.now(timezone.utc)
             db.session.commit()
             return True, None
 
@@ -231,3 +320,41 @@ class DatasetService:
             'formats': format_counts,
             'public_count': sum(1 for d in datasets if d.is_public),
         }
+
+
+# ============ 数据集文件自动解析 ============
+
+def _analyze_dataset_file(dataset, file_path: str, file_ext: str):
+    """自动解析数据集文件，提取行列数、列名等统计信息"""
+    import pandas as pd
+
+    if file_ext == 'csv':
+        df = pd.read_csv(file_path)
+    elif file_ext in ('xlsx', 'xls'):
+        df = pd.read_excel(file_path)
+    elif file_ext == 'json':
+        df = pd.read_json(file_path)
+    elif file_ext == 'parquet':
+        df = pd.read_parquet(file_path)
+    elif file_ext == 'txt':
+        df = pd.read_csv(file_path, sep='\t', nrows=1000)
+    else:
+        return
+
+    dataset.row_count = len(df)
+    dataset.column_count = len(df.columns)
+
+    # 构建摘要：列名 + 类型 + 缺失值
+    import json
+    summary = {
+        'columns': list(df.columns),
+        'dtypes': {col: str(dtype) for col, dtype in df.dtypes.items()},
+        'missing_values': {col: int(df[col].isna().sum()) for col in df.columns if df[col].isna().sum() > 0},
+        'sample_rows': 5,
+    }
+    dataset.summary_json = json.dumps(summary, ensure_ascii=False)
+
+    # 智能推断分类 — 基于数据集名称+列名+内容
+    dataset.category = _infer_category(dataset.name, df, file_ext)
+
+    dataset.status = 'ready'

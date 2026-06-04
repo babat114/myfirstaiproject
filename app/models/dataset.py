@@ -6,12 +6,49 @@
 """
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from app import db
 
 
+# 数据集分类映射 (数据库值 → 中文标签 + 图标)
+CATEGORY_LABELS = {
+    'classification':  '📊 分类数据',
+    'regression':      '📈 回归数据',
+    'clustering':      '🔵 聚类数据',
+    'nlp':             '📝 自然语言处理',
+    'vision':          '👁 计算机视觉',
+    'time_series':     '📅 时间序列',
+    'biology':         '🧬 生物医学',
+    'finance':         '💰 金融经济',
+    'synthetic':       '🔧 合成数据',
+    'tabular':         '📋 通用表格',
+    'other':           '📦 其他',
+}
+
+
 class Dataset(db.Model):
-    """数据集模型 - 存储数据集信息和文件路径"""
+    """数据集模型 — 存储上传数据集的文件路径、元数据和统计信息
+
+    数据集类别 (category) — 11种细分:
+        classification — 分类任务数据 (二分类/多分类)
+        regression     — 回归任务数据
+        clustering     — 聚类/无监督数据
+        nlp            — 自然语言处理 (文本/语料)
+        vision         — 计算机视觉 (图像特征)
+        time_series    — 时间序列数据
+        biology        — 生物医学数据
+        finance        — 金融经济数据
+        synthetic      — 合成/生成数据
+        tabular        — 通用表格数据 (未分类)
+        other          — 其他类型
+
+    状态 (status):
+        uploading → processing → ready  (正常导入流程)
+        uploading → error                (导入失败)
+
+    summary_json: 自动解析的统计摘要
+        {columns, dtypes, missing_values, n_samples, n_features, target_column}
+    """
 
     __tablename__ = 'datasets'
 
@@ -29,12 +66,10 @@ class Dataset(db.Model):
     version = db.Column(db.String(20), default='1.0.0')
     tags = db.Column(db.String(500), nullable=True)  # 逗号分隔的标签
     category = db.Column(
-        db.Enum(
-            'image', 'text', 'tabular', 'audio', 'video', 'other',
-            name='dataset_categories'
-        ),
+        db.String(50),
         default='other',
-        nullable=False
+        nullable=False,
+        index=True
     )
 
     # 统计信息
@@ -58,11 +93,11 @@ class Dataset(db.Model):
     owner_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
 
     # 时间戳
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = db.Column(
         db.DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
         nullable=False
     )
 
@@ -98,6 +133,16 @@ class Dataset(db.Model):
         """获取文件名"""
         return os.path.basename(self.file_path) if self.file_path else ''
 
+    @property
+    def category_label(self) -> str:
+        """获取分类的中文标签 (含图标)"""
+        return CATEGORY_LABELS.get(self.category, f'📦 {self.category}')
+
+    @staticmethod
+    def get_category_choices() -> list:
+        """获取所有可选分类 (用于表单下拉)"""
+        return [(k, v) for k, v in CATEGORY_LABELS.items()]
+
     # ============ 方法 ============
 
     def update_statistics(self, row_count: int = None, column_count: int = None,
@@ -129,6 +174,7 @@ class Dataset(db.Model):
             'column_count': self.column_count,
             'status': self.status,
             'is_public': self.is_public,
+            'summary_json': self.summary_json,
             'owner_id': self.owner_id,
             'owner_name': self.owner.username if self.owner else None,
             'training_job_count': self.training_jobs.count(),

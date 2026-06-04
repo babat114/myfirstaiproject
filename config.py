@@ -50,9 +50,14 @@ class Config:
     # 分页配置
     ITEMS_PER_PAGE = 15
 
+    # CSRF 保护
+    WTF_CSRF_ENABLED = True
+    WTF_CSRF_TIME_LIMIT = 3600  # 1小时
+
     # JWT 配置
     JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY', 'jwt-secret-key')
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=2)
+    JWT_REFRESH_TOKEN_EXPIRES = timedelta(days=30)
 
     # 日志配置
     LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO')
@@ -71,6 +76,7 @@ class TestingConfig(Config):
     """测试环境配置"""
     TESTING = True
     SQLALCHEMY_DATABASE_URI = 'sqlite:///:memory:'
+    SQLALCHEMY_ENGINE_OPTIONS = {}  # SQLite 不接受 pool_size 等参数
     WTF_CSRF_ENABLED = False
 
 
@@ -89,7 +95,8 @@ config_map = {
 }
 
 
-def get_config():
+def get_config(env: str = None):
     """获取当前环境配置"""
-    env = os.environ.get('FLASK_ENV', 'development')
+    if env is None:
+        env = os.environ.get('FLASK_ENV', 'development')
     return config_map.get(env, config_map['default'])

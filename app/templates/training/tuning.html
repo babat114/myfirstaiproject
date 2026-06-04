@@ -1,0 +1,255 @@
+{% extends "base.html" %}
+{% block title %}超参数自动调优 - AI Platform{% endblock %}
+{% block content %}
+<div class="container-fluid px-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h1 class="h3 mb-1"><i class="bi bi-sliders me-2"></i>超参数自动调优</h1>
+            <p class="text-muted mb-0">使用 Grid Search 或 Random Search 自动寻找最佳超参数组合</p>
+        </div>
+        <a href="{{ url_for('training.create_job') }}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left me-1"></i>手动创建训练
+        </a>
+    </div>
+
+    {% if error %}
+    <div class="alert alert-danger">{{ error }}</div>
+    {% endif %}
+
+    <div class="row">
+        <!-- 左侧：配置表单 -->
+        <div class="col-lg-5">
+            <div class="card mb-4">
+                <div class="card-header"><h5 class="card-title mb-0"><i class="bi bi-gear me-2"></i>调优配置</h5></div>
+                <div class="card-body">
+                    <form method="POST" id="tuning-form">
+                        <div class="mb-3">
+                            <label class="form-label">数据集 <span class="text-danger">*</span></label>
+                            <select name="dataset_id" class="form-select" required id="dataset-select">
+                                <option value="">-- 选择数据集 --</option>
+                                {% for ds in datasets %}
+                                <option value="{{ ds.id }}" data-columns="{{ ds.columns|tojson }}">
+                                    {{ ds.name }} ({{ ds.row_count or '?' }}行)
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label">任务类型</label>
+                                <select name="ml_task_type" class="form-select" id="task-type">
+                                    <option value="classification">分类 (Classification)</option>
+                                    <option value="regression">回归 (Regression)</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">算法</label>
+                                <select name="algorithm" class="form-select" id="algorithm-select">
+                                    <optgroup label="分类算法">
+                                        <option value="random_forest">Random Forest</option>
+                                        <option value="gradient_boosting">Gradient Boosting</option>
+                                        <option value="logistic_regression">Logistic Regression</option>
+                                        <option value="svm">SVM (SVC)</option>
+                                        <option value="knn">K-Nearest Neighbors</option>
+                                    </optgroup>
+                                    <optgroup label="回归算法">
+                                        <option value="linear_regression">Linear Regression</option>
+                                        <option value="random_forest_regressor">Random Forest Regressor</option>
+                                        <option value="gradient_boosting_regressor">Gradient Boosting Regressor</option>
+                                        <option value="svr">SVR</option>
+                                    </optgroup>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">目标列</label>
+                            <select name="target_column" class="form-select" id="target-column">
+                                <option value="">-- 自动推断 (最后一列) --</option>
+                            </select>
+                        </div>
+
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label">搜索方法</label>
+                                <select name="tuning_method" class="form-select">
+                                    <option value="random">Random Search (推荐-快速)</option>
+                                    <option value="grid">Grid Search (穷举-精确)</option>
+                                </select>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">迭代/组合数</label>
+                                <input type="number" name="n_iter" class="form-control" value="30" min="5" max="200">
+                                <small class="text-muted">Random: 采样数; Grid: 自动</small>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">CV折数</label>
+                                <input type="number" name="cv" class="form-control" value="5" min="2" max="10">
+                            </div>
+                        </div>
+
+                        <div class="form-check mb-3">
+                            <input type="checkbox" name="start_training" class="form-check-input" id="start-training" checked>
+                            <label class="form-check-label" for="start-training">
+                                调优完成后自动使用最佳参数训练模型
+                            </label>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary w-100" id="submit-btn">
+                            <i class="bi bi-search me-1"></i>开始超参数搜索
+                        </button>
+                    </form>
+                </div>
+            </div>
+
+            <!-- 搜索空间预览 -->
+            <div class="card">
+                <div class="card-header"><h6 class="card-title mb-0"><i class="bi bi-diagram-3 me-2"></i>搜索空间预览</h6></div>
+                <div class="card-body" id="search-space-preview">
+                    <p class="text-muted small">选择算法后显示可调参数</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- 右侧：搜索结果 -->
+        <div class="col-lg-7">
+            {% if tuning_result and tuning_result.success %}
+            <div class="card border-success mb-4">
+                <div class="card-header bg-success text-white">
+                    <h5 class="card-title mb-0"><i class="bi bi-check-circle me-2"></i>调优完成</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row mb-3">
+                        <div class="col-md-4">
+                            <div class="text-center p-3 bg-light rounded">
+                                <h4 class="text-success mb-1">{{ tuning_result.best_score }}</h4>
+                                <small class="text-muted">最佳CV分数</small>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="text-center p-3 bg-light rounded">
+                                <h4 class="mb-1">{{ tuning_result.search_time }}s</h4>
+                                <small class="text-muted">搜索耗时</small>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="text-center p-3 bg-light rounded">
+                                <h4 class="mb-1">{{ tuning_result.n_combinations }}</h4>
+                                <small class="text-muted">评估组合数</small>
+                            </div>
+                        </div>
+                    </div>
+
+                    <h6>最佳参数:</h6>
+                    <table class="table table-sm table-bordered">
+                        <thead><tr><th>参数</th><th>最佳值</th></tr></thead>
+                        <tbody>
+                            {% for k, v in tuning_result.best_params.items() %}
+                            <tr><td><code>{{ k }}</code></td><td><strong>{{ v }}</strong></td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+
+                    {% if tuning_result.cv_results %}
+                    <h6>Top-10 参数组合:</h6>
+                    <div class="table-responsive" style="max-height: 400px;">
+                        <table class="table table-sm table-hover">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>参数</th>
+                                    <th>均值</th>
+                                    <th>±Std</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for r in tuning_result.cv_results[:10] %}
+                                <tr>
+                                    <td>{{ r.rank }}</td>
+                                    <td><small>
+                                        {% for k, v in r.params.items() %}
+                                        <span class="badge bg-light text-dark me-1">{{ k }}={{ v }}</span>
+                                        {% endfor %}
+                                    </small></td>
+                                    <td><strong>{{ r.mean_score }}</strong></td>
+                                    <td class="text-muted">{{ r.std_score }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            {% elif tuning_result and not tuning_result.success %}
+            <div class="alert alert-warning">
+                <i class="bi bi-exclamation-triangle me-2"></i>
+                {{ tuning_result.error or '调优未成功完成' }}
+            </div>
+            {% else %}
+            <div class="text-center py-5 text-muted">
+                <i class="bi bi-search display-3 mb-3 d-block"></i>
+                <h5>尚未运行调优</h5>
+                <p>在左侧选择数据集和算法，点击"开始超参数搜索"</p>
+                <hr class="w-50 mx-auto">
+                <small class="text-muted">
+                    <strong>提示:</strong><br>
+                    • Random Search 适合快速探索（推荐）<br>
+                    • Grid Search 适合精确搜索（耗时更长）<br>
+                    • 调优完成后会自动创建使用最佳参数的训练任务
+                </small>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ============ 超参数调优页 — 动态表单联动 + 搜索空间预览 ============
+
+// 数据集选择联动: 切换数据集时更新目标列下拉框 (从 summary_json 解析列名)
+document.getElementById('dataset-select').addEventListener('change', function() {
+    const opt = this.options[this.selectedIndex];
+    const targetSelect = document.getElementById('target-column');
+    targetSelect.innerHTML = '<option value="">-- 自动推断 (最后一列) --</option>';
+    if (opt.dataset.columns) {
+        try {
+            const cols = JSON.parse(opt.dataset.columns);
+            cols.forEach(function(c) {
+                const o = document.createElement('option');
+                o.value = c;
+                o.textContent = c;
+                targetSelect.appendChild(o);
+            });
+        } catch(e) {}
+    }
+});
+
+// 算法选择联动: 切换算法时更新搜索空间预览 (展示可调参数badge列表)
+const searchSpaces = {{ search_spaces|tojson }};
+document.getElementById('algorithm-select').addEventListener('change', function() {
+    const algo = this.value;
+    const preview = document.getElementById('search-space-preview');
+    const params = searchSpaces[algo] || [];
+    if (params.length > 0) {
+        preview.innerHTML = '<div class="d-flex flex-wrap gap-1">' +
+            params.map(function(p) {
+                return '<span class="badge bg-info text-dark">' + p + '</span>';
+            }).join(' ') +
+            '</div><small class="text-muted mt-2 d-block">共 ' + params.length + ' 个可调参数</small>';
+    } else {
+        preview.innerHTML = '<p class="text-muted small">该算法暂无预定义搜索空间</p>';
+    }
+});
+
+// 表单提交防重复: 点击后禁用按钮并显示加载动画 (搜索可能耗时较久)
+document.getElementById('tuning-form').addEventListener('submit', function() {
+    const btn = document.getElementById('submit-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>搜索中... 请耐心等待';
+});
+</script>
+{% endblock %}

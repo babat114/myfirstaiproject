@@ -1,0 +1,231 @@
+{% extends "base.html" %}
+{% block title %}模型对比{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="{{ url_for('models.list_models') }}">模型</a></li>
+        <li class="breadcrumb-item active">模型对比</li>
+    </ol>
+</nav>
+
+<h4 class="mb-3"><i class="bi bi-bar-chart-fill"></i> 模型对比</h4>
+
+{% if error %}
+<div class="alert alert-warning">{{ error }}</div>
+{% endif %}
+
+<!-- 选择模型 -->
+<div class="card mb-4">
+    <div class="card-header"><h6 class="mb-0">选择要对比的模型 (2-4个)</h6></div>
+    <div class="card-body">
+        <form method="POST" action="{{ url_for('models.compare') }}" class="row g-2 align-items-end">
+            <div class="col-md-9">
+                <select name="model_ids" class="form-select" multiple size="6" required>
+                    {% for m in user_models %}
+                    <option value="{{ m.id }}" {% if m.id in selected_ids %}selected{% endif %}>
+                        {{ m.name }} v{{ m.version }} |
+                        {% if m.accuracy is not none %}准确率: {{ '%.4f'|format(m.accuracy) }}{% else %}暂无指标{% endif %} |
+                        {{ model_type_labels.get(m.model_type, m.model_type) }}/{{ m.framework or '-' }}
+                    </option>
+                    {% endfor %}
+                </select>
+                <small class="text-muted">按住 Ctrl 多选 (2-4个)</small>
+            </div>
+            <div class="col-md-3 d-grid gap-2">
+                <button type="submit" class="btn btn-primary"><i class="bi bi-bar-chart"></i> 对比</button>
+                <a href="{{ url_for('models.compare') }}" class="btn btn-outline-secondary">清空</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% if models %}
+<!-- 对比表格 -->
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h6 class="mb-0">指标对比 (共 {{ models|length }} 个模型)</h6>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-bordered table-hover align-middle mb-0">
+            <thead class="table-dark">
+                <tr>
+                    <th style="min-width:140px">模型</th>
+                    <th>类型</th>
+                    <th>框架</th>
+                    {% for metric in compare_metrics %}
+                    <th class="text-center">{{ metric.label }}</th>
+                    {% endfor %}
+                    <th class="text-center">训练时长</th>
+                    <th>状态</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for m in models %}
+                <tr>
+                    <td>
+                        <a href="{{ url_for('models.model_detail', model_id=m.id) }}" class="fw-bold text-decoration-none">
+                            {{ m.name }}
+                        </a>
+                        <br><small class="text-muted">v{{ m.version }}</small>
+                    </td>
+                    <td><span class="badge bg-secondary">{{ model_type_labels.get(m.model_type, m.model_type) }}</span></td>
+                    <td>{{ m.framework or '-' }}</td>
+                    {% for metric in compare_metrics %}
+                    {% set val = m|attr(metric.key) %}
+                    <td class="text-center {% if best_values.get(metric.key) == m.id %}fw-bold{% endif %}">
+                        {% if val is not none %}
+                        <span class="{% if best_values.get(metric.key) == m.id %}
+                            text-{{ 'success' if metric.higher_better else 'danger' }} fw-bold
+                        {% endif %}">
+                            {{ '%.4f'|format(val) }}
+                            {% if best_values.get(metric.key) == m.id %}
+                            <i class="bi bi-{{ 'trophy-fill' if metric.higher_better else 'arrow-down-circle-fill' }} text-warning small"></i>
+                            {% endif %}
+                        </span>
+                        {% else %}
+                        <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    {% endfor %}
+                    <td class="text-center">
+                        {% if m.training_duration_seconds %}
+                        <small>
+                            {% if m.training_duration_seconds < 60 %}
+                            {{ m.training_duration_seconds }}秒
+                            {% elif m.training_duration_seconds < 3600 %}
+                            {{ (m.training_duration_seconds / 60)|int }}分{{ (m.training_duration_seconds % 60)|int }}秒
+                            {% else %}
+                            {{ (m.training_duration_seconds / 3600)|int }}时{{ ((m.training_duration_seconds % 3600) / 60)|int }}分
+                            {% endif %}
+                        </small>
+                        {% else %}
+                        <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td><span class="badge bg-{{ 'success' if m.status == 'trained' else 'primary' if m.status == 'deployed' else 'secondary' }}">{{ m.status }}</span></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- 柱状图可视化 -->
+<div class="card mb-4">
+    <div class="card-header"><h6 class="mb-0">可视化对比</h6></div>
+    <div class="card-body">
+        <canvas id="compareChart" height="220"></canvas>
+    </div>
+</div>
+
+<!-- 超参数对比 -->
+<div class="card mb-4">
+    <div class="card-header"><h6 class="mb-0">超参数对比</h6></div>
+    <div class="table-responsive">
+        <table class="table table-sm table-striped mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>参数</th>
+                    {% for m in models %}
+                    <th>{{ m.name }}</th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% set all_hp_keys = [] %}
+                {% for m in models %}
+                    {% for k in m.hyperparameters_dict.keys() %}
+                        {% if k not in all_hp_keys %}{% set _ = all_hp_keys.append(k) %}{% endif %}
+                    {% endfor %}
+                {% endfor %}
+                {% if all_hp_keys %}
+                {% for key in all_hp_keys %}
+                <tr>
+                    <td class="fw-bold">{{ key }}</td>
+                    {% for m in models %}
+                    <td>{{ m.hyperparameters_dict.get(key, '-') }}</td>
+                    {% endfor %}
+                </tr>
+                {% endfor %}
+                {% else %}
+                <tr><td colspan="{{ models|length + 1 }}" class="text-center text-muted py-3">暂无超参数记录</td></tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+{% if models %}
+<script>
+(function() {
+    var ctx = document.getElementById('compareChart').getContext('2d');
+
+    // 预渲染: 从 Jinja2 构建完整的图表数据 (避免 JS-Jinja2 变量冲突)
+    var modelNames = {{ models | map(attribute='name') | list | tojson }};
+
+    // 每个指标的完整数据集 (服务端预渲染)
+    var allMetricsData = {
+        {% for metric in compare_metrics %}
+        '{{ metric.key }}': {
+            label: '{{ metric.label }}',
+            higherBetter: {{ 'true' if metric.higher_better else 'false' }},
+            values: [
+                {% for m in models %}
+                {% set val = m|attr(metric.key) %}
+                {{ val if val is not none else 'null' }},
+                {% endfor %}
+            ]
+        },
+        {% endfor %}
+    };
+
+    // 过滤有数据的指标
+    var metricsToShow = [];
+    for (var key in allMetricsData) {
+        var hasData = allMetricsData[key].values.some(function(v) { return v !== null; });
+        if (hasData) {
+            metricsToShow.push(allMetricsData[key]);
+        }
+    }
+
+    if (metricsToShow.length > 0) {
+        var colors = ['#4e73df', '#1cc88a', '#f6c23e', '#e74a3b'];
+        var datasets = metricsToShow.map(function(metric, i) {
+            return {
+                label: metric.label,
+                data: metric.values,
+                backgroundColor: colors[i % colors.length],
+                borderColor: colors[i % colors.length],
+                borderWidth: 1,
+            };
+        });
+
+        new Chart(ctx, {
+            type: 'bar',
+            data: { labels: modelNames, datasets: datasets },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { position: 'top' },
+                    tooltip: {
+                        callbacks: {
+                            label: function(ctx) {
+                                return ctx.dataset.label + ': ' + (ctx.raw !== null ? ctx.raw.toFixed(4) : 'N/A');
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: { beginAtZero: true, title: { display: true, text: '分数 (Score)' } }
+                }
+            }
+        });
+    }
+})();
+</script>
+{% endif %}
+{% endblock %}

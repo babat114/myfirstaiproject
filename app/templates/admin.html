@@ -2,8 +2,17 @@
 {% block title %}管理面板{% endblock %}
 
 {% block content %}
-<h2><i class="bi bi-shield-lock"></i> 管理员面板</h2>
-<p class="text-muted mb-4">全局统计概览</p>
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+        <h4 class="mb-1"><i class="bi bi-shield-lock"></i> 管理员面板</h4>
+        <small class="text-muted">全局统计概览</small>
+    </div>
+    <div>
+        <a href="{{ url_for('dashboard.admin_users') }}" class="btn btn-outline-primary">
+            <i class="bi bi-people-fill"></i> 用户管理
+        </a>
+    </div>
+</div>
 
 <div class="row g-3 mb-4">
     <div class="col-md-3">
@@ -27,17 +36,20 @@
 <div class="row g-3">
     <div class="col-lg-6">
         <div class="card"><div class="card-header">数据集分类</div><div class="card-body">
-            <canvas id="datasetCatChart" height="200"></canvas></div></div>
+            <canvas id="datasetCatChart" height="160"></canvas></div></div>
     </div>
     <div class="col-lg-6">
         <div class="card"><div class="card-header">模型框架分布</div><div class="card-body">
-            <canvas id="frameworkChart" height="200"></canvas></div></div>
+            <canvas id="frameworkChart" height="160"></canvas></div></div>
     </div>
 </div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
+// ============ 管理面板 — 数据集分类柱状图 + 模型框架饼图 ============
+
+// 数据集分类分布柱状图
 new Chart(document.getElementById('datasetCatChart'), {
     type: 'bar',
     data: {
@@ -47,6 +59,7 @@ new Chart(document.getElementById('datasetCatChart'), {
     options: { responsive: true, plugins: { legend: { display: false } } }
 });
 
+// 模型框架分布饼图 (sklearn/PyTorch/TensorFlow等占比)
 new Chart(document.getElementById('frameworkChart'), {
     type: 'pie',
     data: {

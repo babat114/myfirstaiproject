@@ -11,6 +11,8 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
 from flask_migrate import Migrate
 from flask_cors import CORS
+from flask_wtf.csrf import CSRFProtect
+import colorlog
 from config import get_config
 
 # 初始化扩展 (不绑定到应用)
@@ -18,6 +20,7 @@ db = SQLAlchemy()
 login_manager = LoginManager()
 migrate = Migrate()
 cors = CORS()
+csrf = CSRFProtect()
 
 # 全局日志记录器
 logger = logging.getLogger(__name__)
@@ -34,7 +37,7 @@ def create_app(config_name=None):
     if config_name is None:
         config_name = os.environ.get('FLASK_ENV', 'development')
 
-    config_class = get_config()
+    config_class = get_config(config_name)
     app.config.from_object(config_class)
 
     # 初始化扩展
@@ -42,6 +45,7 @@ def create_app(config_name=None):
     login_manager.init_app(app)
     migrate.init_app(app, db)
     cors.init_app(app, resources={r"/api/*": {"origins": "*"}})
+    csrf.init_app(app)
 
     # 登录管理器配置
     login_manager.login_view = 'auth.login'
@@ -66,10 +70,9 @@ def create_app(config_name=None):
     # 注册上下文处理器
     register_context_processors(app)
 
-    # 创建数据库表 (开发环境)
-    with app.app_context():
-        from app.models import user, dataset, model_record, training_job
-        db.create_all()
+    # 注意: 数据库表通过 Flask-Migrate 管理
+    # 首次部署运行: flask db upgrade
+    # 生成迁移: flask db migrate -m "描述"
 
     logger.info(f"应用启动成功 - 环境: {config_name}")
     return app
@@ -77,8 +80,6 @@ def create_app(config_name=None):
 
 def configure_logging(app):
     """配置应用日志"""
-    import colorlog
-
     handler = colorlog.StreamHandler()
     handler.setFormatter(colorlog.ColoredFormatter(
         '%(log_color)s%(asctime)s [%(levelname)s] %(name)s:%(lineno)d - %(message)s',
@@ -112,13 +113,34 @@ def register_blueprints(app):
     app.register_blueprint(training_bp, url_prefix='/training')
 
     # RESTful API 路由
+    from app.routes.api.auth import auth_api_bp
     from app.routes.api.datasets import datasets_api_bp
     from app.routes.api.models import models_api_bp
     from app.routes.api.training import training_api_bp
+    from app.routes.api.stream import stream_bp
+    from app.routes.api.users import users_api_bp
 
+    app.register_blueprint(auth_api_bp, url_prefix='/api/auth')
     app.register_blueprint(datasets_api_bp, url_prefix='/api/datasets')
     app.register_blueprint(models_api_bp, url_prefix='/api/models')
     app.register_blueprint(training_api_bp, url_prefix='/api/training')
+    app.register_blueprint(stream_bp, url_prefix='/api/stream')
+    app.register_blueprint(users_api_bp, url_prefix='/api/users')
+
+    # Web 页面路由豁免 CSRF (使用 Session 认证, 表单不含 CSRF token)
+    csrf.exempt(auth_bp)
+    csrf.exempt(dashboard_bp)
+    csrf.exempt(datasets_bp)
+    csrf.exempt(models_bp)
+    csrf.exempt(training_bp)
+
+    # API 路由豁免 CSRF (使用 API Key 认证)
+    csrf.exempt(auth_api_bp)
+    csrf.exempt(datasets_api_bp)
+    csrf.exempt(models_api_bp)
+    csrf.exempt(training_api_bp)
+    csrf.exempt(stream_bp)
+    csrf.exempt(users_api_bp)
 
 
 def register_error_handlers(app):
@@ -153,4 +175,21 @@ def register_context_processors(app):
 
     @app.context_processor
     def inject_config():
-        return {'app_name': 'AI Platform', 'version': '1.0.0'}
+        from app.models.dataset import CATEGORY_LABELS
+        # 模型类型中英文映射 (模板全局可用)
+        model_type_labels = {
+            'classification': '分类',
+            'regression': '回归',
+            'clustering': '聚类',
+            'nlp': '自然语言处理',
+            'computer_vision': '计算机视觉',
+            'reinforcement': '强化学习',
+            'generative': '生成式',
+            'other': '其他',
+        }
+        return {
+            'app_name': 'AI Platform',
+            'version': '1.0.0',
+            'model_type_labels': model_type_labels,
+            'category_labels': CATEGORY_LABELS,
+        }
