@@ -246,36 +246,81 @@
 
 {% block extra_js %}
 <script>
-// 资源总览图表
+// ========== 资源总览 — 横向堆叠条形图 ==========
 const overviewCtx = document.getElementById('overviewChart').getContext('2d');
 new Chart(overviewCtx, {
     type: 'bar',
     data: {
         labels: ['数据集', '模型', '训练任务'],
-        datasets: [{
-            label: '总数',
-            data: [
-                {{ dataset_stats.total_count }},
-                {{ model_stats.total_count }},
-                {{ job_stats.total_count }}
-            ],
-            backgroundColor: ['rgba(78,115,223,0.8)', 'rgba(28,200,138,0.8)', 'rgba(54,185,204,0.8)'],
-            borderColor: ['#4e73df', '#1cc88a', '#36b9cc'],
-            borderWidth: 2,
-            borderRadius: 8,
-        }]
+        datasets: [
+            // 第一段: 主体数量
+            {
+                label: '私有',
+                data: [
+                    {{ dataset_stats.total_count - dataset_stats.public_count }},
+                    {{ model_stats.total_count - model_stats.deployed_count }},
+                    {{ job_stats.completed_count }}
+                ],
+                backgroundColor: ['rgba(79,92,209,0.85)', 'rgba(16,185,129,0.85)', 'rgba(6,182,212,0.85)'],
+                borderColor: ['#4f5cd1', '#10b981', '#06b6d4'],
+                borderWidth: 1.5,
+                borderRadius: 0,
+            },
+            // 第二段: 公开/已部署/运行中
+            {
+                label: '公开/已部署/运行中',
+                data: [
+                    {{ dataset_stats.public_count }},
+                    {{ model_stats.deployed_count }},
+                    {{ job_stats.running_count }}
+                ],
+                backgroundColor: ['rgba(79,92,209,0.35)', 'rgba(16,185,129,0.35)', 'rgba(6,182,212,0.35)'],
+                borderColor: ['#4f5cd1', '#10b981', '#06b6d4'],
+                borderWidth: 1.5,
+                borderDash: [4, 2],
+            },
+            // 第三段: 失败数 (仅训练任务)
+            {
+                label: '失败',
+                data: [0, 0, {{ job_stats.failed_count }}],
+                backgroundColor: 'rgba(239,68,68,0.55)',
+                borderColor: '#ef4444',
+                borderWidth: 1.5,
+                borderDash: [4, 2],
+            }
+        ]
     },
     options: {
+        indexAxis: 'y',           // 横向条形图
         responsive: true,
+        maintainAspectRatio: false,
         plugins: {
-            legend: { display: false },
-            title: { display: true, text: '我的资源统计', font: { size: 14 } }
+            legend: {
+                position: 'top',
+                labels: { usePointStyle: true, padding: 20, font: { size: 11 } }
+            },
+            tooltip: {
+                callbacks: {
+                    label: function(ctx) { return ctx.dataset.label + ': ' + ctx.raw; }
+                }
+            }
         },
         scales: {
-            y: { beginAtZero: true, ticks: { stepSize: 1 } }
+            x: {
+                stacked: true,
+                beginAtZero: true,
+                grid: { color: 'rgba(0,0,0,0.04)' },
+                ticks: { stepSize: 20, font: { size: 11 } }
+            },
+            y: {
+                stacked: true,
+                grid: { display: false },
+                ticks: { font: { size: 12, weight: 'bold' } }
+            }
         }
     }
 });
+
 
 // 模型类型分布
 const typeCtx = document.getElementById('modelTypeChart').getContext('2d');

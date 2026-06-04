@@ -47,24 +47,66 @@
 
 {% block extra_js %}
 <script>
-// ============ 管理面板 — 数据集分类柱状图 + 模型框架饼图 ============
+// ========== 管理面板 — 数据集分类横向条形图 + 模型框架环形图 ==========
 
-// 数据集分类分布柱状图
+// 数据集分类分布 (横向条形图)
+const catLabels = Object.keys({{ dataset_stats.categories | tojson }});
+const catValues = Object.values({{ dataset_stats.categories | tojson }});
+// 渐变色数组
+const catColors = catLabels.map((_, i) => {
+    const hues = [220, 160, 190, 45, 0, 280, 130];
+    const h = hues[i % hues.length];
+    return `hsla(${h}, 70%, 55%, 0.75)`;
+});
+
 new Chart(document.getElementById('datasetCatChart'), {
     type: 'bar',
     data: {
-        labels: Object.keys({{ dataset_stats.categories | tojson }}),
-        datasets: [{data: Object.values({{ dataset_stats.categories | tojson }}), backgroundColor: '#4e73df', borderRadius: 5}]
+        labels: catLabels,
+        datasets: [{
+            data: catValues,
+            backgroundColor: catColors,
+            borderRadius: 4,
+            borderWidth: 0,
+        }]
     },
-    options: { responsive: true, plugins: { legend: { display: false } } }
+    options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+            x: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.04)' }, ticks: { precision: 0 } },
+            y: { grid: { display: false }, ticks: { font: { size: 11 } } }
+        }
+    }
 });
 
-// 模型框架分布饼图 (sklearn/PyTorch/TensorFlow等占比)
+// 模型框架分布 (环形图)
+const fwLabels = Object.keys({{ model_stats.frameworks | tojson }});
+const fwValues = Object.values({{ model_stats.frameworks | tojson }});
+const fwColors = ['#4f5cd1', '#10b981', '#06b6d4', '#f59e0b', '#ef4444', '#8b5cf6'];
+
 new Chart(document.getElementById('frameworkChart'), {
-    type: 'pie',
+    type: 'doughnut',
     data: {
-        labels: Object.keys({{ model_stats.frameworks | tojson }}),
-        datasets: [{data: Object.values({{ model_stats.frameworks | tojson }}), backgroundColor: ['#4e73df','#1cc88a','#36b9cc','#f6c23e','#e74a3b']}]
+        labels: fwLabels,
+        datasets: [{
+            data: fwValues,
+            backgroundColor: fwColors,
+            borderWidth: 2,
+            borderColor: '#fff',
+            hoverBorderColor: '#f8f9fc',
+            hoverBorderWidth: 3,
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        cutout: '60%',
+        plugins: {
+            legend: { position: 'bottom', labels: { usePointStyle: true, padding: 16, font: { size: 11 } } }
+        }
     }
 });
 </script>
