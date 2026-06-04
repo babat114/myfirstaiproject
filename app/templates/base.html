@@ -23,7 +23,7 @@
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark sticky-top">
         <div class="container-fluid">
             <a class="navbar-brand fw-bold" href="{{ url_for('dashboard.index') }}">
-                🤖 AI Platform
+                <i class="bi bi-cpu-fill"></i> AI Platform
             </a>
 
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse"
@@ -60,8 +60,8 @@
                         <ul class="dropdown-menu">
                             <li><a class="dropdown-item" href="{{ url_for('models.list_models') }}">我的模型</a></li>
                             <li><a class="dropdown-item" href="{{ url_for('models.public_models') }}">公开模型</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('models.leaderboard') }}">🏆 排行榜</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('models.compare') }}">📊 模型对比</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('models.leaderboard') }}"><i class="bi bi-trophy-fill text-warning"></i> 排行榜</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('models.compare') }}"><i class="bi bi-bar-chart-fill text-info"></i> 模型对比</a></li>
                             <li><hr class="dropdown-divider"></li>
                             <li><a class="dropdown-item" href="{{ url_for('models.create_model') }}">+ 注册模型</a></li>
                         </ul>

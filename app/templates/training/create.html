@@ -421,7 +421,7 @@ function applyAutoConfig(config) {
         parts.push(di.n_samples.toLocaleString() + ' 样本');
         if (di.n_classes > 0) parts.push(di.n_classes + ' 类');
         if (di.missing_rate > 0) parts.push('缺失率 ' + (di.missing_rate*100).toFixed(1) + '%');
-        if (di.imbalanced) parts.push('<span class="text-warning">⚠ 不平衡</span>');
+        if (di.imbalanced) parts.push('<span class="text-warning"><i class="bi bi-exclamation-triangle-fill me-1"></i>不平衡</span>');
         document.getElementById('datasetInfo').innerHTML += ' | ' + parts.join(' | ');
     }
 }

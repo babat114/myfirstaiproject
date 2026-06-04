@@ -112,6 +112,15 @@ def register_blueprints(app):
     app.register_blueprint(models_bp, url_prefix='/models')
     app.register_blueprint(training_bp, url_prefix='/training')
 
+    # 根路由: 已登录 → 仪表盘, 未登录 → 欢迎首页
+    from flask import redirect, url_for, render_template
+    from flask_login import current_user
+    @app.route('/')
+    def root():
+        if current_user.is_authenticated:
+            return redirect(url_for('dashboard.index'))
+        return render_template('index.html')
+
     # RESTful API 路由
     from app.routes.api.auth import auth_api_bp
     from app.routes.api.datasets import datasets_api_bp

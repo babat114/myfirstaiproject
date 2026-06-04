@@ -34,7 +34,7 @@
                     <option value="">全部状态</option>
                     {% for s in ['queued','running','paused','completed','failed','cancelled'] %}
                     <option value="{{ s }}" {% if current_status == s %}selected{% endif %}>
-                        {% if s == 'queued' %}⏳ 排队中{% elif s == 'running' %}▶️ 运行中{% elif s == 'paused' %}⏸️ 已暂停{% elif s == 'completed' %}✅ 已完成{% elif s == 'failed' %}❌ 失败{% elif s == 'cancelled' %}🚫 已取消{% endif %}
+                        {% if s == 'queued' %}<i class="bi bi-hourglass-split text-muted"></i> 排队中{% elif s == 'running' %}<i class="bi bi-play-circle-fill text-info"></i> 运行中{% elif s == 'paused' %}<i class="bi bi-pause-circle-fill text-warning"></i> 已暂停{% elif s == 'completed' %}<i class="bi bi-check-circle-fill text-success"></i> 已完成{% elif s == 'failed' %}<i class="bi bi-x-circle-fill text-danger"></i> 失败{% elif s == 'cancelled' %}<i class="bi bi-slash-circle-fill text-muted"></i> 已取消{% endif %}
                     </option>
                     {% endfor %}
                 </select>

@@ -670,7 +670,7 @@ function loadGuidance() {
 
             // 问题列表
             if (g.issues && g.issues.length > 0) {
-                html += '<div class="px-3 pt-2"><strong class="small">⚠️ 检测到的问题:</strong></div>';
+                html += '<div class="px-3 pt-2"><strong class="small"><i class="bi bi-exclamation-triangle-fill text-warning me-1"></i>检测到的问题:</strong></div>';
                 html += '<ul class="small mb-0 px-3">';
                 g.issues.forEach(function(issue) {
                     html += '<li class="' + (issue.severity === 'high' ? 'text-danger' : 'text-warning') + '">' + issue.message + '</li>';
@@ -680,7 +680,7 @@ function loadGuidance() {
 
             // 建议
             if (g.suggestions && g.suggestions.length > 0) {
-                html += '<div class="px-3 pt-2"><strong class="small">💡 参数调整建议:</strong></div>';
+                html += '<div class="px-3 pt-2"><strong class="small"><i class="bi bi-lightbulb-fill text-warning me-1"></i>参数调整建议:</strong></div>';
                 html += '<div class="table-responsive px-2"><table class="table table-sm table-borderless small mb-0">';
                 html += '<thead><tr><th>参数</th><th>操作</th><th>原因</th></tr></thead><tbody>';
                 g.suggestions.forEach(function(s) {
@@ -695,7 +695,7 @@ function loadGuidance() {
 
             // 下一步
             if (g.next_steps && g.next_steps.length > 0) {
-                html += '<div class="px-3 py-2"><strong class="small">📋 建议操作:</strong></div>';
+                html += '<div class="px-3 py-2"><strong class="small"><i class="bi bi-list-check me-1"></i>建议操作:</strong></div>';
                 html += '<ol class="small mb-0 px-3">';
                 g.next_steps.forEach(function(s) { html += '<li>' + s + '</li>'; });
                 html += '</ol>';

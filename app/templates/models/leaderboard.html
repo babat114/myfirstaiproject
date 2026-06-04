@@ -7,7 +7,7 @@
 
 <div class="row g-4 mt-2">
     <div class="col-lg-6">
-        <div class="card"><div class="card-header bg-primary text-white"><h5 class="mb-0">🏆 准确率 Top 10</h5></div>
+        <div class="card"><div class="card-header bg-primary text-white"><h5 class="mb-0"><i class="bi bi-trophy-fill me-1"></i> 准确率 Top 10</h5></div>
             <div class="list-group list-group-flush">
                 {% if top_accuracy %}
                     {% for m in top_accuracy %}
@@ -22,7 +22,7 @@
             </div></div>
     </div>
     <div class="col-lg-6">
-        <div class="card"><div class="card-header bg-success text-white"><h5 class="mb-0">🎯 F1 分数 Top 10</h5></div>
+        <div class="card"><div class="card-header bg-success text-white"><h5 class="mb-0"><i class="bi bi-bullseye me-1"></i> F1 分数 Top 10</h5></div>
             <div class="list-group list-group-flush">
                 {% if top_f1 %}
                     {% for m in top_f1 %}

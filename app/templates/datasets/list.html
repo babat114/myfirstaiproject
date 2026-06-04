@@ -51,7 +51,7 @@
                 <td><code>{{ ds.file_format }}</code></td>
                 <td>{{ ds.file_size_mb }} MB</td>
                 <td>{{ ds.row_count }}/{{ ds.column_count }}</td>
-                <td>{% if ds.is_public %}✅{% else %}🔒{% endif %}</td>
+                <td>{% if ds.is_public %}<i class="bi bi-globe2 text-success"></i>{% else %}<i class="bi bi-lock-fill text-muted"></i>{% endif %}</td>
                 <td><span class="badge bg-{{ 'success' if ds.status == 'ready' else 'warning' }}">{{ ds.status }}</span></td>
                 <td>
                     <a href="{{ url_for('datasets.edit_dataset', dataset_id=ds.id) }}" class="btn btn-sm btn-outline-secondary" title="编辑"><i class="bi bi-pencil"></i></a>
