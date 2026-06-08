@@ -14,37 +14,48 @@
         <h4 class="mb-1"><i class="bi bi-play-circle"></i> {{ job.name }}</h4>
         {% if job.description %}<small class="text-muted">{{ job.description }}</small>{% endif %}
     </div>
-    <div class="btn-group">
-        {% if job.status == 'queued' %}
-        <form method="POST" action="{{ url_for('training.start_job', job_id=job.id) }}" class="d-inline">
-            <button type="submit" class="btn btn-success btn-lg"><i class="bi bi-play-fill"></i> 启动训练</button>
-        </form>
-        {% elif job.status == 'running' %}
-        <button type="button" class="btn btn-warning btn-lg" id="pauseBtn" onclick="controlJob('pause')">
-            <i class="bi bi-pause-fill"></i> <span id="pauseBtnText">暂停</span>
-        </button>
-        <button type="button" class="btn btn-outline-danger btn-lg" id="cancelBtn" onclick="controlJob('cancel')">
-            <i class="bi bi-stop-fill"></i> 取消
-        </button>
-        {% elif job.status == 'paused' %}
-        <button type="button" class="btn btn-success btn-lg" id="resumeBtn" onclick="controlJob('resume')">
-            <i class="bi bi-play-fill"></i> 恢复训练
-        </button>
-        <button type="button" class="btn btn-outline-danger btn-lg" id="cancelBtn" onclick="controlJob('cancel')">
-            <i class="bi bi-stop-fill"></i> 取消
-        </button>
-        {% endif %}
-        {# 重新训练按钮 — 适用于已完成/失败/取消/暂停状态 #}
-        {% if job.status in ('completed', 'failed', 'cancelled') %}
-        <button type="button" class="btn btn-success" onclick="confirmRetrain()" title="使用原参数重新训练">
-            <i class="bi bi-arrow-repeat"></i> 重新训练
-        </button>
-        {% endif %}
-        {% if job.status in ('completed', 'failed', 'cancelled', 'paused') %}
-        <button type="button" class="btn btn-outline-success" onclick="toggleParamForm()" title="调整参数后重新训练">
-            <i class="bi bi-sliders"></i> 调参重训
-        </button>
-        {% endif %}
+    <div class="btn-group" id="actionButtons">
+        {# queued → 启动按钮 #}
+        <span id="btnGroupQueued" style="{% if job.status != 'queued' %}display:none;{% endif %}">
+            <form method="POST" action="{{ url_for('training.start_job', job_id=job.id) }}" class="d-inline">
+                <button type="submit" class="btn btn-success btn-lg"><i class="bi bi-play-fill"></i> 启动训练</button>
+            </form>
+        </span>
+
+        {# running → 暂停 + 取消 #}
+        <span id="btnGroupRunning" style="{% if job.status != 'running' %}display:none;{% endif %}">
+            <button type="button" class="btn btn-warning btn-lg" id="pauseBtn" onclick="controlJob('pause')">
+                <i class="bi bi-pause-fill"></i> <span id="pauseBtnText">暂停</span>
+            </button>
+            <button type="button" class="btn btn-outline-danger btn-lg" id="cancelBtnRun" onclick="controlJob('cancel')">
+                <i class="bi bi-stop-fill"></i> 取消
+            </button>
+        </span>
+
+        {# paused → 恢复 + 取消 #}
+        <span id="btnGroupPaused" style="{% if job.status != 'paused' %}display:none;{% endif %}">
+            <button type="button" class="btn btn-success btn-lg" id="resumeBtn" onclick="controlJob('resume')">
+                <i class="bi bi-play-fill"></i> 恢复训练
+            </button>
+            <button type="button" class="btn btn-outline-danger btn-lg" id="cancelBtnPaused" onclick="controlJob('cancel')">
+                <i class="bi bi-stop-fill"></i> 取消
+            </button>
+        </span>
+
+        {# completed / failed / cancelled → 重新训练 + AI智能优化 + 查看模型 #}
+        <span id="btnGroupFinished" style="{% if job.status not in ('completed', 'failed', 'cancelled') %}display:none;{% endif %}">
+            <button type="button" class="btn btn-success" onclick="confirmRetrain()" title="使用原参数重新训练">
+                <i class="bi bi-arrow-repeat"></i> 重新训练
+            </button>
+            <button type="button" class="btn btn-primary" onclick="toggleAIOptimizationPanel()"
+                    title="AI诊断 + GridSearchCV + AutoML 自动寻找最优算法和参数">
+                <i class="bi bi-robot"></i> AI 智能优化
+            </button>
+            <button type="button" class="btn btn-outline-success btn-sm" onclick="toggleParamForm()" title="手动调整参数">
+                <i class="bi bi-sliders"></i> 手动调参
+            </button>
+        </span>
+
         {% if job.model %}
         <a href="{{ url_for('models.model_detail', model_id=job.model.id) }}" class="btn btn-outline-primary">
             <i class="bi bi-cpu"></i> 查看模型
@@ -60,16 +71,26 @@
 <div class="card mb-4" id="paramFormCard" style="display:none;">
     <div class="card-header bg-light d-flex justify-content-between align-items-center">
         <h6 class="mb-0"><i class="bi bi-sliders"></i> 调整训练参数</h6>
-        <button type="button" class="btn-close" onclick="toggleParamForm()" aria-label="关闭"></button>
+        <div>
+            <button type="button" class="btn btn-info btn-sm me-1" id="aiFillRetrainBtn" onclick="aiFillRetrainParams()"
+                    title="AI分析当前训练结果，智能推荐优化参数">
+                <i class="bi bi-magic"></i> AI智能优化参数
+            </button>
+            <button type="button" class="btn-close" onclick="toggleParamForm()" aria-label="关闭"></button>
+        </div>
     </div>
     <div class="card-body">
+        {# AI推荐参数提示区 #}
+        <div id="aiRetrainHint" class="alert alert-info d-none py-2 mb-3">
+            <small><i class="bi bi-robot me-1"></i><span id="aiRetrainHintText"></span></small>
+        </div>
         {% set hparams = (job.model.hyperparameters_dict if job.model else {}) %}
         <form method="POST" action="{{ url_for('training.retrain_job_with_params', job_id=job.id) }}" id="paramRetrainForm">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <div class="row g-3">
                 <div class="col-md-4">
                     <label class="form-label">Learning Rate <small class="text-muted">(学习率)</small></label>
-                    <input type="number" class="form-control form-control-sm" name="learning_rate" step="0.0001"
+                    <input type="number" class="form-control form-control-sm" name="learning_rate" step="any" min="0.000001"
                            placeholder="如 0.001" value="{{ hparams.get('learning_rate', '') }}">
                 </div>
                 <div class="col-md-4">
@@ -80,7 +101,14 @@
                 <div class="col-md-4">
                     <label class="form-label">Epochs <small class="text-muted">(训练轮数)</small></label>
                     <input type="number" class="form-control form-control-sm" name="epochs"
-                           placeholder="如 10" value="{{ job.total_epochs }}">
+                           placeholder="如 10" value="{{ job.total_epochs }}"
+                           {% set algo = hparams.get('algorithm', '') %}
+                           {% if algo in ('linear_regression','ridge','logistic_regression','svm','svr','knn','knn_regressor','kmeans','dbscan','agglomerative','minibatch_kmeans','decision_tree') %}
+                           disabled title="闭环模型({{ algo }})一次训练即收敛，不支持多轮epoch" style="background:#f8f9fa;color:#999;"
+                           {% endif %}>
+                    {% if algo in ('linear_regression','ridge','logistic_regression','svm','svr','knn','knn_regressor','kmeans','dbscan','agglomerative','minibatch_kmeans','decision_tree') %}
+                    <small class="text-muted"><i class="bi bi-info-circle"></i> {{ algo }} 为闭环模型，固定1轮</small>
+                    {% endif %}
                 </div>
                 <div class="col-md-6">
                     <label class="form-label">Hidden Layers <small class="text-muted">(逗号分隔, 如 128,64,32)</small></label>
@@ -101,6 +129,9 @@
                     <label class="form-label">Algorithm <small class="text-muted">(算法)</small></label>
                     <select class="form-select form-select-sm" name="algorithm">
                         <option value="">保持原算法</option>
+                        <optgroup label="NLP 迁移学习">
+                            <option value="transformer_bert">BERT Transformer</option>
+                        </optgroup>
                         <optgroup label="分类">
                             <option value="random_forest">Random Forest</option>
                             <option value="gradient_boosting">Gradient Boosting</option>
@@ -140,6 +171,182 @@
     </div>
 </div>
 
+{# ── AI 智能优化面板 (v8: 整合AI诊断+GridSearchCV+AutoML) ── #}
+{% set hparams = (job.model.hyperparameters_dict if job.model else {}) %}
+{% set current_algo = hparams.get('algorithm', 'random_forest') %}
+{% set current_task = (job.model.model_type if job.model else '') or hparams.get('task_type') or hparams.get('ml_task_type') or 'classification' %}
+<div class="card mb-4 border-primary" id="aiOptimizationPanel" style="display:none;">
+    <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center py-2">
+        <h6 class="mb-0"><i class="bi bi-robot me-2"></i>AI 智能优化中心</h6>
+        <div>
+            <small class="me-3" id="aiPanelTaskInfo">{{ current_task }} / {{ current_algo }}</small>
+            <button type="button" class="btn-close btn-close-white" onclick="toggleAIOptimizationPanel()" aria-label="关闭"></button>
+        </div>
+    </div>
+    <div class="card-body py-2">
+
+        {# ── Tab 导航 ── #}
+        <ul class="nav nav-tabs nav-tabs-sm mb-3" id="aiPanelTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="ai-tab-diagnosis" data-bs-toggle="tab"
+                        data-bs-target="#aiPaneDiagnosis" type="button" role="tab">
+                    <i class="bi bi-clipboard2-pulse me-1"></i>AI 诊断
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="ai-tab-gridsearch" data-bs-toggle="tab"
+                        data-bs-target="#aiPaneGridSearch" type="button" role="tab">
+                    <i class="bi bi-search me-1"></i>GridSearchCV 单算法调优
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="ai-tab-automl" data-bs-toggle="tab"
+                        data-bs-target="#aiPaneAutoML" type="button" role="tab">
+                    <i class="bi bi-cpu me-1"></i>AutoML 全算法对比
+                </button>
+            </li>
+        </ul>
+
+        <div class="tab-content">
+            {# ── Tab 1: AI 诊断 ── #}
+            <div class="tab-pane fade show active" id="aiPaneDiagnosis" role="tabpanel">
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <div class="card bg-light h-100">
+                            <div class="card-body text-center py-3">
+                                <div class="display-6 fw-bold" id="aiHealthScore">--</div>
+                                <small class="text-muted">健康度评分 (0-100)</small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-8">
+                        <div id="aiDiagnosisProblems" class="small">
+                            <span class="text-muted">点击下方按钮开始AI诊断...</span>
+                        </div>
+                        <div class="mt-2 d-flex gap-2">
+                            <button type="button" class="btn btn-info btn-sm" id="aiDiagBtn"
+                                    onclick="runAIDiagnosis()">
+                                <i class="bi bi-clipboard2-pulse me-1"></i>开始AI诊断
+                            </button>
+                            <button type="button" class="btn btn-outline-info btn-sm" id="aiDiagFillBtn"
+                                    onclick="applyAIDiagToForm()" style="display:none;">
+                                <i class="bi bi-magic me-1"></i>应用推荐参数到表单
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div id="aiDiagSuggestions" class="mt-3 small"></div>
+            </div>
+
+            {# ── Tab 2: GridSearchCV 单算法调优 ── #}
+            <div class="tab-pane fade" id="aiPaneGridSearch" role="tabpanel">
+                <div class="row g-2 mb-3">
+                    <div class="col-md-4">
+                        <label class="form-label small">算法</label>
+                        <input class="form-control form-control-sm" id="gsAlgo" value="{{ current_algo }}" readonly>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small">搜索方法</label>
+                        <select class="form-select form-select-sm" id="gsMethod">
+                            <option value="random">Random Search (快速)</option>
+                            <option value="grid">Grid Search (精确)</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label small">CV折数</label>
+                        <input type="number" class="form-control form-control-sm" id="gsCv" value="3" min="2" max="5">
+                    </div>
+                    <div class="col-md-3 d-flex align-items-end">
+                        <button type="button" class="btn btn-warning btn-sm w-100" id="gsStartBtn"
+                                onclick="startGridSearchOnDetail()">
+                            <i class="bi bi-search me-1"></i>开始搜索
+                        </button>
+                    </div>
+                </div>
+                {# 进度条 #}
+                <div id="gsProgressArea" style="display:none;">
+                    <div class="d-flex justify-content-between mb-1">
+                        <small class="fw-bold" id="gsStatusLabel">正在搜索...</small>
+                        <small id="gsPercentLabel">0%</small>
+                    </div>
+                    <div class="progress mb-2" style="height:18px;">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated bg-warning"
+                             id="gsProgressBar" style="width:0%">0%</div>
+                    </div>
+                    <div class="row g-1 small mb-2">
+                        <div class="col-3"><span class="text-muted">步数:</span> <span id="gsStep">-</span></div>
+                        <div class="col-3"><span class="text-muted">耗时:</span> <span id="gsTime">-</span></div>
+                        <div class="col-3"><span class="text-muted">最佳:</span> <strong class="text-success" id="gsBest">--</strong></div>
+                        <div class="col-3"><span class="text-muted">最近:</span> <span id="gsCurrent">--</span></div>
+                    </div>
+                </div>
+                {# 结果区 #}
+                <div id="gsResultArea" class="mt-2" style="display:none;">
+                    <div class="alert alert-success py-2 mb-2">
+                        <small><strong>最佳参数:</strong> <code id="gsBestParams">--</code></small>
+                    </div>
+                    <button type="button" class="btn btn-success btn-sm" onclick="applyGridSearchResult()">
+                        <i class="bi bi-check-circle me-1"></i>应用最佳参数并重新训练
+                    </button>
+                </div>
+            </div>
+
+            {# ── Tab 3: AutoML 全算法对比 ── #}
+            <div class="tab-pane fade" id="aiPaneAutoML" role="tabpanel">
+                <div class="row g-2 mb-3">
+                    <div class="col-md-6">
+                        <label class="form-label small">任务类型</label>
+                        <input class="form-control form-control-sm" id="amlTaskType" value="{{ current_task }}" readonly>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small">CV折数</label>
+                        <input type="number" class="form-control form-control-sm" id="amlCv" value="3" min="2" max="5">
+                    </div>
+                    <div class="col-md-3 d-flex align-items-end">
+                        <button type="button" class="btn btn-primary btn-sm w-100" id="amlStartBtn"
+                                onclick="startAutoMLOnDetail()">
+                            <i class="bi bi-robot me-1"></i>启动 AutoML
+                        </button>
+                    </div>
+                </div>
+                {# 进度 #}
+                <div id="amlProgressArea" style="display:none;">
+                    <div class="d-flex justify-content-between mb-1">
+                        <small class="fw-bold" id="amlStatusLabel">正在搜索...</small>
+                        <small id="amlPercentLabel">0%</small>
+                    </div>
+                    <div class="progress mb-2" style="height:18px;">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated bg-primary"
+                             id="amlProgressBar" style="width:0%">0%</div>
+                    </div>
+                    <div class="row g-1 small mb-2">
+                        <div class="col-3"><span class="text-muted">步数:</span> <span id="amlStep">-</span></div>
+                        <div class="col-3"><span class="text-muted">耗时:</span> <span id="amlTime">-</span></div>
+                        <div class="col-3"><span class="text-muted">全局最佳:</span> <strong class="text-success" id="amlBest">--</strong></div>
+                        <div class="col-3"><span class="text-muted">当前算法:</span> <span id="amlCurAlgo">-</span></div>
+                    </div>
+                    {# 日志 #}
+                    <div id="amlLogBox" class="small mb-2"
+                         style="max-height:80px;overflow-y:auto;background:#1a1a2e;color:#0f0;font-family:monospace;font-size:0.7rem;padding:4px 8px;border-radius:4px;">
+                    </div>
+                </div>
+                {# 结果对比表 #}
+                <div id="amlResultArea" style="display:none;">
+                    <div class="table-responsive" style="max-height:250px;">
+                        <table class="table table-sm table-hover small mb-2" id="amlRankTable">
+                            <thead><tr><th>算法</th><th>框架</th><th>最佳分数</th><th>耗时</th><th>操作</th></tr></thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                    <button type="button" class="btn btn-success btn-sm" onclick="applyAutoMLResult()">
+                        <i class="bi bi-check-circle me-1"></i>应用最佳算法+参数并训练
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="row g-4">
     <!-- 左侧: 进度 + 图表 + 日志 -->
     <div class="col-lg-8">
@@ -152,9 +359,12 @@
                         {{ job.status }}
                     </span>
                 </div>
-                <div class="progress mb-2" style="height: 32px;">
-                    <div id="progressBar" class="progress-bar progress-bar-striped {% if job.status == 'running' %}progress-bar-animated{% endif %} bg-gradient"
-                         style="width:{{ job.progress_percent }}%; transition: width 0.5s ease;">
+                <div class="progress mb-2" style="height: 42px;">
+                    <div id="progressBar" class="progress-bar progress-bar-striped {% if job.status == 'running' %}progress-bar-animated{% endif %}"
+                         style="width:{{ job.progress_percent }}%; transition: width 0.5s ease;
+                                background: linear-gradient(90deg, #4361ee, #3a0ca3) !important;
+                                text-shadow: 0 1px 3px rgba(0,0,0,0.4);
+                                font-size: 1rem;">
                         <span id="progressText" class="fw-bold">{{ job.progress_percent }}%</span>
                     </div>
                 </div>
@@ -279,9 +489,8 @@
             </div>
         </div>
 
-        {# 参数调优引导面板 #}
-        {% if job.status in ('completed', 'failed') and job.metrics_history %}
-        <div class="card mb-3" id="guidanceCard">
+        {# 参数调优引导面板 — 始终渲染，训练完成后自动显示 #}
+        <div class="card mb-3" id="guidanceCard" style="{% if job.status not in ('completed', 'failed') or not job.metrics_history %}display:none;{% endif %}">
             <div class="card-header d-flex justify-content-between align-items-center" style="cursor:pointer;" onclick="loadGuidance()">
                 <h6 class="mb-0"><i class="bi bi-lightbulb"></i> AI 调参建议</h6>
                 <small class="text-muted" id="guidanceStatus">点击加载</small>
@@ -294,7 +503,6 @@
                 <div id="guidanceContent"></div>
             </div>
         </div>
-        {% endif %}
 
         {% if job.error_message %}
         <div class="card border-danger">
@@ -314,9 +522,11 @@
 {% block extra_js %}
 <script>
 // ============ 训练详情页 — 实时进度监控 + Chart.js 可视化 ============
-const jobId = {{ job.id }};                           // 训练任务ID
+const jobId = {{ job.id }};                           // 训练任务ID (Web路由/SSE使用)
+const jobUuid = '{{ job.uuid }}';                   // 任务UUID (API调用使用)
 const isActive = {{ 'true' if job.status in ('running', 'paused') else 'false' }};  // 任务是否活跃 (用于SSE连接)
 const isRegression = {{ 'true' if job.model and job.model.hyperparameters_dict.get('task_type') == 'regression' else 'false' }}; // 回归/分类任务
+const isClustering = {{ 'true' if job.model and job.model.hyperparameters_dict.get('task_type') == 'clustering' else 'false' }};  // 聚类任务
 let charts = {};           // Chart.js 实例缓存
 let autoScroll = true;     // 日志自动滚屏
 let eventSource = null;    // SSE 事件源
@@ -357,6 +567,592 @@ function toggleParamForm() {
     }
 }
 
+// ========== GridSearchCV 一键优化重训 (v5: 异步+实时进度) ==========
+// tuningEventSource / tuningCompleteHandled 等共享变量由 _tuning_progress_modal.html 提供
+
+/** 获取 CSRF token (base.html meta 标签) */
+function getCSRFToken() {
+    var meta = document.querySelector('meta[name="csrf-token"]');
+    return meta ? meta.getAttribute('content') : '';
+}
+
+async function confirmGridSearchRetrain() {
+    var ok = await showConfirmModal(
+        '将使用 GridSearchCV 自动搜索最优超参数组合并重新训练。\n\n' +
+        '搜索过程可能需要1-5分钟，实时进度将显示在弹窗中。\n\n' +
+        '搜索完成后会自动使用最佳参数重新训练。',
+        'GridSearchCV 自动优化', '开始搜索', 'btn-warning'
+    );
+    if (!ok) return;
+
+    // 显示进度弹窗
+    showTuningProgressModal();
+    tuningCompleteHandled = false;
+
+    try {
+        // 1. 发起异步调优请求
+        var formData = new FormData();
+        formData.append('async', '1');
+
+        var resp = await fetch('/training/' + jobId + '/gridsearch-retrain?async=1', {
+            method: 'POST',
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-CSRFToken': getCSRFToken(),
+            },
+        });
+        var data = await resp.json();
+
+        if (!data.success && data.error) {
+            hideTuningProgressModal();
+            showCenteredMessage(data.error || '启动调优失败', 'error', 5000);
+            return;
+        }
+
+        var tuningId = data.tuning_id;
+        var streamUrl = data.stream_url;
+
+        // 2. 连接 SSE 获取实时进度
+        tuningEventSource = new EventSource(streamUrl);
+        tuningEventSource.onmessage = function(e) {
+            try {
+                var session = JSON.parse(e.data);
+                updateTuningProgressUI(session);
+
+                if (session.status === 'completed' && !tuningCompleteHandled) {
+                    tuningCompleteHandled = true;
+                    onTuningComplete(jobId, tuningId, session);
+                } else if (session.status === 'failed') {
+                    onTuningFailed(session.error || '调优过程发生错误');
+                }
+            } catch(err) {
+                console.error('SSE parse error:', err);
+            }
+        };
+        tuningEventSource.onerror = function(e) {
+            console.error('SSE connection error:', e);
+            // 不要立即关闭 — 可能是暂时断线
+        };
+
+    } catch(err) {
+        hideTuningProgressModal();
+        showCenteredMessage('网络错误: ' + err.message, 'error', 5000);
+    }
+}
+
+{% include 'training/_tuning_progress_modal.html' %}
+
+// ====== detail.html 专有: 调优完成后应用最佳参数 ======
+function onTuningComplete(jobId, tuningId, session) {
+    if (tuningEventSource) { tuningEventSource.close(); tuningEventSource = null; }
+
+    document.getElementById('tuningProgressBar').classList.remove('progress-bar-animated');
+    document.getElementById('tuningProgressBar').classList.add('bg-success');
+    document.getElementById('tuningProgressBar').style.width = '100%';
+    document.getElementById('tuningProgressBar').textContent = '100%';
+    document.getElementById('tuningStatusLabel').textContent = '调优完成! 正在应用最佳参数...';
+
+    fetch('/training/' + jobId + '/apply-tuning', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': getCSRFToken(),
+        },
+        body: JSON.stringify({tuning_id: tuningId}),
+    }).then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.success) {
+            showCenteredMessage(
+                'GridSearchCV 优化完成! 最佳CV分数: ' +
+                parseFloat(data.best_score).toFixed(4) +
+                ' | 最佳参数: ' + JSON.stringify(data.best_params),
+                'success', 5000
+            );
+            setTimeout(function() { window.location.href = data.redirect_url; }, 1500);
+        } else {
+            showCenteredMessage('应用结果失败: ' + data.error, 'error', 5000);
+        }
+        hideTuningProgressModal();
+    }).catch(function(err) {
+        showCenteredMessage('应用结果失败: ' + err.message, 'error', 5000);
+        hideTuningProgressModal();
+    });
+}
+
+// ========== AI智能优化参数填充 (调参重训表单) ==========
+var aiRetrainGuidance = null;
+
+function aiFillRetrainParams() {
+    var btn = document.getElementById('aiFillRetrainBtn');
+    var hintBox = document.getElementById('aiRetrainHint');
+    var hintText = document.getElementById('aiRetrainHintText');
+
+    // 已加载过guidance → 直接应用
+    if (aiRetrainGuidance && aiRetrainGuidance.suggestions) {
+        applyRetrainSuggestions(aiRetrainGuidance);
+        return;
+    }
+
+    // 显示加载状态
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>分析中...';
+
+    fetch('/api/training/' + jobUuid + '/guidance')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-magic"></i> AI智能优化参数';
+
+            if (!data.success) {
+                hintBox.classList.remove('d-none', 'alert-info');
+                hintBox.classList.add('alert-warning');
+                hintText.textContent = 'AI分析失败: ' + (data.message || '未知错误');
+                return;
+            }
+
+            aiRetrainGuidance = data.data;
+            applyRetrainSuggestions(data.data);
+        })
+        .catch(function(err) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-magic"></i> AI智能优化参数';
+            hintBox.classList.remove('d-none', 'alert-info');
+            hintBox.classList.add('alert-warning');
+            hintText.textContent = '网络错误，请稍后重试';
+        });
+}
+
+function applyRetrainSuggestions(guidance) {
+    var suggestions = guidance.suggestions || [];
+    var hintBox = document.getElementById('aiRetrainHint');
+    var hintText = document.getElementById('aiRetrainHintText');
+
+    if (suggestions.length === 0) {
+        hintBox.classList.remove('d-none', 'alert-warning');
+        hintBox.classList.add('alert-info');
+        hintText.textContent = '当前参数已较优，建议微调学习率或epochs即可';
+        return;
+    }
+
+    // 构建提示文本
+    var appliedParams = [];
+    var currentHparams = {{ (job.model.hyperparameters_dict if job.model else {}) | tojson }};
+
+    suggestions.forEach(function(s) {
+        var param = s.param;
+        var formEl = null;
+
+        // 映射建议参数名 → 表单字段名
+        var fieldMap = {
+            'learning_rate': 'learning_rate',
+            'dropout': 'dropout',
+            'batch_size': 'batch_size',
+            'weight_decay': 'weight_decay',
+            'epochs': 'epochs',
+            'hidden_layers': 'hidden_layers_str',
+            'test_size': 'test_size',
+            'early_stopping_patience': 'early_stopping_patience',
+        };
+
+        var fieldName = fieldMap[param];
+        if (fieldName) {
+            formEl = document.querySelector('input[name="' + fieldName + '"]');
+        }
+
+        // 特殊处理: algorithm / framework
+        if (param === 'algorithm') {
+            formEl = document.querySelector('select[name="algorithm"]');
+        } else if (param === 'framework') {
+            formEl = document.querySelector('select[name="framework"]');
+        }
+
+        if (formEl && !formEl.disabled) {
+            var newVal = s.suggested;
+            if (newVal !== undefined && newVal !== null) {
+                if (param === 'hidden_layers') {
+                    newVal = Array.isArray(newVal) ? newVal.join(',') : String(newVal);
+                }
+                formEl.value = newVal;
+                formEl.style.borderColor = '#0dcaf0';
+                formEl.style.boxShadow = '0 0 0 0.2rem rgba(13,202,240,0.25)';
+                appliedParams.push(param + ': ' + JSON.stringify(s.suggested));
+                // 3秒后恢复样式
+                setTimeout((function(el) {
+                    return function() {
+                        el.style.borderColor = '';
+                        el.style.boxShadow = '';
+                    };
+                })(formEl), 3000);
+            }
+        }
+
+        // 显示备选建议 (如更换算法)
+        if (s.action === 'change' && s.suggested) {
+            appliedParams.push('建议切换: ' + param + ' → ' + s.suggested + ' (' + (s.reason || '') + ')');
+        }
+    });
+
+    // 显示操作提示
+    if (appliedParams.length > 0) {
+        hintBox.classList.remove('d-none', 'alert-warning');
+        hintBox.classList.add('alert-info');
+        hintText.innerHTML = '<strong>AI已优化 ' + appliedParams.length + ' 项参数:</strong> ' +
+            appliedParams.slice(0, 5).join('; ') +
+            (appliedParams.length > 5 ? ' ...' : '') +
+            '<br><small class="text-muted">蓝色高亮字段已自动填充，请确认后点击"使用新参数重新训练"</small>';
+    }
+
+    // 显示健康度
+    if (guidance.health_score !== undefined) {
+        var healthIcon = guidance.health_score >= 80 ? '🟢' :
+                        (guidance.health_score >= 60 ? '🟡' :
+                        (guidance.health_score >= 40 ? '🟠' : '🔴'));
+        hintText.innerHTML += '<br><small>' + healthIcon + ' 当前模型健康度: <strong>' +
+            guidance.health_score + '/100</strong> — ' + (guidance.diagnosis || '') + '</small>';
+    }
+}
+
+// 如果guidance已加载且用户打开参数表单，自动预填
+var origToggleParamForm = toggleParamForm;
+toggleParamForm = function() {
+    var card = document.getElementById('paramFormCard');
+    var isOpening = (card.style.display === 'none' || !card.style.display);
+    origToggleParamForm();
+    // 打开表单时尝试自动加载AI建议
+    if (isOpening && !aiRetrainGuidance) {
+        // 如果 guidance API 已调用过，关联数据
+        if (guidanceLoaded) {
+            setTimeout(function() {
+                var btn = document.getElementById('aiFillRetrainBtn');
+                if (btn && !aiRetrainGuidance) {
+                    btn.click();
+                }
+            }, 300);
+        }
+    }
+};
+
+// ===================================================================
+// AI 智能优化面板 (v8) — 整合诊断+GridSearchCV+AutoML
+// ===================================================================
+var aiPanelGsResult = null;  // GridSearchCV 结果缓存
+var aiPanelAmlResult = null; // AutoML 结果缓存
+
+function toggleAIOptimizationPanel() {
+    var panel = document.getElementById('aiOptimizationPanel');
+    if (!panel.style.display || panel.style.display === 'none') {
+        panel.style.display = '';
+        panel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // 自动触发AI诊断
+        if (!aiDiagRan) { setTimeout(function() { runAIDiagnosis(); }, 500); }
+    } else {
+        panel.style.display = 'none';
+    }
+}
+
+// ── Tab 1: AI 诊断 ──
+var aiDiagRan = false;
+var aiDiagData = null;
+
+function runAIDiagnosis() {
+    var btn = document.getElementById('aiDiagBtn');
+    var scoreEl = document.getElementById('aiHealthScore');
+    var problemsEl = document.getElementById('aiDiagnosisProblems');
+    var suggestEl = document.getElementById('aiDiagSuggestions');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>分析中...';
+
+    fetch('/api/training/' + jobUuid + '/guidance')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-clipboard2-pulse me-1"></i>重新诊断';
+            aiDiagRan = true;
+
+            if (!data.success) {
+                problemsEl.innerHTML = '<span class="text-danger">诊断失败: ' + (data.message || '未知') + '</span>';
+                return;
+            }
+            aiDiagData = data.data;
+            var g = data.data;
+            scoreEl.textContent = g.health_score || '?';
+            scoreEl.className = 'display-6 fw-bold ' +
+                (g.health_score >= 80 ? 'text-success' : g.health_score >= 60 ? 'text-warning' : g.health_score >= 40 ? 'text-orange' : 'text-danger');
+
+            problemsEl.innerHTML = '<strong>检测到的问题:</strong>' +
+                (g.problems && g.problems.length ? g.problems.map(function(p) {
+                    return '<div class="mt-1"><span class="badge bg-warning text-dark me-1">' + (p.severity || 'warn') + '</span>' + p.description + '</div>';
+                }).join('') : '<div class="text-success mt-1">✓ 未检测到明显问题</div>');
+
+            if (g.suggestions && g.suggestions.length) {
+                var sugHtml = '<strong>参数调整建议:</strong><ul class="mb-0 mt-1">';
+                g.suggestions.forEach(function(s) {
+                    sugHtml += '<li><code>' + s.param + '</code> → <strong>' + JSON.stringify(s.suggested) + '</strong> (' + (s.reason || '') + ')</li>';
+                });
+                sugHtml += '</ul>';
+                suggestEl.innerHTML = sugHtml;
+            }
+
+            document.getElementById('aiDiagFillBtn').style.display = '';
+        })
+        .catch(function(err) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-clipboard2-pulse me-1"></i>开始AI诊断';
+            problemsEl.innerHTML = '<span class="text-danger">网络错误: ' + err.message + '</span>';
+        });
+}
+
+function applyAIDiagToForm() {
+    if (!aiDiagData || !aiDiagData.suggestions) return;
+    toggleParamForm();
+    var card = document.getElementById('paramFormCard');
+    if (!card.style.display || card.style.display === 'none') {
+        card.style.display = '';
+    }
+    aiDiagData.suggestions.forEach(function(s) {
+        var el = document.querySelector('[name="' + s.param + '"]');
+        if (el && !el.disabled) {
+            var v = s.suggested;
+            if (s.param === 'hidden_layers' || s.param === 'hidden_layers_str') {
+                v = Array.isArray(v) ? v.join(',') : String(v);
+                el = document.querySelector('[name="hidden_layers_str"]') || el;
+            }
+            el.value = v;
+            el.style.borderColor = '#0dcaf0';
+            el.style.boxShadow = '0 0 0 0.2rem rgba(13,202,240,0.25)';
+        }
+    });
+    showCenteredMessage('AI推荐参数已填充到表单, 请确认后提交', 'info', 3000);
+}
+
+// ── Tab 2/3 通用: SSE进度+结果处理 ──
+function showAIProgress(prefix) {
+    document.getElementById(prefix + 'ProgressArea').style.display = '';
+    document.getElementById(prefix + 'ResultArea').style.display = 'none';
+}
+function updateAIProgressUI(s, prefix) {
+    var pct = s.progress_percent || 0;
+    var bar = document.getElementById(prefix + 'ProgressBar');
+    if (bar) { bar.style.width = pct + '%'; bar.textContent = Math.round(pct) + '%'; }
+    var lbl = document.getElementById(prefix + 'PercentLabel');
+    if (lbl) lbl.textContent = Math.round(pct) + '%';
+    var st = document.getElementById(prefix + 'StatusLabel');
+    if (st) st.textContent = (s.status === 'completed' ? '搜索完成!' : '正在搜索...');
+    var step = document.getElementById(prefix + 'Step');
+    if (step) step.textContent = (s.current_step||0) + '/' + (s.total_steps||'?');
+    var t = document.getElementById(prefix + 'Time');
+    if (t) t.textContent = (s.elapsed_seconds||0) + 's';
+    var bs = document.getElementById(prefix + 'Best');
+    if (bs && s.best_score_so_far != null) bs.textContent = parseFloat(s.best_score_so_far).toFixed(4);
+    var cs = document.getElementById(prefix + 'Current');
+    if (cs && s.current_score != null) cs.textContent = parseFloat(s.current_score).toFixed(4);
+    if (prefix === 'aml') {
+        var ca = document.getElementById('amlCurAlgo');
+        if (ca && s.best_params_so_far && s.best_params_so_far._current_algo) {
+            ca.textContent = s.best_params_so_far._current_algo;
+        }
+        if (s.log_lines && s.log_lines.length) {
+            var box = document.getElementById('amlLogBox');
+            if (box) {
+                box.innerHTML = s.log_lines.slice(-4).map(function(l) {
+                    return '<div style="white-space:nowrap">' + l.replace(/\[/g,'[').replace(/\]/g,']') + '</div>';
+                }).join('');
+                box.scrollTop = box.scrollHeight;
+            }
+        }
+    }
+}
+
+// ── Tab 2: GridSearchCV 单算法 ──
+function startGridSearchOnDetail() {
+    var algo = document.getElementById('gsAlgo').value;
+    var method = document.getElementById('gsMethod').value;
+    var cv = parseInt(document.getElementById('gsCv').value) || 3;
+    showAIProgress('gs');
+    document.getElementById('gsStartBtn').disabled = true;
+
+    var formData = new FormData();
+    formData.append('algorithm', algo);
+    formData.append('tuning_method', method);
+    formData.append('cv', cv);
+    formData.append('async', '1');
+
+    fetch('/training/' + jobId + '/gridsearch-retrain?async=1', {
+        method: 'POST',
+        headers: { 'X-Requested-With': 'XMLHttpRequest', 'X-CSRFToken': getCSRFToken() },
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (!data.success) {
+            showCenteredMessage(data.error || '启动失败', 'error', 5000);
+            document.getElementById('gsStartBtn').disabled = false;
+            return;
+        }
+        var es = new EventSource(data.stream_url);
+        es.onmessage = function(e) {
+            try {
+                var s = JSON.parse(e.data);
+                updateAIProgressUI(s, 'gs');
+                if (s.status === 'completed') {
+                    es.close();
+                    aiPanelGsResult = s.result || s;
+                    document.getElementById('gsProgressBar').classList.remove('progress-bar-animated');
+                    document.getElementById('gsProgressBar').classList.add('bg-success');
+                    document.getElementById('gsBestParams').textContent = JSON.stringify(aiPanelGsResult.best_params || s.best_params_so_far || {});
+                    document.getElementById('gsResultArea').style.display = '';
+                    document.getElementById('gsStartBtn').disabled = false;
+                } else if (s.status === 'failed') {
+                    es.close();
+                    showCenteredMessage('搜索失败: ' + (s.error || '未知'), 'error', 5000);
+                    document.getElementById('gsStartBtn').disabled = false;
+                }
+            } catch(ex) {}
+        };
+        es.onerror = function() { if (es.readyState === EventSource.CLOSED) { es.close(); } };
+    })
+    .catch(function(err) {
+        showCenteredMessage('网络错误: ' + err.message, 'error', 5000);
+        document.getElementById('gsStartBtn').disabled = false;
+    });
+}
+
+function applyGridSearchResult() {
+    if (!aiPanelGsResult) return;
+    var bestParams = aiPanelGsResult.best_params || {};
+    var bestScore = aiPanelGsResult.best_score || 0;
+
+    var formData = new FormData();
+    formData.append('algorithm', document.getElementById('gsAlgo').value);
+    for (var k in bestParams) { formData.append(k, bestParams[k]); }
+    formData.append('total_epochs', 1);
+    formData.append('epochs', 1);
+
+    fetch('/training/' + jobId + '/retrain-with-params', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': getCSRFToken() },
+        body: formData,
+    }).then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (d.success) {
+            showCenteredMessage('已应用最优参数! 分数: ' + bestScore.toFixed(4), 'success', 3000);
+            setTimeout(function() { location.reload(); }, 1500);
+        } else {
+            showCenteredMessage('应用失败: ' + (d.error || d.message || '未知'), 'error', 5000);
+        }
+    });
+}
+
+// ── Tab 3: AutoML 全算法对比 ──
+function startAutoMLOnDetail() {
+    var cv = parseInt(document.getElementById('amlCv').value) || 3;
+    showAIProgress('aml');
+    document.getElementById('amlStartBtn').disabled = true;
+    document.getElementById('amlLogBox').innerHTML = '<div>正在连接...</div>';
+
+    var formData = new FormData();
+    formData.append('algorithm', 'auto');
+    formData.append('ml_task_type', document.getElementById('amlTaskType').value);
+    formData.append('cv', cv);
+    formData.append('async', '1');
+    formData.append('dataset_id', '{{ job.dataset_id }}');
+
+    fetch('/training/tuning?async=1', {
+        method: 'POST',
+        headers: { 'X-Requested-With': 'XMLHttpRequest', 'X-CSRFToken': getCSRFToken() },
+        body: formData,
+    }).then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (!data.success) {
+            showCenteredMessage(data.error || '启动失败', 'error', 5000);
+            document.getElementById('amlStartBtn').disabled = false;
+            return;
+        }
+        var es = new EventSource(data.stream_url);
+        es.onmessage = function(e) {
+            try {
+                var s = JSON.parse(e.data);
+                updateAIProgressUI(s, 'aml');
+                if (s.status === 'completed') {
+                    es.close();
+                    aiPanelAmlResult = s.result || s;
+                    document.getElementById('amlProgressBar').classList.remove('progress-bar-animated');
+                    document.getElementById('amlProgressBar').classList.add('bg-success');
+                    renderAutoMLRankTable(aiPanelAmlResult);
+                    document.getElementById('amlResultArea').style.display = '';
+                    document.getElementById('amlStartBtn').disabled = false;
+                } else if (s.status === 'failed') {
+                    es.close();
+                    showCenteredMessage('AutoML失败: ' + (s.error || '未知'), 'error', 5000);
+                    document.getElementById('amlStartBtn').disabled = false;
+                }
+            } catch(ex) {}
+        };
+        es.onerror = function() { if (es.readyState === EventSource.CLOSED) es.close(); };
+    })
+    .catch(function(err) {
+        showCenteredMessage('网络错误: ' + err.message, 'error', 5000);
+        document.getElementById('amlStartBtn').disabled = false;
+    });
+}
+
+function renderAutoMLRankTable(result) {
+    var tbody = document.querySelector('#amlRankTable tbody');
+    if (!tbody || !result || !result.algo_results) return;
+    tbody.innerHTML = result.algo_results.map(function(r, i) {
+        var isBest = r.algo === result.best_algo;
+        return '<tr class="' + (isBest ? 'table-success' : '') + '">' +
+            '<td>' + (isBest ? '🏆 ' : '') + (r.label || r.algo) + '</td>' +
+            '<td>' + (r.framework || '-') + '</td>' +
+            '<td><strong>' + (r.best_score != null ? r.best_score.toFixed(4) : '-') + '</strong></td>' +
+            '<td>' + (r.search_time || '?') + 's</td>' +
+            '<td><button class="btn btn-outline-success btn-sm py-0" onclick="applyAutoMLAlgo(\'' + r.algo + '\',\'' + (r.framework||'sklearn') + '\')">选用</button></td>' +
+            '</tr>';
+    }).join('');
+}
+
+function applyAutoMLResult() {
+    if (!aiPanelAmlResult) return;
+    applyAutoMLAlgo(aiPanelAmlResult.best_algo, aiPanelAmlResult.best_framework || 'sklearn');
+}
+
+function applyAutoMLAlgo(algo, framework) {
+    var bestParams = {};
+    if (aiPanelAmlResult && aiPanelAmlResult.best_algo === algo) {
+        bestParams = aiPanelAmlResult.best_params || {};
+    } else {
+        // 从 algo_results 中找
+        var results = aiPanelAmlResult.algo_results || [];
+        for (var i = 0; i < results.length; i++) {
+            if (results[i].algo === algo) { bestParams = results[i].best_params || {}; break; }
+        }
+    }
+
+    var formData = new FormData();
+    formData.append('algorithm', algo);
+    formData.append('framework', framework);
+    formData.append('ml_task_type', aiPanelAmlResult.task_type || document.getElementById('amlTaskType').value);
+    for (var k in bestParams) { if (k !== 'algorithm') formData.append(k, bestParams[k]); }
+    formData.append('total_epochs', (algo === 'mlp') ? 20 : 1);
+
+    fetch('/training/' + jobId + '/retrain-with-params', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': getCSRFToken() },
+        body: formData,
+    }).then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (d.success) {
+            showCenteredMessage('已选用 ' + algo + ', 正在重新训练...', 'success', 3000);
+            setTimeout(function() { location.reload(); }, 1500);
+        } else {
+            showCenteredMessage('失败: ' + (d.error || d.message || '未知'), 'error', 5000);
+        }
+    });
+}
+
+// ── 旧兼容: toggleParamForm auto-load AI ──
+var aiRetrainGuidance = null;
+var guidanceLoaded = false;
+
 /** 渲染关键帧时间线 — 每个epoch一个彩色pill徽章显示指标快照 */
 function renderKeyframes(historyArr) {
     var container = document.getElementById('keyframeTimeline');
@@ -372,17 +1168,30 @@ function renderKeyframes(historyArr) {
     for (var i = 0; i < historyArr.length; i++) {
         var m = historyArr[i];
         var epoch = m.epoch || (i + 1);
-        var acc = pickValue(m, ['train_accuracy', 'accuracy', 'acc']);
+        var score, badgeClass, tooltipExtra = '';
+
+        if (isClustering) {
+            // 聚类: 用轮廓系数着色 (-1~1 → 0~1映射)
+            var sil = pickValue(m, ['silhouette_score', 'train_silhouette_score']);
+            var db = pickValue(m, ['davies_bouldin_score', 'train_davies_bouldin_score']);
+            score = sil !== null ? (sil + 1) / 2 : 0.5;  // 映射到 0~1
+            if (sil !== null) tooltipExtra += ' | Silhouette: ' + sil.toFixed(4);
+            if (db !== null) tooltipExtra += ' | DB Index: ' + db.toFixed(4);
+        } else if (isRegression) {
+            var r2 = pickValue(m, ['train_r2', 'r2']);
+            score = r2 !== null ? Math.max(0, r2) : 0.5;
+            if (r2 !== null) tooltipExtra += ' | R²: ' + r2.toFixed(4);
+        } else {
+            var acc = pickValue(m, ['train_accuracy', 'accuracy', 'acc']);
+            score = acc !== null ? acc : 0.5;
+            if (acc !== null) tooltipExtra += ' | Acc: ' + (acc*100).toFixed(1) + '%';
+        }
+
         var loss = pickValue(m, ['train_loss', 'loss']);
-        var r2 = pickValue(m, ['train_r2', 'r2']);
-        // 颜色: 根据准确率 (或 R²) 渐变
-        var score = acc !== null ? acc : (r2 !== null ? Math.max(0, r2) : 0.5);
-        var hue = Math.round(120 * Math.min(1, score)); // 0→红, 1→绿
-        var badgeClass = score >= 0.8 ? 'bg-success' : (score >= 0.6 ? 'bg-info' : (score >= 0.4 ? 'bg-warning text-dark' : 'bg-danger'));
-        html += '<span class="badge ' + badgeClass + ' keyframe-pill" title="Epoch ' + epoch;
-        if (acc !== null) html += ' | Acc: ' + (acc*100).toFixed(1) + '%';
-        if (loss !== null) html += ' | Loss: ' + loss.toFixed(4);
-        if (r2 !== null) html += ' | R²: ' + r2.toFixed(4);
+        if (loss !== null) tooltipExtra += ' | Loss: ' + loss.toFixed(4);
+
+        badgeClass = score >= 0.8 ? 'bg-success' : (score >= 0.6 ? 'bg-info' : (score >= 0.4 ? 'bg-warning text-dark' : 'bg-danger'));
+        html += '<span class="badge ' + badgeClass + ' keyframe-pill" title="Epoch ' + epoch + tooltipExtra;
         html += '" style="cursor:default; font-size:0.78rem;">Ep ' + epoch + '</span>';
     }
     container.innerHTML = html;
@@ -415,22 +1224,69 @@ function pickValue(m, keys) {
     return null;
 }
 
-/** 构建训练图表数据 — {labels: [epoch], datasets: [score1, score2]} */
+/** 从历史数据中检测实际存在的指标键名 */
+var _detectedMetricKeys = null;
+function detectMetricKeys(historyArr) {
+    if (_detectedMetricKeys || !historyArr || historyArr.length === 0) return;
+    var keys = new Set();
+    for (var i = 0; i < historyArr.length; i++) {
+        Object.keys(historyArr[i]).forEach(function(k) { keys.add(k); });
+    }
+    _detectedMetricKeys = keys;
+}
+
+/** 构建训练图表数据 — 自动检测可用指标，不再依赖固定的 task_type 假设 */
 function buildChartData(historyArr) {
-    var labels = [];
-    var ds0 = [], ds1 = [];
+    detectMetricKeys(historyArr);
+    var keys = _detectedMetricKeys || new Set();
+    var labels = [], ds0 = [], ds1 = [];
+
+    // 确定指标对 (优先匹配实际数据中存在的键)
+    var pair0, pair1;
+    if (isClustering) {
+        pair0 = ['train_silhouette_score', 'silhouette_score', 'test_silhouette_score'];
+        pair1 = ['train_calinski_harabasz_score', 'calinski_harabasz_score'];
+        // 如果聚类指标不存在 (深度学习训练器)，回退到 loss/val_loss
+        if (!hasAnyKey(keys, pair0) && !hasAnyKey(keys, pair1)) {
+            pair0 = ['train_loss', 'loss'];
+            pair1 = ['val_loss'];
+        }
+    } else if (isRegression) {
+        pair0 = ['train_mse', 'mse', 'test_mse'];
+        pair1 = ['train_r2', 'r2'];
+        // R² 不存在则用 loss 代替
+        if (!hasAnyKey(keys, pair1)) {
+            pair1 = ['train_loss', 'loss'];
+        }
+    } else {
+        pair0 = ['train_accuracy', 'accuracy', 'acc'];
+        pair1 = ['train_f1_score', 'f1_score', 'f1'];
+        // 聚类指标可能存在 (如 sklearn 聚类)
+        if (!hasAnyKey(keys, pair0) && !hasAnyKey(keys, pair1)) {
+            if (hasAnyKey(keys, ['train_silhouette_score', 'silhouette_score'])) {
+                pair0 = ['train_silhouette_score', 'silhouette_score'];
+                pair1 = ['train_davies_bouldin_score', 'davies_bouldin_score'];
+            } else {
+                pair0 = ['train_loss', 'loss'];
+                pair1 = ['val_loss'];
+            }
+        }
+    }
+
     for (var i = 0; i < historyArr.length; i++) {
         var m = historyArr[i];
         labels.push(m.epoch || (i + 1));
-        if (isRegression) {
-            ds0.push(pickValue(m, ['train_mse', 'mse']));
-            ds1.push(pickValue(m, ['train_r2', 'r2']));
-        } else {
-            ds0.push(pickValue(m, ['train_accuracy', 'accuracy', 'acc']));
-            ds1.push(pickValue(m, ['train_f1_score', 'f1_score', 'f1']));
-        }
+        ds0.push(pickValue(m, pair0));
+        ds1.push(pickValue(m, pair1));
     }
-    return { labels: labels, datasets: [ds0, ds1] };
+    return { labels: labels, datasets: [ds0, ds1], keys: [pair0, pair1] };
+}
+
+function hasAnyKey(keySet, candidates) {
+    for (var i = 0; i < candidates.length; i++) {
+        if (keySet.has(candidates[i])) return true;
+    }
+    return false;
 }
 
 /** 构建 Loss 数据 — 独立于指标数据, 用于Loss标签页 */
@@ -439,7 +1295,12 @@ function buildLossData(historyArr) {
     for (var i = 0; i < historyArr.length; i++) {
         var m = historyArr[i];
         labels.push(m.epoch || (i + 1));
-        data.push(pickValue(m, ['loss', 'train_loss']));
+        if (isClustering) {
+            // 聚类: inertia 或 davies_bouldin (越低越好, 类似 loss)
+            data.push(pickValue(m, ['inertia', 'davies_bouldin_score', 'loss', 'train_loss']));
+        } else {
+            data.push(pickValue(m, ['loss', 'train_loss']));
+        }
     }
     return { labels: labels, data: data };
 }
@@ -452,15 +1313,35 @@ function initCharts() {
         var wasHidden = lossContainer.style.display === 'none';
         if (wasHidden) lossContainer.style.display = '';
 
-        // 主指标图
+        // 主指标图 — 三种任务类型各有不同指标对
         var ctx1 = document.getElementById('metricsChart').getContext('2d');
-        var metricDatasets = isRegression ? [
-            { label: 'MSE', data: [], borderColor: '#e74a3b', backgroundColor: 'rgba(231,74,59,0.1)', tension: 0.3, fill: true, pointRadius: 3, spanGaps: true },
-            { label: 'R²', data: [], borderColor: '#1cc88a', backgroundColor: 'rgba(28,200,138,0.1)', tension: 0.3, fill: true, pointRadius: 3, spanGaps: true },
-        ] : [
-            { label: 'Accuracy', data: [], borderColor: '#1cc88a', backgroundColor: 'rgba(28,200,138,0.1)', tension: 0.3, fill: true, pointRadius: 3, spanGaps: true },
-            { label: 'F1 Score', data: [], borderColor: '#4e73df', backgroundColor: 'rgba(78,115,223,0.1)', tension: 0.3, fill: true, pointRadius: 3, spanGaps: true },
-        ];
+        var metricDatasets, yAxisConfig;
+        if (isClustering) {
+            metricDatasets = [
+                { label: 'Silhouette', data: [], borderColor: '#1cc88a', backgroundColor: 'rgba(28,200,138,0.1)', tension: 0.3, fill: true, pointRadius: 3, spanGaps: true },
+                { label: 'Calinski-Harabasz', data: [], borderColor: '#4e73df', backgroundColor: 'rgba(78,115,223,0.1)', tension: 0.3, fill: true, pointRadius: 3, spanGaps: true, yAxisID: 'y1' },
+            ];
+            yAxisConfig = {
+                y: { beginAtZero: false, title: { display: true, text: 'Silhouette Score' }, min: -1, max: 1 },
+                y1: { position: 'right', beginAtZero: true, title: { display: true, text: 'CH Index' }, grid: { drawOnChartArea: false } }
+            };
+        } else if (isRegression) {
+            metricDatasets = [
+                { label: 'MSE', data: [], borderColor: '#e74a3b', backgroundColor: 'rgba(231,74,59,0.1)', tension: 0.3, fill: true, pointRadius: 3, spanGaps: true },
+                { label: 'R²', data: [], borderColor: '#1cc88a', backgroundColor: 'rgba(28,200,138,0.1)', tension: 0.3, fill: true, pointRadius: 3, spanGaps: true },
+            ];
+            yAxisConfig = {
+                y: { beginAtZero: false, title: { display: true, text: 'Score' }, min: 0, max: 1 }
+            };
+        } else {
+            metricDatasets = [
+                { label: 'Accuracy', data: [], borderColor: '#1cc88a', backgroundColor: 'rgba(28,200,138,0.1)', tension: 0.3, fill: true, pointRadius: 3, spanGaps: true },
+                { label: 'F1 Score', data: [], borderColor: '#4e73df', backgroundColor: 'rgba(78,115,223,0.1)', tension: 0.3, fill: true, pointRadius: 3, spanGaps: true },
+            ];
+            yAxisConfig = {
+                y: { beginAtZero: false, title: { display: true, text: 'Score' }, min: 0, max: 1 }
+            };
+        }
 
         charts.metrics = new Chart(ctx1, {
             type: 'line',
@@ -470,20 +1351,19 @@ function initCharts() {
                 maintainAspectRatio: false,
                 interaction: { intersect: false, mode: 'index' },
                 plugins: { legend: { position: 'top' } },
-                scales: {
-                    y: { beginAtZero: false, title: { display: true, text: 'Score' }, min: 0, max: 1 }
-                }
+                scales: yAxisConfig
             }
         });
 
-        // Loss 图
+        // Loss 图 — 聚类用 Inertia/DB Index, 其他用 Loss
         var ctx2 = document.getElementById('lossChart').getContext('2d');
+        var lossLabel = isClustering ? 'Inertia / DB Index' : 'Loss';
         charts.loss = new Chart(ctx2, {
             type: 'line',
             data: {
                 labels: [],
                 datasets: [{
-                    label: 'Loss', data: [], borderColor: '#e74a3b',
+                    label: lossLabel, data: [], borderColor: '#e74a3b',
                     backgroundColor: 'rgba(231,74,59,0.15)', tension: 0.3,
                     fill: true, pointRadius: 3, spanGaps: true,
                 }]
@@ -492,7 +1372,7 @@ function initCharts() {
                 responsive: true,
                 maintainAspectRatio: false,
                 plugins: { legend: { position: 'top' } },
-                scales: { y: { beginAtZero: true, title: { display: true, text: 'Loss' } } }
+                scales: { y: { beginAtZero: true, title: { display: true, text: lossLabel } } }
             }
         });
 
@@ -510,47 +1390,163 @@ function initCharts() {
     }
 }
 
-/** 用服务端历史数据填充图表 */
+/** 用服务端历史数据填充图表 (初始加载) */
 function loadHistoryData(historyArr) {
+    updateChartFromHistory(historyArr, 'none');
+}
+
+/** 更新图表数据 (初始加载 + SSE实时推送共用) */
+function updateChartFromHistory(historyArr, updateMode) {
     try {
         var cd = buildChartData(historyArr);
         charts.metrics.data.labels = cd.labels;
         charts.metrics.data.datasets[0].data = cd.datasets[0];
         charts.metrics.data.datasets[1].data = cd.datasets[1];
-        charts.metrics.update();
+
+        // 根据实际检测到的指标键更新图表标签和 Y 轴
+        if (cd.keys) {
+            var label0 = metricKeyToLabel(cd.keys[0]);
+            var label1 = metricKeyToLabel(cd.keys[1]);
+            charts.metrics.data.datasets[0].label = label0;
+            charts.metrics.data.datasets[1].label = label1;
+
+            // 动态调整 Y 轴: Silhouette 用 -1~1, 百分比指标用 0~1, 其他自适应
+            var isSilhouette = label0.indexOf('Silhouette') >= 0;
+            if (isSilhouette) {
+                charts.metrics.options.scales.y.min = -1;
+                charts.metrics.options.scales.y.max = 1;
+            } else {
+                charts.metrics.options.scales.y.min = 0;
+                charts.metrics.options.scales.y.max = undefined;
+            }
+        }
+
+        charts.metrics.update(updateMode || undefined);
 
         var ld = buildLossData(historyArr);
         charts.loss.data.labels = ld.labels;
         charts.loss.data.datasets[0].data = ld.data;
-        charts.loss.update();
+        charts.loss.update(updateMode || undefined);
     } catch(e) {
-        console.error('loadHistoryData error:', e);
+        console.error('updateChartFromHistory error:', e);
     }
 }
 
+/** 指标键名 → 友好显示名 */
+function metricKeyToLabel(keyCandidates) {
+    if (!keyCandidates || !keyCandidates.length) return 'Value';
+    var k = keyCandidates[0];
+    var map = {
+        'train_accuracy': 'Accuracy', 'accuracy': 'Accuracy', 'acc': 'Accuracy',
+        'train_f1_score': 'F1 Score', 'f1_score': 'F1 Score', 'f1': 'F1 Score',
+        'train_mse': 'MSE', 'mse': 'MSE', 'test_mse': 'MSE',
+        'train_r2': 'R²', 'r2': 'R²',
+        'train_silhouette_score': 'Silhouette', 'silhouette_score': 'Silhouette',
+        'train_calinski_harabasz_score': 'Calinski-Harabasz',
+        'train_davies_bouldin_score': 'Davies-Bouldin', 'davies_bouldin_score': 'Davies-Bouldin',
+        'train_inertia': 'Inertia', 'inertia': 'Inertia',
+        'train_loss': 'Train Loss', 'loss': 'Loss',
+        'val_loss': 'Val Loss',
+        'lr': 'Learning Rate',
+    };
+    return map[k] || k.replace(/^train_/, '').replace(/_/g, ' ');
+}
+
 // ========== SSE (Server-Sent Events) 实时推送 ==========
-// 每1秒从服务端推送训练进度/日志/指标，更新进度条+图表+日志
+// 事件类型:
+//   _init         — 初始快照 (完整状态 + metrics_history + log_full)
+//   metrics       — 每epoch指标 (含完整 history → 前端直接渲染图表+关键帧)
+//   log           — 单条日志增量
+//   status_change — 状态变更
+//   is_finished   — 训练结束
 function startStream() {
-    eventSource = new EventSource('/api/stream/training/' + jobId + '/stream');
+    if (eventSource) { eventSource.close(); }
+    eventSource = new EventSource('/api/v1/stream/training/' + jobId + '/stream');
 
     eventSource.onmessage = function(e) {
         try {
-            var data = JSON.parse(e.data);
-            updateUI(data);
+            var msg = JSON.parse(e.data);
 
-            if (data.is_finished) {
-                eventSource.close();
-                document.getElementById('logStatus').textContent = '已完成';
-                document.getElementById('liveIndicator').classList.add('d-none');
-                document.getElementById('progressBar').classList.remove('progress-bar-animated');
-                if (data.final_metrics) showFinalMetrics(data.final_metrics);
-                setTimeout(function() { location.reload(); }, 4000);
+            // 初始快照 — 完整状态 + 指标历史 + 全量日志
+            if (msg._init) {
+                updateUI(msg);
+                return;
             }
-        } catch(err) { console.error('SSE error:', err); }
+
+            // 事件驱动消息 — 增量更新
+            var type = msg.type;
+            var payload = msg.data || {};
+
+            if (type === 'log') {
+                // 单条日志 → 直接追加
+                appendLog(payload.message || '');
+            } else if (type === 'metrics') {
+                // 进度/轮次 → 直接更新 DOM
+                if (payload.current_epoch != null) {
+                    document.getElementById('epochInfo').textContent =
+                        payload.current_epoch + ' / ' + payload.total_epochs;
+                }
+                if (payload.progress_percent != null) {
+                    var p = payload.progress_percent;
+                    document.getElementById('progressBar').style.width = p + '%';
+                    document.getElementById('progressText').textContent = p + '%';
+                }
+                // 完整历史 → 直接渲染图表+关键帧 (零HTTP开销)
+                if (payload.metrics_history && payload.metrics_history.length > 0 && charts.metrics) {
+                    try {
+                        updateChartFromHistory(payload.metrics_history, 'none');
+                        renderKeyframes(payload.metrics_history);
+                    } catch(err) { console.error('SSE chart update error:', err); }
+                }
+                // 日志尾部 → 增量追加 (避免全量替换)
+                if (payload.log_tail) {
+                    appendNewLines(payload.log_tail);
+                }
+                // 仍然触发后台全量拉取作为兜底
+                scheduleStatusRefresh();
+            } else if (type === 'status_change') {
+                var st = payload.status;
+                updateStatusBadgesUI(st);
+                appendLog('[状态] ' + (payload.message || st));
+                if (st === 'completed' || st === 'failed' || st === 'cancelled') {
+                    onTrainingFinished(st);
+                }
+                // 状态变化时强制全量刷新
+                fetchStatusAndUpdate();
+            }
+
+            if (msg.is_finished) {
+                onTrainingFinished(msg.status || 'completed');
+            }
+        } catch(err) { console.error('SSE parse error:', err); }
     };
 
     eventSource.onerror = function() {
-        document.getElementById('logStatus').textContent = '连接中断 (重试中...)';
+        // EventSource 会自动重连, 先检查训练是否已结束
+        fetch('/api/v1/stream/training/' + jobId + '/status')
+            .then(function(r) { return r.json(); })
+            .then(function(resp) {
+                if (resp.success && resp.data) {
+                    var s = resp.data;
+                    if (s.is_finished) {
+                        eventSource.close();
+                        stopStatusPolling();
+                        stopAutoRefresh();
+                        updateUI(s);
+                        showGuidanceCard();
+                        currentStatus = 'completed';
+                        updateStatusBadgesUI('completed');
+                        document.getElementById('logStatus').textContent = '已完成';
+                        document.getElementById('liveIndicator').classList.add('d-none');
+                        return;
+                    }
+                }
+                // 训练仍在进行 → 等待 EventSource 自动重连
+                document.getElementById('logStatus').textContent = '重连中...';
+            })
+            .catch(function() {
+                document.getElementById('logStatus').textContent = '连接中断';
+            });
         document.getElementById('liveIndicator').classList.add('d-none');
     };
 }
@@ -565,7 +1561,7 @@ function updateUI(data) {
     document.getElementById('durationInfo').textContent = data.duration_display || '';
     document.getElementById('sideDuration').textContent = data.duration_display || '';
 
-    // 状态
+    // 状态 + 按钮组
     var statusColors = {completed:'success', failed:'danger', cancelled:'secondary',
         running:'warning', paused:'warning', queued:'info'};
     var color = statusColors[data.status] || 'secondary';
@@ -573,38 +1569,35 @@ function updateUI(data) {
         var el = document.getElementById(id);
         if (el) { el.textContent = data.status; el.className = 'badge fs-6 bg-' + color; }
     });
+    updateActionButtons(data.status);
 
-    // 日志
-    if (data.new_logs) {
-        var logArea = document.getElementById('logArea');
-        logArea.textContent = (logArea.textContent + data.new_logs).slice(-20000);
+    // 日志更新 — 支持增量(new_logs)和全量(log_full/log_tail)
+    var logArea = document.getElementById('logArea');
+    if (logArea) {
+        if (data.log_full) {
+            // 首次/全量覆盖 (SSE初始快照或状态轮询)
+            logArea.textContent = data.log_full;
+        } else if (data.new_logs) {
+            // 增量追加
+            logArea.textContent = (logArea.textContent + data.new_logs).slice(-20000);
+        } else if (data.log_tail && !logArea.textContent) {
+            // 初始加载: 有tail但无全量时填充
+            logArea.textContent = data.log_tail;
+        }
         if (autoScroll) logArea.scrollTop = logArea.scrollHeight;
     }
 
-    // 图表增量更新 — 仅在历史数据点数量变化时刷新 (避免每帧重绘)
+    // 图表 + 关键帧 — 每次有 metrics_history 就刷新
     if (data.metrics_history && data.metrics_history.length > 0 && charts.metrics) {
-        if (charts.metrics.data.labels.length !== data.metrics_history.length) {
-            try {
-                var cd = buildChartData(data.metrics_history);
-                charts.metrics.data.labels = cd.labels;
-                charts.metrics.data.datasets[0].data = cd.datasets[0];
-                charts.metrics.data.datasets[1].data = cd.datasets[1];
-                charts.metrics.update('none');
-
-                var ld = buildLossData(data.metrics_history);
-                charts.loss.data.labels = ld.labels;
-                charts.loss.data.datasets[0].data = ld.data;
-                charts.loss.update('none');
-
-                // 渲染关键帧
-                renderKeyframes(data.metrics_history);
-            } catch(e) { console.error('Chart update error:', e); }
-        }
+        try {
+            updateChartFromHistory(data.metrics_history, 'none');
+            renderKeyframes(data.metrics_history);
+        } catch(e) { console.error('Chart update error:', e); }
     }
 
-    // 关键帧增量更新 (SSE推送了new_keyframes)
-    if (data.new_keyframes && data.new_keyframes.length > 0) {
-        renderKeyframes(data.metrics_history || []);
+    // 最终指标
+    if (data.final_metrics) {
+        showFinalMetrics(data.final_metrics);
     }
 }
 
@@ -644,7 +1637,7 @@ function loadGuidance() {
     document.getElementById('guidanceContent').innerHTML = '';
     status.textContent = '分析中...';
 
-    fetch('/api/training/' + jobId + '/guidance')
+    fetch('/api/training/' + jobUuid + '/guidance')
         .then(function(r) { return r.json(); })
         .then(function(data) {
             document.getElementById('guidanceLoading').style.display = 'none';
@@ -663,7 +1656,7 @@ function loadGuidance() {
             html += '<div class="px-3 pt-2"><strong>' + g.diagnosis + '</strong></div>';
 
             // 健康度条
-            var barColor = g.health_score >= 80 ? 'bg-success' : (g.health_score >= 50 ? 'bg-warning' : 'bg-danger');
+            var barColor = g.health_score >= 90 ? 'bg-success' : (g.health_score >= 75 ? 'bg-info' : (g.health_score >= 60 ? 'bg-warning' : 'bg-danger'));
             html += '<div class="px-3 py-1"><div class="progress" style="height:6px;">';
             html += '<div class="progress-bar ' + barColor + '" style="width:' + g.health_score + '%"></div></div>';
             html += '<small class="text-muted px-3">健康度 ' + g.health_score + '/100</small></div>';
@@ -711,15 +1704,220 @@ function loadGuidance() {
         });
 }
 
+// 辅助: 追加单条日志到日志区域
+function appendLog(message) {
+    var logArea = document.getElementById('logArea');
+    if (!logArea) return;
+    logArea.textContent = (logArea.textContent + message).slice(-20000);
+    if (autoScroll) logArea.scrollTop = logArea.scrollHeight;
+}
+
+// 辅助: 智能追加日志行 (避免重复 — 只追加当前日志区域中不存在的行)
+function appendNewLines(newLines) {
+    var logArea = document.getElementById('logArea');
+    if (!logArea || !newLines) return;
+    var current = logArea.textContent || '';
+    // 如果新行不在当前日志中，追加
+    if (current.indexOf(newLines.trim()) === -1) {
+        logArea.textContent = (current + newLines).slice(-20000);
+        if (autoScroll) logArea.scrollTop = logArea.scrollHeight;
+    }
+}
+
+// 兜底自动刷新 — 每2秒拉取全量状态 (SSE可能因网络/线程原因延迟)
+var _autoRefreshTimer = null;
+var _statusRefreshPending = false;
+function scheduleStatusRefresh() {
+    if (_statusRefreshPending) return;
+    _statusRefreshPending = true;
+    // 300ms防抖 → 批量metrics事件只触发一次全量拉取
+    setTimeout(function() {
+        _statusRefreshPending = false;
+        fetchStatusAndUpdate();
+    }, 300);
+}
+function startAutoRefresh() {
+    if (_autoRefreshTimer) return;
+    _autoRefreshTimer = setInterval(function() {
+        fetch('/api/v1/stream/training/' + jobId + '/status')
+            .then(function(r) { return r.json(); })
+            .then(function(resp) {
+                if (resp.success && resp.data) {
+                    updateUI(resp.data);
+                    // 检测任务结束
+                    if (resp.data.is_finished) {
+                        stopAutoRefresh();
+                    }
+                }
+            })
+            .catch(function() { /* 静默忽略 */ });
+    }, 2000);  // 每2秒兜底刷新
+}
+function stopAutoRefresh() {
+    if (_autoRefreshTimer) { clearInterval(_autoRefreshTimer); _autoRefreshTimer = null; }
+}
+
+// 辅助: 获取完整状态并刷新 (事件驱动模式下仅在指标更新时调用)
+var _statusFetching = false;
+function fetchStatusAndUpdate() {
+    if (_statusFetching) return;  // 防抖
+    _statusFetching = true;
+    fetch('/api/v1/stream/training/' + jobId + '/status')
+        .then(function(r) { return r.json(); })
+        .then(function(resp) {
+            _statusFetching = false;
+            if (resp.success && resp.data) updateUI(resp.data);
+        })
+        .catch(function() { _statusFetching = false; });
+}
+
+// 辅助: 训练结束时的统一处理
+function onTrainingFinished(status) {
+    if (eventSource) { eventSource.close(); eventSource = null; }
+    stopAutoRefresh();
+    document.getElementById('logStatus').textContent = status === 'completed' ? '已完成' : '已结束';
+    document.getElementById('liveIndicator').classList.add('d-none');
+    document.getElementById('progressBar').classList.remove('progress-bar-animated');
+
+    // 显示 AI 调参建议卡片 (服务器端仅 completed/failed 渲染，运行中为隐藏态)
+    showGuidanceCard();
+
+    if (status === 'completed' || status === 'failed') {
+        // 获取最终指标 + 全量刷新
+        fetch('/api/v1/stream/training/' + jobId + '/status')
+            .then(function(r) { return r.json(); })
+            .then(function(resp) {
+                if (resp.success && resp.data) {
+                    if (resp.data.final_metrics) showFinalMetrics(resp.data.final_metrics);
+                    updateUI(resp.data);
+                }
+            });
+    }
+}
+
+// 辅助: 显示 AI 调参建议卡片 (训练完成后调用)
+function showGuidanceCard() {
+    var card = document.getElementById('guidanceCard');
+    if (card) { card.style.display = ''; }
+}
+
+// 辅助: 根据训练状态切换右上角操作按钮组
+function updateActionButtons(status) {
+    // 隐藏所有状态按钮组
+    ['btnGroupQueued','btnGroupRunning','btnGroupPaused','btnGroupFinished'].forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) el.style.display = 'none';
+    });
+    // 显示当前状态对应的按钮组
+    var map = {
+        'queued': 'btnGroupQueued',
+        'running': 'btnGroupRunning',
+        'paused': 'btnGroupPaused',
+        'completed': 'btnGroupFinished',
+        'failed': 'btnGroupFinished',
+        'cancelled': 'btnGroupFinished',
+    };
+    var targetId = map[status];
+    if (targetId) {
+        var target = document.getElementById(targetId);
+        if (target) target.style.display = '';
+    }
+}
+
+// 辅助: 原地更新所有状态徽章（无需页面刷新）
+function updateStatusBadgesUI(status) {
+    var colors = {completed:'success', failed:'danger', cancelled:'secondary',
+        running:'warning', paused:'warning', queued:'info'};
+    var color = colors[status] || 'secondary';
+    ['statusBadge','sideStatus'].forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) { el.textContent = status; el.className = 'badge fs-6 bg-' + color; }
+    });
+    // 同步更新操作按钮
+    updateActionButtons(status);
+}
+
 // ========== 页面启动入口 ==========
 // DOM加载完成后: 初始化图表 → 加载历史数据 → 关键帧 → 如果活跃则连接SSE
+// 如果非活跃则轮询状态变化，实现热加载(无需手动刷新)
+let statusPollTimer = null;
+let currentStatus = '{{ job.status }}';
+
+function startStatusPolling() {
+    if (statusPollTimer) return;
+    statusPollTimer = setInterval(function() {
+        fetch('/api/v1/stream/training/' + jobId + '/status')
+            .then(function(r) { return r.json(); })
+            .then(function(resp) {
+                if (!resp.success || !resp.data) return;
+                var s = resp.data;
+                // 状态变化检测
+                if (s.status !== currentStatus) {
+                    var prev = currentStatus;
+                    currentStatus = s.status;
+                    // 更新状态徽章
+                    var statusColors = {completed:'success', failed:'danger', cancelled:'secondary',
+                        running:'warning', paused:'warning', queued:'info'};
+                    ['statusBadge','sideStatus'].forEach(function(id) {
+                        var el = document.getElementById(id);
+                        if (el) { el.textContent = s.status; el.className = 'badge fs-6 bg-' + (statusColors[s.status]||'secondary'); }
+                    });
+                    // queued/paused → running: 启动SSE + 兜底轮询
+                    if (s.status === 'running' && !eventSource) {
+                        stopStatusPolling();
+                        document.getElementById('liveIndicator').classList.remove('d-none');
+                        document.getElementById('logStatus').textContent = '';
+                        document.getElementById('progressBar').classList.add('progress-bar-animated');
+                        startStream();
+                        startAutoRefresh();
+                        return;
+                    }
+                    // → completed/failed/cancelled: 停止轮询, 刷新页面
+                    if (s.status === 'completed' || s.status === 'failed' || s.status === 'cancelled') {
+                        stopStatusPolling();
+                        stopAutoRefresh();
+                        updateStatusBadgesUI(s.status);
+                        showGuidanceCard();
+                        if (s.final_metrics) showFinalMetrics(s.final_metrics);
+                        document.getElementById('logStatus').textContent = s.status === 'completed' ? '已完成' : '已终止';
+                        document.getElementById('progressBar').classList.remove('progress-bar-animated');
+                        document.getElementById('epochInfo').textContent = (s.current_epoch||0) + ' / ' + (s.total_epochs||0);
+                        // 2s后刷新获取服务端最新数据
+                        setTimeout(function() { location.reload(); }, 2000);
+                        return;
+                    }
+                }
+                // 更新静态进度信息
+                if (s.progress_percent) {
+                    document.getElementById('progressBar').style.width = s.progress_percent + '%';
+                    document.getElementById('progressText').textContent = s.progress_percent + '%';
+                }
+                if (s.duration_display) {
+                    document.getElementById('durationInfo').textContent = s.duration_display;
+                    document.getElementById('sideDuration').textContent = s.duration_display;
+                }
+            })
+            .catch(function() { /* 网络错误忽略 */ });
+    }, 800);  // 高频轮询 0.8s
+}
+
+function stopStatusPolling() {
+    if (statusPollTimer) { clearInterval(statusPollTimer); statusPollTimer = null; }
+}
+
 document.addEventListener('DOMContentLoaded', function() {
     initCharts();
     // 加载初始关键帧
     if (serverHistory.length > 0) {
         renderKeyframes(serverHistory);
     }
-    if (isActive) startStream();
+    if (isActive) {
+        startStream();
+        startAutoRefresh();  // 兜底: 每2秒全量刷新
+    } else {
+        // 非活跃任务 → 轮询检测状态变化 (热加载核心)
+        startStatusPolling();
+    }
     {% if job.final_metrics_json %}
     showFinalMetrics({{ job.final_metrics_json | tojson }});
     {% endif %}
