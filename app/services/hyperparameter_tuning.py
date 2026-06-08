@@ -1199,8 +1199,10 @@ class HyperparameterTuningService:
                 )
                 logger.info(
                     f'GridSearchCV 完成 (attempt {attempt_idx+1}): '
-                    f'{try_algo}/{final_task}, best={grid.best_score_:.4f}, '
-                    f'{search_time}s, {len(grid.cv_results_["mean_test_score"])}组合'
+                    f'{try_algo}/{final_task}, '
+                    f'best={result["best_score"]:.4f}, '
+                    f'{search_time}s, '
+                    f'{result.get("n_combinations", "?")}组合'
                 )
                 return result
 
