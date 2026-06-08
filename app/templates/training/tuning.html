@@ -27,11 +27,36 @@
                             <label class="form-label">数据集 <span class="text-danger">*</span></label>
                             <select name="dataset_id" class="form-select" required id="dataset-select">
                                 <option value="">-- 选择数据集 --</option>
+                                {% set ns = namespace(has_own=false, has_public=false) %}
                                 {% for ds in datasets %}
-                                <option value="{{ ds.id }}" data-columns="{{ ds.columns|tojson }}">
-                                    {{ ds.name }} ({{ ds.row_count or '?' }}行)
-                                </option>
+                                    {% if ds.owner_id == current_user.id %}
+                                        {% set ns.has_own = true %}
+                                    {% else %}
+                                        {% set ns.has_public = true %}
+                                    {% endif %}
                                 {% endfor %}
+                                {% if ns.has_own %}
+                                <optgroup label="-- 我的数据集 --">
+                                {% for ds in datasets %}
+                                    {% if ds.owner_id == current_user.id %}
+                                    <option value="{{ ds.id }}" data-columns="{{ ds.columns|tojson }}">
+                                        {{ ds.name }} ({{ ds.row_count or '?' }}行)
+                                    </option>
+                                    {% endif %}
+                                {% endfor %}
+                                </optgroup>
+                                {% endif %}
+                                {% if ns.has_public %}
+                                <optgroup label="-- 公开数据集 --">
+                                {% for ds in datasets %}
+                                    {% if ds.owner_id != current_user.id %}
+                                    <option value="{{ ds.id }}" data-columns="{{ ds.columns|tojson }}">
+                                        {{ ds.name }} ({{ ds.row_count or '?' }}行{% if ds.owner_name %} - {{ ds.owner_name }}{% endif %})
+                                    </option>
+                                    {% endif %}
+                                {% endfor %}
+                                </optgroup>
+                                {% endif %}
                             </select>
                         </div>
 
@@ -41,23 +66,35 @@
                                 <select name="ml_task_type" class="form-select" id="task-type">
                                     <option value="classification">分类 (Classification)</option>
                                     <option value="regression">回归 (Regression)</option>
+                                    <option value="clustering">聚类 (Clustering)</option>
                                 </select>
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label">算法</label>
                                 <select name="algorithm" class="form-select" id="algorithm-select">
-                                    <optgroup label="分类算法">
+                                    <option value="auto" data-fw="auto">🤖 Auto (智能遍历所有算法)</option>
+                                    <optgroup label="── 分类算法 ──" id="algo-cls">
                                         <option value="random_forest">Random Forest</option>
                                         <option value="gradient_boosting">Gradient Boosting</option>
                                         <option value="logistic_regression">Logistic Regression</option>
                                         <option value="svm">SVM (SVC)</option>
                                         <option value="knn">K-Nearest Neighbors</option>
+                                        <option value="decision_tree">Decision Tree</option>
+                                        <option value="mlp">PyTorch MLP</option>
                                     </optgroup>
-                                    <optgroup label="回归算法">
+                                    <optgroup label="── 回归算法 ──" id="algo-reg">
                                         <option value="linear_regression">Linear Regression</option>
                                         <option value="random_forest_regressor">Random Forest Regressor</option>
                                         <option value="gradient_boosting_regressor">Gradient Boosting Regressor</option>
                                         <option value="svr">SVR</option>
+                                        <option value="ridge">Ridge</option>
+                                        <option value="knn_regressor">KNN Regressor</option>
+                                    </optgroup>
+                                    <optgroup label="── 聚类算法 ──" id="algo-cluster">
+                                        <option value="kmeans">K-Means</option>
+                                        <option value="minibatch_kmeans">MiniBatch K-Means</option>
+                                        <option value="agglomerative">层次聚类</option>
+                                        <option value="dbscan">DBSCAN</option>
                                     </optgroup>
                                 </select>
                             </div>
@@ -208,6 +245,7 @@
 
 {% block scripts %}
 <script>
+{% include 'training/_tuning_progress_modal.html' %}
 // ============ 超参数调优页 — 动态表单联动 + 搜索空间预览 ============
 
 // 数据集选择联动: 切换数据集时更新目标列下拉框 (从 summary_json 解析列名)
@@ -228,15 +266,55 @@ document.getElementById('dataset-select').addEventListener('change', function() 
     }
 });
 
+// 任务类型联动: 切换任务类型时过滤算法下拉 + 清空目标列 (聚类不需要)
+document.getElementById('task-type').addEventListener('change', function() {
+    const taskType = this.value;
+    // 显示/隐藏算法分组
+    document.getElementById('algo-cls').style.display = (taskType === 'classification') ? '' : 'none';
+    document.getElementById('algo-reg').style.display = (taskType === 'regression') ? '' : 'none';
+    document.getElementById('algo-cluster').style.display = (taskType === 'clustering') ? '' : 'none';
+    // 聚类不需要目标列
+    var targetRow = document.getElementById('target-column').closest('.mb-3');
+    if (taskType === 'clustering') {
+        targetRow.style.display = 'none';
+        document.getElementById('algorithm-select').value = 'auto';  // 聚类默认Auto
+    } else {
+        targetRow.style.display = '';
+    }
+    // 触发算法联动
+    document.getElementById('algorithm-select').dispatchEvent(new Event('change'));
+});
+
 // 算法选择联动: 切换算法时更新搜索空间预览 (展示可调参数badge列表)
 const searchSpaces = {{ search_spaces|tojson }};
+// Auto 模式的算法映射 (模板渲染时注入)
+const AUTO_ALGO_LABELS = {
+    classification: ['Random Forest','Gradient Boosting','Logistic Regression','SVM','KNN','Decision Tree','PyTorch MLP'],
+    regression: ['Random Forest Reg.','Gradient Boosting Reg.','Linear Regression','Ridge','SVR','KNN Reg.','PyTorch MLP'],
+    clustering: ['K-Means','MiniBatch K-Means','层次聚类','DBSCAN'],
+};
 document.getElementById('algorithm-select').addEventListener('change', function() {
     const algo = this.value;
+    const taskType = document.getElementById('task-type').value;
     const preview = document.getElementById('search-space-preview');
-    const params = searchSpaces[algo] || [];
-    if (params.length > 0) {
-        preview.innerHTML = '<div class="d-flex flex-wrap gap-1">' +
-            params.map(function(p) {
+
+    if (algo === 'auto') {
+        // Auto模式: 展示所有将遍历的算法
+        var labels = AUTO_ALGO_LABELS[taskType] || [];
+        preview.innerHTML =
+            '<div class="alert alert-info mb-2 py-2">' +
+            '<i class="bi bi-robot me-1"></i><strong>AutoML 模式</strong>: 自动遍历 ' + labels.length + ' 种算法</div>' +
+            '<div class="d-flex flex-wrap gap-1">' +
+            labels.map(function(l) {
+                return '<span class="badge bg-primary">' + l + '</span>';
+            }).join(' ') +
+            '</div>' +
+            '<small class="text-muted mt-2 d-block">每算法快速采样 15 组参数, 约需 1-3 分钟</small>';
+    } else {
+        const params = searchSpaces[algo] || [];
+        if (params.length > 0) {
+            preview.innerHTML = '<div class="d-flex flex-wrap gap-1">' +
+                params.map(function(p) {
                 return '<span class="badge bg-info text-dark">' + p + '</span>';
             }).join(' ') +
             '</div><small class="text-muted mt-2 d-block">共 ' + params.length + ' 个可调参数</small>';
@@ -245,11 +323,100 @@ document.getElementById('algorithm-select').addEventListener('change', function(
     }
 });
 
-// 表单提交防重复: 点击后禁用按钮并显示加载动画 (搜索可能耗时较久)
-document.getElementById('tuning-form').addEventListener('submit', function() {
+// 表单提交: 异步AJAX + SSE实时进度 (防止页面卡死)
+document.getElementById('tuning-form').addEventListener('submit', function(e) {
+    e.preventDefault();
     const btn = document.getElementById('submit-btn');
     btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>搜索中... 请耐心等待';
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>正在启动...';
+
+    var formData = new FormData(this);
+    formData.append('async', '1');
+
+    fetch('{{ url_for("training.hyperparameter_tuning") }}?async=1', {
+        method: 'POST',
+        headers: { 'X-Requested-With': 'XMLHttpRequest' },
+        body: formData,
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (!data.success || !data.tuning_id) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-search me-1"></i>开始调优';
+            showTuningError(data.error || '启动失败');
+            return;
+        }
+
+        // 显示进度弹窗
+        showTuningProgressModal();
+
+        // 连接SSE — 带重试和错误处理
+        function connectTuningSSE(streamUrl, meta) {
+            var es = new EventSource(streamUrl);
+            es.onmessage = function(e) {
+                try {
+                    var session = JSON.parse(e.data);
+                    if (session.error) {
+                        // 后端返回错误 (如会话不存在)
+                        document.getElementById('tuningLogBox').innerHTML =
+                            '<div style="color:#f66">[错误] ' + escapeTuningHtml(session.error) + '</div>';
+                        return;
+                    }
+                    updateTuningProgressUI(session);
+                    if (session.status === 'completed' && !tuningCompleteHandled) {
+                        tuningCompleteHandled = true;
+                        onTuningCompleteForTuningPage(meta, session);
+                    } else if (session.status === 'failed') {
+                        onTuningFailed(session.error || '搜索失败');
+                    }
+                } catch(ex) {}
+            };
+            es.onerror = function() {
+                if (es.readyState === EventSource.CLOSED) {
+                    // 连接完全关闭 — 可能是认证问题或服务器错误
+                    if (tuningSseRetries < MAX_SSE_RETRIES && !tuningCompleteHandled) {
+                        tuningSseRetries++;
+                        document.getElementById('tuningLogBox').innerHTML +=
+                            '<div style="color:#fa0">[重连] 第' + tuningSseRetries + '次重试...</div>';
+                        es.close();
+                        setTimeout(function() {
+                            if (!tuningCompleteHandled) {
+                                tuningEventSource = connectTuningSSE(streamUrl, meta);
+                            }
+                        }, 1000);
+                    } else if (!tuningCompleteHandled) {
+                        document.getElementById('tuningLogBox').innerHTML +=
+                            '<div style="color:#f66">[错误] SSE 连接失败，请检查网络或刷新页面</div>';
+                        document.getElementById('tuningStatusLabel').textContent = '连接失败';
+                        es.close();
+                    }
+                }
+                // readyState === CONNECTING: 自动重连中, 不处理
+            };
+            return es;
+        }
+        tuningEventSource = connectTuningSSE(data.stream_url, data);
+    })
+    .catch(function(err) {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-search me-1"></i>开始调优';
+        alert('Network error: ' + err.message);
+    });
 });
+
+function onTuningCompleteForTuningPage(meta, session) {
+    if (tuningEventSource) { tuningEventSource.close(); tuningEventSource = null; }
+    // 刷新页面显示结果
+    setTimeout(function() { location.reload(); }, 1500);
+}
+
+function showTuningError(msg) {
+    var alertDiv = document.createElement('div');
+    alertDiv.className = 'alert alert-danger alert-dismissible fade show';
+    alertDiv.innerHTML = msg +
+        '<button type="button" class="btn-close" data-bs-dismiss="alert"></button>';
+    var form = document.getElementById('tuning-form');
+    form.parentNode.insertBefore(alertDiv, form);
+}
 </script>
 {% endblock %}

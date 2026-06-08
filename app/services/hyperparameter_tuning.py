@@ -270,13 +270,13 @@ SEARCH_SPACES = {
     'dbscan': {
         'eps': [0.1, 0.3, 0.5, 0.7, 1.0, 1.5],
         'min_samples': [3, 5, 10, 15, 20],
-        'metric': ['euclidean', 'manhattan', 'cosine'],
+        'metric': ['euclidean', 'manhattan'],
         'algorithm': ['auto', 'ball_tree', 'kd_tree'],
     },
     'agglomerative': {
         'n_clusters': [2, 3, 5, 7, 10, 15],
         'linkage': ['ward', 'complete', 'average', 'single'],
-        'metric': ['euclidean', 'manhattan', 'cosine', 'l2', 'l1'],
+        'metric': ['euclidean', 'manhattan', 'cosine'],
     },
     'minibatch_kmeans': {
         'n_clusters': [2, 3, 5, 7, 10, 15],
@@ -305,6 +305,35 @@ PYTORCH_SEARCH_SPACE = {
     'batch_size': [16, 32, 64, 128],
     'dropout': [0.1, 0.2, 0.3, 0.5],
     'weight_decay': [1e-6, 1e-5, 1e-4, 1e-3],
+}
+
+# ── 自动模式: task_type → 算法列表 (AutoML 智能算法选择) ──
+# 每种任务类型的快速扫描算法, 包含对应的推荐框架
+AUTO_ALGORITHMS = {
+    'classification': [
+        {'algo': 'random_forest',    'framework': 'sklearn', 'label': 'Random Forest'},
+        {'algo': 'gradient_boosting','framework': 'sklearn', 'label': 'Gradient Boosting'},
+        {'algo': 'logistic_regression','framework': 'sklearn','label': 'Logistic Regression'},
+        {'algo': 'svm',              'framework': 'sklearn', 'label': 'SVM'},
+        {'algo': 'knn',              'framework': 'sklearn', 'label': 'KNN'},
+        {'algo': 'decision_tree',    'framework': 'sklearn', 'label': 'Decision Tree'},
+        {'algo': 'mlp',              'framework': 'pytorch', 'label': 'PyTorch MLP'},
+    ],
+    'regression': [
+        {'algo': 'random_forest_regressor','framework': 'sklearn','label': 'Random Forest'},
+        {'algo': 'gradient_boosting_regressor','framework': 'sklearn','label': 'Gradient Boosting'},
+        {'algo': 'linear_regression', 'framework': 'sklearn', 'label': 'Linear Regression'},
+        {'algo': 'ridge',            'framework': 'sklearn', 'label': 'Ridge'},
+        {'algo': 'svr',              'framework': 'sklearn', 'label': 'SVR'},
+        {'algo': 'knn_regressor',    'framework': 'sklearn', 'label': 'KNN'},
+        {'algo': 'mlp',              'framework': 'pytorch', 'label': 'PyTorch MLP'},
+    ],
+    'clustering': [
+        {'algo': 'kmeans',           'framework': 'sklearn', 'label': 'K-Means'},
+        {'algo': 'minibatch_kmeans', 'framework': 'sklearn', 'label': 'MiniBatch K-Means'},
+        {'algo': 'agglomerative',    'framework': 'sklearn', 'label': '层次聚类'},
+        {'algo': 'dbscan',           'framework': 'sklearn', 'label': 'DBSCAN'},
+    ],
 }
 
 # ---- 聚类算法集合 (v4 新增) ----
@@ -1371,7 +1400,7 @@ class HyperparameterTuningService:
                     cv=effective_cv,
                     n_jobs=n_jobs,
                     random_state=42,
-                    error_score='raise',
+                    error_score=0,   # AutoML模式: 跳过非法参数组合, 不崩溃
                 )
                 search.fit(X, y)
                 search_time = round(time.time() - start_time, 2)
@@ -1602,4 +1631,176 @@ class HyperparameterTuningService:
         thread = threading.Thread(target=_bg_run, daemon=True, name=f'tuning-{tuning_id}')
         thread.start()
         logger.info(f'异步 RandomizedSearchCV 已启动: tuning_id={tuning_id}')
+        return tuning_id
+
+    # ------------------------------------------------------------------
+    # AutoML 自动算法选择 (v8 新增) — 遍历所有算法找最优
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def run_auto_tuning_async(dataset: Dataset, task_type: str,
+                              target_column: str = None,
+                              cv: int = 3, n_jobs: int = 2) -> str:
+        """AutoML 模式: 自动遍历任务类型的所有适用算法, 找到最优组合
+
+        对每种算法执行快速 RandomSearch, 实时展示:
+          - 当前正在搜索的算法名
+          - 每种算法的 best score
+          - 全局 best score + best algo + best params
+
+        Returns:
+            tuning_id (str): SSE 订阅用 UUID
+        """
+        import time as _time
+        from sklearn.model_selection import ParameterGrid
+
+        tuning_id = str(uuid.uuid4())[:8]
+        tracker = get_tuning_tracker()
+
+        # 获取该 task_type 的所有适用算法
+        algo_list = AUTO_ALGORITHMS.get(task_type, [])
+        if not algo_list:
+            tracker.init(tuning_id, 0, 'auto', task_type, 'auto')
+            tracker.fail(tuning_id, f'任务类型 "{task_type}" 不支持自动模式')
+            return tuning_id
+
+        # 计算总步数: 每种算法的快速搜索迭代数
+        QUICK_N_ITER = 15   # 每算法采样15组参数
+        total_steps = len(algo_list) * QUICK_N_ITER
+        tracker.init(tuning_id, total_steps, 'auto', task_type, 'auto')
+        tracker.add_log(tuning_id,
+                       f'🤖 AutoML 启动: {task_type}, '
+                       f'{len(algo_list)} 种算法, 每种 {QUICK_N_ITER} 组参数')
+
+        def _bg_run():
+            overall_best_score = None
+            overall_best_algo = None
+            overall_best_params = None
+            overall_best_framework = 'sklearn'
+            algo_results = []  # [{algo, label, framework, best_score, best_params, search_time}]
+            global_step = 0
+
+            try:
+                for idx, algo_info in enumerate(algo_list):
+                    algo = algo_info['algo']
+                    label = algo_info['label']
+                    framework = algo_info['framework']
+
+                    tracker.add_log(tuning_id,
+                                   f'▶ [{idx+1}/{len(algo_list)}] {label} ({algo}) 开始搜索...')
+
+                    # 内部 progress 回调 — 更新全局步数 + 当前算法信息
+                    def algo_progress_cb(step, total, params, score):
+                        nonlocal global_step
+                        global_step += 1
+                        tracker.update(
+                            tuning_id, global_step,
+                            params=params, score=score,
+                            total=total_steps,
+                        )
+                        # 在 best_params 中注入当前算法信息, 前端可展示
+                        s = tracker.get(tuning_id)
+                        if s and s.get('best_params_so_far') is not None:
+                            bp = dict(s['best_params_so_far'])
+                            bp['_current_algo'] = f'{label} ({algo})'
+                            with tracker._lock:
+                                if tuning_id in tracker._sessions:
+                                    tracker._sessions[tuning_id]['best_params_so_far'] = bp
+
+                    # 快速 RandomSearch (每算法)
+                    t0 = _time.time()
+                    try:
+                        param_grid = SEARCH_SPACES.get(algo, {})
+                        if not param_grid:
+                            # 尝试映射
+                            alt = _CLS_TO_REG.get(algo) or _REG_TO_CLS.get(algo)
+                            if alt and alt in SEARCH_SPACES:
+                                param_grid = SEARCH_SPACES[alt]
+
+                        if param_grid:
+                            result = HyperparameterTuningService.run_random_search(
+                                dataset=dataset,
+                                algorithm=algo,
+                                task_type=task_type,
+                                target_column=target_column,
+                                n_iter=QUICK_N_ITER,
+                                scoring='accuracy' if task_type == 'classification' else
+                                        'neg_mean_squared_error' if task_type == 'regression' else
+                                        'silhouette',
+                                cv=cv,
+                                n_jobs=n_jobs,
+                            )
+                        else:
+                            result = {'success': False, 'error': '无搜索空间'}
+                    except Exception as e:
+                        result = {'success': False, 'error': str(e)}
+
+                    search_t = round(_time.time() - t0, 1)
+
+                    if result.get('success'):
+                        score = result['best_score']
+                        params = result['best_params']
+                        algo_results.append({
+                            'algo': algo, 'label': label, 'framework': framework,
+                            'best_score': score, 'best_params': params,
+                            'search_time': search_t,
+                        })
+
+                        tracker.add_log(tuning_id,
+                                       f'  ✓ {label}: best={score:.4f} ({search_t}s)')
+
+                        # 更新全局最优
+                        if overall_best_score is None or score > overall_best_score:
+                            overall_best_score = score
+                            overall_best_algo = algo
+                            overall_best_params = params
+                            overall_best_framework = framework
+                    else:
+                        tracker.add_log(tuning_id,
+                                       f'  ✗ {label}: {result.get("error", "失败")}')
+
+                # ── 全部算法搜索完毕, 汇总结果 ──
+                algo_results.sort(key=lambda x: x['best_score'], reverse=True)
+
+                final_result = {
+                    'success': True,
+                    'task_type': task_type,
+                    'best_algo': overall_best_algo,
+                    'best_framework': overall_best_framework,
+                    'best_score': overall_best_score,
+                    'best_params': overall_best_params or {},
+                    'algo_results': algo_results,
+                    'total_algos_tried': len(algo_list),
+                    'total_search_time': round(_time.time() - tracker._sessions[tuning_id]['started_at'], 1),
+                    'auto_mode': True,
+                }
+
+                tracker.add_log(tuning_id,
+                               f'🏆 最优: {overall_best_algo} '
+                               f'score={overall_best_score:.4f}')
+                tracker.add_log(tuning_id,
+                               f'📊 算法排名: ' + ', '.join(
+                                   f'{r["label"]}({r["best_score"]:.4f})'
+                                   for r in algo_results[:5]))
+
+                # 注入最终算法的 best_params 给前端展示
+                with tracker._lock:
+                    if tuning_id in tracker._sessions:
+                        tracker._sessions[tuning_id]['best_params_so_far'] = (
+                            overall_best_params or {}
+                        )
+                        tracker._sessions[tuning_id]['_auto_algo_results'] = algo_results
+
+                tracker.complete(tuning_id, final_result)
+
+            except Exception as e:
+                logger.error(f'AutoML 失败: {e}', exc_info=True)
+                tracker.add_log(tuning_id, f'异常: {str(e)}')
+                tracker.fail(tuning_id, str(e))
+
+        thread = threading.Thread(target=_bg_run, daemon=True,
+                                  name=f'autotune-{tuning_id}')
+        thread.start()
+        logger.info(f'AutoML 已启动: tuning_id={tuning_id}, '
+                    f'{len(algo_list)} algorithms, {task_type}')
         return tuning_id

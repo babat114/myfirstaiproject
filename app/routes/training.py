@@ -679,7 +679,15 @@ def hyperparameter_tuning():
 
                 # ---- 异步模式: 后台调优 + SSE 进度 ----
                 if is_ajax:
-                    if tuning_method == 'grid':
+                    if algorithm == 'auto':
+                        # AutoML: 自动遍历所有适用算法
+                        tuning_id = HyperparameterTuningService.run_auto_tuning_async(
+                            dataset=dataset,
+                            task_type=task_type,
+                            target_column=target_column,
+                            cv=cv, n_jobs=2,
+                        )
+                    elif tuning_method == 'grid':
                         tuning_id = HyperparameterTuningService.run_grid_search_async(
                             dataset=dataset, algorithm=algorithm,
                             task_type=task_type, target_column=target_column,
