@@ -50,13 +50,19 @@ class TrainingExecutor:
             return
         self._initialized = True
 
-        self._pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix='trainer-')
+        # 从 Flask 配置读取 max_workers (默认 2)
+        try:
+            from flask import current_app
+            self.max_workers = current_app.config.get('TRAINING_MAX_WORKERS', 2)
+        except RuntimeError:
+            self.max_workers = 2
+
+        self._pool = ThreadPoolExecutor(max_workers=self.max_workers, thread_name_prefix='trainer-')
         self._active_trainers: dict[int, object] = {}  # {job_id: trainer_instance}
         self._futures: dict[int, Future] = {}           # {job_id: Future}
-        self.max_workers = 2
         self._app = None  # 延迟绑定 Flask app
 
-        logger.info('TrainingExecutor 初始化完成 (max_workers=2)')
+        logger.info(f'TrainingExecutor 初始化完成 (max_workers={self.max_workers})')
 
     def _get_app(self):
         """获取 Flask 应用实例"""
@@ -157,11 +163,15 @@ class TrainingExecutor:
         return False
 
     def get_status(self, job_id: int) -> dict | None:
-        """获取训练任务的实时状态"""
+        """获取训练任务的实时状态 (确保读取最新数据)"""
+        # 刷新会话以读取训练线程的最新提交
+        db.session.commit()
+        db.session.expire_all()
         job = db.session.get(TrainingJob, job_id)
         if not job:
             return None
 
+        full_history = job.metrics_history
         return {
             'job_id': job.id,
             'uuid': job.uuid,
@@ -172,10 +182,11 @@ class TrainingExecutor:
             'current_step': job.current_step,
             'total_steps': job.total_steps,
             'duration_display': job.duration_display,
-            'metrics_history': job.metrics_history[-20:],  # 最近 20 条
+            'metrics_history': full_history,        # 完整历史 → 前端增量对比
             'final_metrics': job.final_metrics_json,
             'error_message': job.error_message,
-            'log_tail': _tail_log(job.log_text, 50),
+            'log_tail': _tail_log(job.log_text, 100),  # 最近100行
+            'log_full': job.log_text or '',             # 全量日志(用于首次填充)
             'is_finished': job.is_finished,
             'is_running': job.is_running,
         }
@@ -234,7 +245,45 @@ class TrainingExecutor:
 
                 # 决定使用哪个训练器
                 framework = (job.framework or '').lower()
-                if 'pytorch' in framework or 'torch' in framework:
+                dataset_category = (dataset.category or '').lower()
+                algorithm = hyperparams.get('algorithm', '')
+
+                # ── 纠错: KMeans 参数 algorithm=lloyd/elkan 会覆盖 ML 算法名 kmeans ──
+                # 如果 hyperparams 里的 algorithm 是 KMeans 的参数值而非算法名, 自动修正
+                _KMEANS_ALGO_PARAMS = {'lloyd', 'elkan', 'auto', 'full'}
+                _KNOWN_CLUSTERING_ALGOS = {'kmeans', 'dbscan', 'agglomerative', 'minibatch_kmeans'}
+                model_type = (getattr(job.model, 'model_type', '') or '').lower()
+                task_type = hyperparams.get('task_type', hyperparams.get('ml_task_type', ''))
+                if algorithm.lower() in _KMEANS_ALGO_PARAMS:
+                    logger.warning(
+                        f'检测到错误的algorithm值 "{algorithm}" (KMeans参数值), '
+                        f'自动修正为 "kmeans"'
+                    )
+                    algorithm = 'kmeans'
+                    # 同时修复存储的hyperparams, 防止下次再出错
+                    hyperparams['algorithm'] = 'kmeans'
+                    if job.model:
+                        try:
+                            job.model.hyperparameters_json = json.dumps(
+                                hyperparams, ensure_ascii=False
+                            )
+                        except Exception:
+                            pass
+
+                # Transformer 迁移学习 — 仅当显式指定 algorithm 时启用
+                # (NLP 数据集可能含预提取的特征向量如 TF-IDF，不适合 BERT tokenizer)
+                if algorithm.startswith('transformer'):
+                    from app.executor.trainers.transformers_nlp_trainer import TransformersNLPTrainer
+                    trainer_cls = TransformersNLPTrainer
+                # mlp 算法固定用 PyTorch (UI 标注为 "PyTorch MLP")
+                elif algorithm == 'mlp':
+                    from app.executor.trainers.pytorch_trainer import PyTorchTrainer
+                    trainer_cls = PyTorchTrainer
+                # 视觉数据 → PyTorch 深度学习
+                elif dataset_category == 'vision':
+                    from app.executor.trainers.pytorch_trainer import PyTorchTrainer
+                    trainer_cls = PyTorchTrainer
+                elif 'pytorch' in framework or 'torch' in framework:
                     from app.executor.trainers.pytorch_trainer import PyTorchTrainer
                     trainer_cls = PyTorchTrainer
                 elif 'tensorflow' in framework or 'keras' in framework or 'tf' in framework:
@@ -292,12 +341,6 @@ def _tail_log(log_text: str | None, lines: int = 50) -> str:
 
 # ============ 全局单例获取 ============
 
-_executor_instance = None
-
-
-def get_executor() -> TrainingExecutor:
-    """获取全局 TrainingExecutor 单例"""
-    global _executor_instance
-    if _executor_instance is None:
-        _executor_instance = TrainingExecutor()
-    return _executor_instance
+def get_executor() -> 'TrainingExecutor':
+    """获取全局 TrainingExecutor 单例 (委托给 __new__ 的双重检查锁)"""
+    return TrainingExecutor()

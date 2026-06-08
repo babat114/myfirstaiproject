@@ -8,10 +8,12 @@ import json
 from datetime import datetime, timezone
 from typing import Optional, Tuple
 from app import db, logger
+from app._timezone import localnow
 from app.models.training_job import TrainingJob
 from app.models.dataset import Dataset
 from app.models.model_record import ModelRecord
 from app.models.user import User
+from app.utils.cache import dashboard_cache
 
 
 class TrainingService:
@@ -102,6 +104,8 @@ class TrainingService:
 
             db.session.add(job)
             db.session.commit()
+            dashboard_cache.invalidate('job_stats:')
+            dashboard_cache.invalidate('dashboard:')
 
             logger.info(f"训练任务创建: {name} (by {user.username}), "
                         f"算法: {algorithm}, 类型: {ml_task_type}")
@@ -121,9 +125,8 @@ class TrainingService:
         try:
             from app.executor.engine import get_executor
 
-            # 如果是首次启动 (非暂停恢复)
+            # 如果是首次启动 (非暂停恢复)，清空旧数据
             if job.status == 'queued':
-                job.status = 'queued'
                 job.log_text = None
                 job.metrics_history_json = None
                 job.final_metrics_json = None
@@ -172,6 +175,9 @@ class TrainingService:
 
         job.complete()
         job.append_log('训练任务已完成')
+        db.session.commit()
+        dashboard_cache.invalidate('job_stats:')
+        dashboard_cache.invalidate('dashboard:')
         logger.info(f"训练完成: {job.name}")
         return True, None
 
@@ -180,6 +186,9 @@ class TrainingService:
         """标记训练失败"""
         job.fail(error)
         job.append_log(f'训练失败: {error}')
+        db.session.commit()
+        dashboard_cache.invalidate('job_stats:')
+        dashboard_cache.invalidate('dashboard:')
         logger.error(f"训练失败: {job.name} - {error}")
         return True, None
 
@@ -198,6 +207,8 @@ class TrainingService:
         job.cancel()
         job.append_log('训练任务已取消')
         db.session.commit()
+        dashboard_cache.invalidate('job_stats:')
+        dashboard_cache.invalidate('dashboard:')
         logger.info(f"训练取消: {job.name}")
         return True, None
 
@@ -214,6 +225,26 @@ class TrainingService:
         try:
             from app.executor.engine import get_executor
 
+            # 同步 model_type → task_type + algorithm: 确保重训练使用正确的任务类型和算法
+            # (修复历史遗留: 旧聚类模型的 hyperparams 可能为 classification + decision_tree)
+            if job.model:
+                try:
+                    hp = job.model.hyperparameters_dict
+                    model_type = job.model.model_type
+                    updated = False
+                    if model_type == 'clustering' and hp.get('task_type') != 'clustering':
+                        hp['task_type'] = 'clustering'
+                        hp['algorithm'] = 'kmeans'  # 聚类默认算法
+                        updated = True
+                    elif model_type == 'regression' and hp.get('task_type') != 'regression':
+                        hp['task_type'] = 'regression'
+                        updated = True
+                    if updated:
+                        job.model.hyperparameters_json = json.dumps(hp, ensure_ascii=False)
+                        job.append_log(f'[重训] 已同步 task_type={hp["task_type"]} algorithm={hp.get("algorithm")}')
+                except Exception:
+                    pass
+
             # 清理旧数据
             job.status = 'queued'
             job.progress_percent = 0.0
@@ -227,6 +258,9 @@ class TrainingService:
             job.error_message = None
             job.started_at = None
             job.completed_at = None
+            job.created_at = localnow()  # 更新创建时间为重训练时间
+            if job.model:
+                job.model.created_at = localnow()  # 同步更新关联模型的创建时间
             job.append_log(f'[重训] 任务重置，准备重新训练...')
             db.session.commit()
 
@@ -267,6 +301,15 @@ class TrainingService:
                 try:
                     existing = job.model.hyperparameters_dict
                     existing.update(new_params)
+                    # ── 纠错: KMeans参数 algorithm=lloyd/elkan 会覆盖 ML算法名 kmeans ──
+                    _KMEANS_ALGO_PARAMS = {'lloyd', 'elkan', 'auto', 'full'}
+                    curr_algo = existing.get('algorithm', '')
+                    if curr_algo.lower() in _KMEANS_ALGO_PARAMS:
+                        existing['algorithm'] = 'kmeans'
+                        logger.warning(
+                            f'检测到错误的algorithm值 "{curr_algo}" (KMeans参数), '
+                            f'已自动修正为 "kmeans"'
+                        )
                     job.model.hyperparameters_json = json.dumps(
                         existing, ensure_ascii=False
                     )
@@ -275,6 +318,15 @@ class TrainingService:
                         job.model.model_type = new_params['ml_task_type']
                     if 'algorithm' in new_params:
                         pass  # algorithm 在 model 中没有独立字段
+                    # 同步 model_type → task_type + algorithm
+                    model_type = job.model.model_type
+                    if model_type == 'clustering' and existing.get('task_type') != 'clustering':
+                        existing['task_type'] = 'clustering'
+                        existing['algorithm'] = 'kmeans'
+                        job.model.hyperparameters_json = json.dumps(existing, ensure_ascii=False)
+                    elif model_type == 'regression' and existing.get('task_type') != 'regression':
+                        existing['task_type'] = 'regression'
+                        job.model.hyperparameters_json = json.dumps(existing, ensure_ascii=False)
                 except Exception as e:
                     logger.warning(f'更新模型超参数失败: {e}')
 
@@ -296,6 +348,9 @@ class TrainingService:
             job.error_message = None
             job.started_at = None
             job.completed_at = None
+            job.created_at = localnow()  # 更新创建时间为重训练时间
+            if job.model:
+                job.model.created_at = localnow()  # 同步更新关联模型的创建时间
             job.append_log(f'[重训] 使用新参数重置: {json.dumps(new_params, ensure_ascii=False)}')
             db.session.commit()
 
@@ -325,6 +380,7 @@ class TrainingService:
             return False, '任务未在运行中。'
 
         job.update_progress(epoch, step, metrics)
+        db.session.commit()
         return True, None
 
     @staticmethod
@@ -343,6 +399,8 @@ class TrainingService:
         try:
             db.session.delete(job)
             db.session.commit()
+            dashboard_cache.invalidate('job_stats:')
+            dashboard_cache.invalidate('dashboard:')
             logger.info(f"训练任务已删除: {job.name}")
             return True, None
         except Exception as e:
@@ -396,37 +454,72 @@ class TrainingService:
 
     @staticmethod
     def get_job_statistics(user_id: int = None) -> dict:
-        """获取训练任务统计"""
-        query = TrainingJob.query
-        if user_id:
-            query = query.filter_by(owner_id=user_id)
+        """获取训练任务统计 (使用 SQL GROUP BY 聚合, 避免全量加载)"""
+        cache_key = f'job_stats:{user_id or "all"}'
+        cached = dashboard_cache.get(cache_key)
+        if cached is not None:
+            return cached
 
-        jobs = query.all()
+        from sqlalchemy import func
 
-        status_counts = {}
-        type_counts = {}
-        for j in jobs:
-            status_counts[j.status] = status_counts.get(j.status, 0) + 1
-            type_counts[j.task_type] = type_counts.get(j.task_type, 0) + 1
+        # 辅助: 构建带可选 user_id 过滤的查询
+        def _filtered_query(*cols):
+            q = db.select(*cols)
+            if user_id:
+                q = q.filter_by(owner_id=user_id)
+            return q
 
-        completed = [j for j in jobs if j.status == 'completed']
+        # 按状态聚合
+        status_rows = db.session.execute(
+            _filtered_query(TrainingJob.status, func.count(TrainingJob.id))
+            .group_by(TrainingJob.status)
+        ).all()
+        status_counts = {row[0]: row[1] for row in status_rows}
+
+        # 按任务类型聚合
+        type_rows = db.session.execute(
+            _filtered_query(TrainingJob.task_type, func.count(TrainingJob.id))
+            .group_by(TrainingJob.task_type)
+        ).all()
+        type_counts = {row[0]: row[1] for row in type_rows}
+
+        total_count = sum(status_counts.values())
+
+        # 平均完成时间 — SQL AVG (仅 completed 任务, 移除 tzinfo 后计算差值)
         avg_duration = None
-        if completed:
-            durations = [
-                (j.completed_at - j.started_at).total_seconds()
-                for j in completed
-                if j.started_at and j.completed_at
-            ]
-            if durations:
-                avg_duration = sum(durations) / len(durations)
+        try:
+            avg_row = db.session.execute(
+                _filtered_query(func.avg(
+                    func.timestampdiff(db.text('SECOND'),
+                                       TrainingJob.started_at,
+                                       TrainingJob.completed_at)
+                )).filter(
+                    TrainingJob.status == 'completed',
+                    TrainingJob.started_at.isnot(None),
+                    TrainingJob.completed_at.isnot(None),
+                )
+            ).scalar()
+            if avg_row:
+                avg_duration = round(float(avg_row), 1)
+        except Exception:
+            avg_duration = None
 
-        return {
-            'total_count': len(jobs),
-            'running_count': status_counts.get('running', 0),
-            'queued_count': status_counts.get('queued', 0),
+        running = status_counts.get('running', 0)
+        queued = status_counts.get('queued', 0)
+        paused = status_counts.get('paused', 0)
+
+        result = {
+            'total_count': total_count,
+            'running_count': running,
+            'queued_count': queued,
+            'paused_count': paused,
+            'active_or_paused_count': running + queued + status_counts.get('preparing', 0) + paused,
             'completed_count': status_counts.get('completed', 0),
             'failed_count': status_counts.get('failed', 0),
+            'cancelled_count': status_counts.get('cancelled', 0),
             'statuses': status_counts,
             'types': type_counts,
-            'avg_completion_seconds': round(avg_duration, 1) if avg_duration else None,
+            'avg_completion_seconds': avg_duration,
         }
+        dashboard_cache.set(cache_key, result)
+        return result
