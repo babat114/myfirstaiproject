@@ -584,3 +584,42 @@ input[type="url"],
     z-index: 1;
     position: relative;
 }
+
+/* ===== 页面加载指示器 ===== */
+.page-loader-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    background: rgba(255,255,255,0.85);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: opacity 0.3s ease, visibility 0.3s ease;
+}
+.page-loader-overlay.fade-out {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+}
+.page-loader-spinner {
+    text-align: center;
+}
+
+/* ===== 骨架屏 (列表加载占位) ===== */
+.skeleton {
+    background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.5s ease-in-out infinite;
+    border-radius: 4px;
+}
+.skeleton-text { height: 1rem; margin-bottom: 0.5rem; width: 80%; }
+.skeleton-text.short { width: 50%; }
+.skeleton-text.medium { width: 65%; }
+.skeleton-card { height: 100px; }
+.skeleton-row { height: 2.5rem; margin-bottom: 0.5rem; }
+
+@keyframes skeleton-shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}

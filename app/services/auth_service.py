@@ -5,8 +5,9 @@
 ============================================
 """
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional, Tuple
+from app._timezone import localnow
 from sqlalchemy import or_
 from app import db, logger
 from app.models.user import User
@@ -30,23 +31,29 @@ class AuthService:
         Returns:
             (User, error_message): 成功返回 (user, None)，失败返回 (None, error_msg)
         """
-        # 验证用户名唯一性
-        if User.query.filter_by(username=username).first():
+        # 验证用户名唯一性 (SQLAlchemy 2.0 风格)
+        if db.session.execute(db.select(User).filter_by(username=username)).scalar_one_or_none():
             return None, '用户名已被注册。'
 
         # 验证邮箱唯一性
-        if User.query.filter_by(email=email).first():
+        if db.session.execute(db.select(User).filter_by(email=email)).scalar_one_or_none():
             return None, '邮箱已被注册。'
 
-        # 验证密码强度
-        if len(password) < 8:
-            return None, '密码长度至少为 8 个字符。'
+        # 验证密码强度 (建议: 12+ 字符, 含大小写+数字+特殊字符)
+        if len(password) < 10:
+            return None, '密码长度至少为 10 个字符。'
 
         if not any(c.isupper() for c in password):
             return None, '密码必须包含至少一个大写字母。'
 
+        if not any(c.islower() for c in password):
+            return None, '密码必须包含至少一个小写字母。'
+
         if not any(c.isdigit() for c in password):
             return None, '密码必须包含至少一个数字。'
+
+        if not any(c in '!@#$%^&*()_+-=[]{}|;:,.<>?/~`' for c in password):
+            return None, '密码必须包含至少一个特殊字符 (!@#$%^&*...)。'
 
         # 创建用户
         try:
@@ -81,10 +88,12 @@ class AuthService:
         Returns:
             (User, error_message)
         """
-        # 查找用户 (支持用户名或邮箱登录)
-        user = User.query.filter(
-            or_(User.username == login_id, User.email == login_id)
-        ).first()
+        # 查找用户 (支持用户名或邮箱登录, SQLAlchemy 2.0 风格)
+        user = db.session.execute(
+            db.select(User).filter(
+                or_(User.username == login_id, User.email == login_id)
+            )
+        ).scalar_one_or_none()
 
         if not user:
             return None, '用户名或邮箱不存在。'
@@ -96,7 +105,7 @@ class AuthService:
             return None, '密码错误。'
 
         # 更新最后登录时间
-        user.last_login_at = datetime.now(timezone.utc)
+        user.last_login_at = localnow()
         db.session.commit()
 
         logger.info(f"用户登录: {user.username}")
@@ -121,7 +130,7 @@ class AuthService:
                 if field in allowed_fields and hasattr(user, field):
                     setattr(user, field, value)
 
-            user.updated_at = datetime.now(timezone.utc)
+            user.updated_at = localnow()
             db.session.commit()
             return True, None
 
@@ -142,8 +151,17 @@ class AuthService:
         if not user.check_password(old_password):
             return False, '当前密码错误。'
 
-        if len(new_password) < 8:
-            return False, '新密码长度至少为 8 个字符。'
+        if len(new_password) < 10:
+            return False, '新密码长度至少为 10 个字符。'
+
+        if not any(c.isupper() for c in new_password):
+            return False, '新密码必须包含至少一个大写字母。'
+
+        if not any(c.islower() for c in new_password):
+            return False, '新密码必须包含至少一个小写字母。'
+
+        if not any(c.isdigit() for c in new_password):
+            return False, '新密码必须包含至少一个数字。'
 
         user.set_password(new_password)
         db.session.commit()
@@ -171,19 +189,35 @@ class AuthService:
         Returns:
             User 或 None
         """
-        return User.query.filter_by(api_key=api_key, is_active=True).first()
+        return db.session.execute(
+            db.select(User).filter_by(api_key=api_key, is_active=True)
+        ).scalar_one_or_none()
 
     @staticmethod
-    def list_users(page: int = 1, per_page: int = 20) -> dict:
+    def list_users(page: int = 1, per_page: int = 20,
+                   role: str = None, search: str = None) -> dict:
         """
         获取用户列表 (管理员功能)
 
         Returns:
             分页用户数据
         """
-        pagination = User.query.order_by(User.created_at.desc()).paginate(
-            page=page, per_page=per_page, error_out=False
-        )
+        stmt = db.select(User).order_by(User.created_at.desc())
+
+        if role:
+            stmt = stmt.filter_by(role=role)
+        if search:
+            term = f'%{search}%'
+            stmt = stmt.filter(
+                db.or_(
+                    User.username.ilike(term),
+                    User.email.ilike(term),
+                    User.full_name.ilike(term),
+                    User.organization.ilike(term),
+                )
+            )
+
+        pagination = db.paginate(stmt, page=page, per_page=per_page, error_out=False)
         return {
             'users': [u.to_dict() for u in pagination.items],
             'total': pagination.total,

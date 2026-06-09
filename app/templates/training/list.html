@@ -61,6 +61,7 @@
                     <th style="min-width: 160px;">进度</th>
                     <th>状态</th>
                     <th>耗时</th>
+                    <th>创建时间</th>
                     <th style="min-width: 130px;">操作</th>
                 </tr>
             </thead>
@@ -92,6 +93,7 @@
                         </span>
                     </td>
                     <td><small>{{ j.duration_display }}</small></td>
+                    <td><small>{{ j.created_at[:19].replace('T', ' ') if j.created_at else '-' }}</small></td>
                     <td>
                         <div class="btn-group btn-group-sm">
                             {% if j.status == 'queued' %}

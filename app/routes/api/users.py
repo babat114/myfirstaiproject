@@ -10,6 +10,7 @@ from app.services.auth_service import AuthService
 from app.utils.decorators import api_login_required, api_admin_required
 from app.utils.auth_helpers import get_current_user
 from app.models.user import User
+from app._timezone import localnow
 
 users_api_bp = Blueprint('users_api', __name__)
 
@@ -17,34 +18,19 @@ users_api_bp = Blueprint('users_api', __name__)
 @users_api_bp.route('', methods=['GET'])
 @api_admin_required
 def list_users():
-    """获取用户列表 (管理员)"""
+    """获取用户列表 (管理员) — 筛选在 SQL 层完成"""
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 20, type=int)
     role = request.args.get('role')
     search = request.args.get('search', '').strip() or None
 
-    result = AuthService.list_users(page=page, per_page=per_page)
-
-    # 额外筛选
-    users = result['users']
-    if role:
-        users = [u for u in users if u.get('role') == role]
-    if search:
-        term = search.lower()
-        users = [u for u in users if
-                 term in (u.get('username') or '').lower() or
-                 term in (u.get('email') or '').lower() or
-                 term in (u.get('full_name') or '').lower() or
-                 term in (u.get('organization') or '').lower()]
+    result = AuthService.list_users(
+        page=page, per_page=per_page, role=role, search=search
+    )
 
     return jsonify({
         'success': True,
-        'data': {
-            'users': users,
-            'total': len(users),
-            'page': page,
-            'per_page': per_page,
-        }
+        'data': result,
     })
 
 
@@ -75,13 +61,11 @@ def update_user(user_id):
     # 可更新的字段
     updatable = {'full_name', 'bio', 'organization', 'role', 'is_active', 'is_verified'}
     try:
-        from datetime import datetime, timezone
-
         for field, value in data.items():
             if field in updatable and hasattr(user, field):
                 setattr(user, field, value)
 
-        user.updated_at = datetime.now(timezone.utc)
+        user.updated_at = localnow()
         db.session.commit()
 
         return jsonify({
@@ -107,10 +91,8 @@ def update_user_role(user_id):
         return jsonify({'success': False, 'message': '无效的角色。可选: admin, researcher, viewer'}), 400
 
     try:
-        from datetime import datetime, timezone
-
         user.role = new_role
-        user.updated_at = datetime.now(timezone.utc)
+        user.updated_at = localnow()
         db.session.commit()
 
         return jsonify({

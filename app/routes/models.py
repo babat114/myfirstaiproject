@@ -18,19 +18,37 @@ models_bp = Blueprint('models', __name__)
 @models_bp.route('/')
 @login_required
 def list_models():
-    """模型列表页面"""
+    """模型列表页面 — 支持排序、筛选、公开/私有切换"""
     page = request.args.get('page', 1, type=int)
     model_type = request.args.get('model_type')
     framework = request.args.get('framework')
     search = request.args.get('search', '').strip() or None
+    sort_by = request.args.get('sort_by', 'created_at')
+    sort_order = request.args.get('sort_order', 'desc')
+    visibility = request.args.get('visibility', 'owned')  # owned | public | all
 
-    result = ModelService.list_models(
-        page=page,
-        owner_id=current_user.id,
-        model_type=model_type,
-        framework=framework,
-        search=search,
-    )
+    # 根据可见性构建查询参数
+    if visibility == 'public':
+        # 仅公开模型 (不限owner)
+        result = ModelService.list_models(
+            page=page, model_type=model_type, framework=framework,
+            search=search, is_public=True,
+            sort_by=sort_by, sort_order=sort_order,
+        )
+    elif visibility == 'all':
+        # 我的 + 其他公开模型
+        result = ModelService.list_models(
+            page=page, model_type=model_type, framework=framework,
+            search=search, owner_id=current_user.id, include_public=True,
+            sort_by=sort_by, sort_order=sort_order,
+        )
+    else:
+        # 仅我的模型
+        result = ModelService.list_models(
+            page=page, model_type=model_type, framework=framework,
+            search=search, owner_id=current_user.id,
+            sort_by=sort_by, sort_order=sort_order,
+        )
 
     return render_template(
         'models/list.html',
@@ -39,24 +57,31 @@ def list_models():
         current_type=model_type,
         current_framework=framework,
         search_query=search,
+        current_sort=sort_by,
+        current_order=sort_order,
+        current_visibility=visibility,
     )
 
 
 @models_bp.route('/public')
 @login_required
 def public_models():
-    """公开模型浏览"""
+    """公开模型浏览 — 支持排序"""
     page = request.args.get('page', 1, type=int)
     model_type = request.args.get('model_type')
     framework = request.args.get('framework')
     search = request.args.get('search', '').strip() or None
+    sort_by = request.args.get('sort_by', 'accuracy')
+    sort_order = request.args.get('sort_order', 'desc')
 
     result = ModelService.list_models(
         page=page,
         model_type=model_type,
         framework=framework,
         search=search,
-        is_public=True,  # 仅显示公开模型
+        is_public=True,
+        sort_by=sort_by,
+        sort_order=sort_order,
     )
 
     return render_template(
@@ -66,6 +91,8 @@ def public_models():
         current_type=model_type,
         current_framework=framework,
         search_query=search,
+        current_sort=sort_by,
+        current_order=sort_order,
     )
 
 
@@ -126,7 +153,7 @@ def model_detail(model_id):
         flash('模型不存在。', 'danger')
         return redirect(url_for('models.list_models'))
 
-    if not model.is_public and model.owner_id != current_user.id and not current_user.is_admin:
+    if not model.is_viewable_by(current_user):
         flash('您没有权限查看此模型。', 'danger')
         return redirect(url_for('models.list_models'))
 
@@ -142,7 +169,7 @@ def edit_model(model_id):
         flash('模型不存在。', 'danger')
         return redirect(url_for('models.list_models'))
 
-    if model.owner_id != current_user.id and not current_user.is_admin:
+    if not model.is_editable_by(current_user):
         flash('您没有权限编辑此模型。', 'danger')
         return redirect(url_for('models.list_models'))
 
@@ -183,7 +210,7 @@ def edit_model(model_id):
 def upload_model_file(model_id):
     """上传模型文件"""
     model = ModelService.get_model_by_id(model_id)
-    if not model or model.owner_id != current_user.id:
+    if not model or not model.is_editable_by(current_user):
         flash('模型不存在或权限不足。', 'danger')
         return redirect(url_for('models.list_models'))
 
@@ -316,7 +343,7 @@ def test_model(model_id):
         flash('模型不存在。', 'danger')
         return redirect(url_for('models.list_models'))
 
-    if not model.is_public and model.owner_id != current_user.id and not current_user.is_admin:
+    if not model.is_viewable_by(current_user):
         flash('您没有权限测试此模型。', 'danger')
         return redirect(url_for('models.list_models'))
 
@@ -358,16 +385,23 @@ def test_model(model_id):
                     error = f'文件解析失败: {str(e)}'
 
         elif action == 'predict_manual':
-            # 手动输入特征值
+            # 手动输入特征值 — 使用模型真实特征名
             try:
                 import pandas as pd
+                # 获取特征名
+                fnames_json = request.form.get('feature_names_json', '[]')
+                try:
+                    fnames = json.loads(fnames_json)
+                except Exception:
+                    fnames = []
                 feature_count = int(request.form.get('feature_count', 0))
                 manual_data = {}
                 for i in range(feature_count):
-                    key = f'feature_{i}'
-                    val = request.form.get(key, '')
+                    val = request.form.get(f'feature_{i}', '')
                     if val:
-                        manual_data[key] = [float(val)]
+                        # 用真实特征名作为 DataFrame 列名
+                        real_name = fnames[i] if i < len(fnames) else f'feature_{i}'
+                        manual_data[real_name] = [float(val)]
                 if manual_data:
                     df = pd.DataFrame(manual_data)
                     result = ModelInferenceService.predict(model, df)
@@ -387,10 +421,19 @@ def test_model(model_id):
             if not feature_importance.get('success'):
                 error = feature_importance.get('error')
 
-    # 获取特征名 (从模型元数据)
+    # 获取特征名 (优先从模型元数据，其次从数据集)
     feature_names = []
     hyperparams = model.hyperparameters_dict
-    if model.training_dataset and model.training_dataset.summary_json:
+    # 尝试从模型文件元数据中获取 (PyTorch/sklearn saved config)
+    try:
+        from app.services.inference_service import ModelInferenceService
+        _, metadata, _ = ModelInferenceService.load_model(model)
+        if metadata and metadata.get('feature_names'):
+            feature_names = list(metadata['feature_names'])
+    except Exception:
+        metadata = None
+    # 回退: 从数据集 summary 中获取
+    if not feature_names and model.training_dataset and model.training_dataset.summary_json:
         try:
             summary = json.loads(model.training_dataset.summary_json) if isinstance(model.training_dataset.summary_json, str) else model.training_dataset.summary_json
             cols = summary.get('columns', [])

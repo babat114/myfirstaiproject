@@ -7,8 +7,7 @@ RESTful JSON 接口
 import json
 from flask import Blueprint, request, jsonify
 from app.services.training_service import TrainingService
-from app.services.auth_service import AuthService
-from app.utils.decorators import api_login_required
+from app.utils.decorators import api_login_required, rate_limit
 from app.utils.auth_helpers import get_current_user
 
 training_api_bp = Blueprint('training_api', __name__)
@@ -46,6 +45,7 @@ def get_job(job_uuid):
 
 @training_api_bp.route('/', methods=['POST'])
 @api_login_required
+@rate_limit(max_calls=30, period=60)  # 训练创建是耗时操作，限制调用频率
 def create_job():
     """POST /api/training - 创建训练任务"""
     user = get_current_user()

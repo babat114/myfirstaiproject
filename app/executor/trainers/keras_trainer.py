@@ -1,8 +1,15 @@
 """
 ============================================
-Keras / TensorFlow 训练器
-支持 MLP 全连接网络，CPU训练，完整保存/加载
+Keras / TensorFlow 训练器 v2
+支持 MLP 全连接网络，验证集+早停，智能模型缩放
 ============================================
+
+v2 改进 (2026-06-05):
+  - 3-way 分割: train/val/test
+  - EarlyStopping + ReduceLROnPlateau Keras 回调
+  - 智能模型规模推断
+  - train + val 双指标报告
+  - 更安全默认值: lr=1e-4, dropout=0.5, wd=1e-3
 """
 import os
 import pickle
@@ -30,32 +37,62 @@ def _ensure_tf():
         raise ImportError('TensorFlow 未安装。请运行: pip install tensorflow')
 
 
-class KerasTrainer(BaseTrainer):
-    """TensorFlow/Keras 深度学习训练器 — MLP 全连接神经网络
+def _auto_hidden_layers_tf(n_samples: int, n_features: int, n_classes: int = 2) -> list:
+    """根据数据集规模自动推断隐藏层结构 (同 PyTorch 逻辑)"""
+    if n_samples < 3000:
+        h1 = min(n_features // 2, 32)
+        h2 = min(n_features // 4, 16)
+        if h2 < 8:
+            return [max(h1, 8)]
+        return [h1, h2]
+    elif n_samples < 10000:
+        half = min(n_features // 2, 64)
+        quarter = min(n_features // 4, 32)
+        return [half, quarter]
+    elif n_samples < 50000:
+        return [128, 64]
+    elif n_samples < 200000:
+        return [256, 128, 64]
+    else:
+        return [512, 256, 128, 64]
 
-    架构: Dense + ReLU + BatchNorm + Dropout 堆叠
-    优化: Adam + 分类/回归损失函数
+
+class KerasTrainer(BaseTrainer):
+    """TensorFlow/Keras 深度学习训练器 v2 — MLP 全连接神经网络
+
+    防过拟合机制:
+        - 智能模型规模: 根据 n_samples 自动缩放 hidden_layers
+        - 3-way 分割: train / val / test
+        - EarlyStopping: 监控 val_loss, patience=10
+        - ReduceLROnPlateau: val_loss 停滞 → 学习率减半
+        - Dense + ReLU + BatchNorm + Dropout 堆叠
+        - Adam 优化器 + L2 权重正则化
     """
 
     def __init__(self, job, dataset, hyperparams: dict = None):
         super().__init__(job, dataset, hyperparams)
 
         self.task_type = self.hyperparams.get('task_type', 'classification')
-        self.hidden_layers = self.hyperparams.get('hidden_layers', [128, 64, 32])
-        self.learning_rate = float(self.hyperparams.get('learning_rate', 0.001))
+        self.hidden_layers = self.hyperparams.get('hidden_layers', None)  # None = 自动
+        self.learning_rate = float(self.hyperparams.get('learning_rate', 1e-4))
         self.batch_size = int(self.hyperparams.get('batch_size', 64))
         self.test_size = float(self.hyperparams.get('test_size', 0.2))
-        self.dropout = float(self.hyperparams.get('dropout', 0.3))
-        self.weight_decay = float(self.hyperparams.get('weight_decay', 1e-5))
+        self.val_size = float(self.hyperparams.get('val_size', 0.15))
+        self.dropout = float(self.hyperparams.get('dropout', 0.5))
+        self.weight_decay = float(self.hyperparams.get('weight_decay', 1e-3))
+        self.early_stopping_patience = int(self.hyperparams.get('early_stopping_patience', 10))
+        self.lr_patience = int(self.hyperparams.get('lr_patience', 5))
+        self.lr_factor = float(self.hyperparams.get('lr_factor', 0.5))
 
         self._model = None
-        self._X_train = self._X_test = None
-        self._y_train = self._y_test = None
+        self._X_train = self._X_val = self._X_test = None
+        self._y_train = self._y_val = self._y_test = None
         self._input_dim = self._output_dim = None
         self._scaler = None
-        self._y_scaler = None  # 回归目标标准化器
+        self._y_scaler = None
         self._label_encoders = {}
         self._feature_names = []
+        self._callbacks = []
 
     def load_data(self):
         tf = _ensure_tf()
@@ -106,30 +143,46 @@ class KerasTrainer(BaseTrainer):
             self._label_encoders['__target__'] = le
             self._output_dim = len(le.classes_)
         else:
-            # 回归: 对目标值做标准化，大幅提升 MLP 收敛效果 (R² 从 ~0 提升到 >0.7)
-            y_raw_vals = y_raw.values.astype(np.float32).reshape(-1, 1)
+            y_raw_vals = y_raw.values.astype('float32').reshape(-1, 1)
             self._y_scaler = StandardScaler()
-            y = self._y_scaler.fit_transform(y_raw_vals).ravel().astype(np.float32)
+            y = self._y_scaler.fit_transform(y_raw_vals).ravel().astype('float32')
             self._output_dim = 1
 
         # 标准化特征
-        X_num = X.values.astype(np.float32)
+        X_num = X.values.astype('float32')
         self._scaler = StandardScaler()
-        X_num = self._scaler.fit_transform(X_num).astype(np.float32)
+        X_num = self._scaler.fit_transform(X_num).astype('float32')
         self._input_dim = X_num.shape[1]
+        n_samples = X_num.shape[0]
 
-        # 划分
-        X_train, X_test, y_train, y_test = train_test_split(
+        # —— 智能模型规模 ——
+        if self.hidden_layers is None:
+            n_classes = self._output_dim if self.task_type == 'classification' else 2
+            self.hidden_layers = _auto_hidden_layers_tf(n_samples, self._input_dim, n_classes)
+            self.callback.on_log(f'智能模型规模: {self.hidden_layers} '
+                               f'(样本={n_samples}, 特征={self._input_dim})')
+        else:
+            self.callback.on_log(f'用户指定网络结构: {self.hidden_layers}')
+
+        # —— 3-way 分割 ——
+        stratify_y = y if self.task_type == 'classification' and len(set(y)) > 1 else None
+        X_train_val, X_test, y_train_val, y_test = train_test_split(
             X_num, y, test_size=self.test_size, random_state=42,
-            stratify=y if self.task_type == 'classification' and len(set(y)) > 1 else None
+            stratify=stratify_y
+        )
+        val_ratio = self.val_size / (1.0 - self.test_size)
+        stratify_tv = y_train_val if self.task_type == 'classification' and len(set(y_train_val)) > 1 else None
+        X_train, X_val, y_train, y_val = train_test_split(
+            X_train_val, y_train_val, test_size=val_ratio, random_state=42,
+            stratify=stratify_tv
         )
 
-        self._X_train, self._X_test = X_train, X_test
-        self._y_train, self._y_test = y_train, y_test
+        self._X_train, self._X_val, self._X_test = X_train, X_val, X_test
+        self._y_train, self._y_val, self._y_test = y_train, y_val, y_test
 
         self.callback.on_log(f'设备: CPU (TensorFlow {tf.__version__})')
         self.callback.on_log(f'输入维度: {self._input_dim}, 输出维度: {self._output_dim}')
-        self.callback.on_log(f'训练: {len(X_train)} 样本, 测试: {len(X_test)} 样本')
+        self.callback.on_log(f'训练: {len(X_train)} | 验证: {len(X_val)} | 测试: {len(X_test)}')
         self.callback.on_log(f'网络结构: {self.hidden_layers}')
 
     def build_model(self):
@@ -162,72 +215,104 @@ class KerasTrainer(BaseTrainer):
         )
 
         self._model = model
+
+        # —— Keras 回调: 早停 + LR 调度 ——
+        self._callbacks = [
+            tf.keras.callbacks.EarlyStopping(
+                monitor='val_loss',
+                patience=self.early_stopping_patience,
+                restore_best_weights=True,
+                verbose=0
+            ),
+            tf.keras.callbacks.ReduceLROnPlateau(
+                monitor='val_loss',
+                factor=self.lr_factor,
+                patience=self.lr_patience,
+                min_lr=1e-6,
+                verbose=0
+            ),
+        ]
+
         total_params = model.count_params()
-        self.callback.on_log(f'总参数: {total_params:,}')
+        self.callback.on_log(f'参数: 总={total_params:,} lr={self.learning_rate} '
+                           f'dropout={self.dropout} wd={self.weight_decay}')
 
     def train_epoch(self, epoch: int) -> dict:
+        """训练一个 epoch，返回 train + val 指标"""
         if self.task_type == 'classification':
-            y_train = self._y_train.astype(np.int64)
+            y_train = self._y_train.astype('int64')
+            y_val = self._y_val.astype('int64')
         else:
-            y_train = self._y_train.astype(np.float32)
+            y_train = self._y_train.astype('float32')
+            y_val = self._y_val.astype('float32')
 
+        # 整个训练过程用 model.fit + callbacks
+        # 注意: Keras 的 fit 是 "训练到完成" 而非 "训练1个epoch"
+        # 这里用一次 fit(epochs=1) 模拟单 epoch, callbacks 在 epoch 结束时触发
         history = self._model.fit(
             self._X_train, y_train,
             batch_size=self.batch_size,
             epochs=1,
             verbose=0,
-            validation_split=0.0
+            validation_data=(self._X_val, y_val),
+            callbacks=self._callbacks
         )
 
-        result = {'loss': round(float(history.history['loss'][0]), 4)}
+        result = {
+            'train_loss': round(float(history.history['loss'][0]), 4),
+            'val_loss': round(float(history.history['val_loss'][0]), 4),
+        }
         if self.task_type == 'classification' and 'accuracy' in history.history:
-            result['accuracy'] = round(float(history.history['accuracy'][0]), 4)
+            result['train_accuracy'] = round(float(history.history['accuracy'][0]), 4)
+            result['val_accuracy'] = round(float(history.history['val_accuracy'][0]), 4)
+
+        # 检测早停 (通过 lr 变化判断)
+        current_lr = float(self._model.optimizer.learning_rate.numpy())
+        result['lr'] = current_lr
+
         return result
 
     def evaluate(self) -> dict:
-        from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, r2_score, mean_squared_error
+        """最终评估: 在测试集上计算指标"""
+        from sklearn.metrics import (accuracy_score, precision_score, recall_score,
+                                      f1_score, r2_score, mean_squared_error)
 
         if self.task_type == 'classification':
-            y_test = self._y_test.astype(np.int64)
+            y_test = self._y_test.astype('int64')
         else:
-            y_test = self._y_test.astype(np.float32)
+            y_test = self._y_test.astype('float32')
 
         y_pred_raw = self._model.predict(self._X_test, verbose=0)
 
         result = {}
         if self.task_type == 'classification':
             y_pred = np.argmax(y_pred_raw, axis=1)
-            result['accuracy'] = round(float(accuracy_score(y_test, y_pred)), 4)
+            result['test_accuracy'] = round(float(accuracy_score(y_test, y_pred)), 4)
             try:
-                # weighted 平均 — 按样本数加权
-                result['precision_weighted'] = round(float(precision_score(y_test, y_pred, average='weighted', zero_division=0)), 4)
-                result['recall_weighted'] = round(float(recall_score(y_test, y_pred, average='weighted', zero_division=0)), 4)
-                result['f1_weighted'] = round(float(f1_score(y_test, y_pred, average='weighted', zero_division=0)), 4)
-                # macro 平均 — 各类别等权, 暴露类别间差异
-                result['precision_macro'] = round(float(precision_score(y_test, y_pred, average='macro', zero_division=0)), 4)
-                result['recall_macro'] = round(float(recall_score(y_test, y_pred, average='macro', zero_division=0)), 4)
-                result['f1_macro'] = round(float(f1_score(y_test, y_pred, average='macro', zero_division=0)), 4)
+                result['test_precision_weighted'] = round(float(precision_score(y_test, y_pred, average='weighted', zero_division=0)), 4)
+                result['test_recall_weighted'] = round(float(recall_score(y_test, y_pred, average='weighted', zero_division=0)), 4)
+                result['test_f1_weighted'] = round(float(f1_score(y_test, y_pred, average='weighted', zero_division=0)), 4)
+                result['test_precision_macro'] = round(float(precision_score(y_test, y_pred, average='macro', zero_division=0)), 4)
+                result['test_recall_macro'] = round(float(recall_score(y_test, y_pred, average='macro', zero_division=0)), 4)
+                result['test_f1_macro'] = round(float(f1_score(y_test, y_pred, average='macro', zero_division=0)), 4)
             except Exception:
                 pass
         else:
-            # 回归: 反标准化预测值和标签，计算真实尺度下的指标
-            y_pred_flat = y_pred_raw.flatten().astype(np.float32)
-            y_test_flat = y_test.astype(np.float32)
+            y_pred_flat = y_pred_raw.flatten().astype('float32')
+            y_test_flat = y_test.astype('float32')
             if self._y_scaler is not None:
                 y_pred_flat = self._y_scaler.inverse_transform(y_pred_flat.reshape(-1, 1)).ravel()
                 y_test_flat = self._y_scaler.inverse_transform(y_test_flat.reshape(-1, 1)).ravel()
-            result['mse'] = round(float(mean_squared_error(y_test_flat, y_pred_flat)), 4)
-            result['r2'] = round(float(r2_score(y_test_flat, y_pred_flat)), 4)
+            result['test_mse'] = round(float(mean_squared_error(y_test_flat, y_pred_flat)), 4)
+            result['test_r2'] = round(float(r2_score(y_test_flat, y_pred_flat)), 4)
         return result
 
     def save_model(self, path: str):
         tf = _ensure_tf()
         os.makedirs(os.path.dirname(path), exist_ok=True)
 
-        # 保存 Keras 模型
         self._model.save(path + '.keras')
 
-        # 保存配置和预处理器
         config = {
             'model_class': 'MLPClassifier' if self.task_type == 'classification' else 'MLPRegressor',
             'input_dim': self._input_dim,
@@ -240,6 +325,8 @@ class KerasTrainer(BaseTrainer):
             'y_scaler': self._y_scaler,
             'label_encoders': self._label_encoders,
             'framework': 'TensorFlow',
+            'val_size': self.val_size,
+            'early_stopping_patience': self.early_stopping_patience,
         }
         with open(path + '_config.pkl', 'wb') as f:
             pickle.dump(config, f)

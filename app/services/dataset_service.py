@@ -6,14 +6,16 @@
 """
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional, Tuple
+from app._timezone import localnow
 from werkzeug.utils import secure_filename
 from flask import current_app
 from werkzeug.datastructures import FileStorage
 from app import db, logger
 from app.models.dataset import Dataset
 from app.models.user import User
+from app.utils.cache import dashboard_cache
 
 
 # ========== 智能分类推断 ==========
@@ -170,6 +172,10 @@ class DatasetService:
 
             db.session.commit()
 
+            # 清除统计缓存
+            dashboard_cache.invalidate('dataset_stats:')
+            dashboard_cache.invalidate('dashboard:')
+
             logger.info(f"数据集创建成功: {name} ({file_size} bytes, "
                         f"{dataset.row_count}行x{dataset.column_count}列) by {user.username}")
             return dataset, None
@@ -213,8 +219,10 @@ class DatasetService:
                     else:
                         setattr(dataset, field, value)
 
-            dataset.updated_at = datetime.now(timezone.utc)
+            dataset.updated_at = localnow()
             db.session.commit()
+            dashboard_cache.invalidate('dataset_stats:')
+            dashboard_cache.invalidate('dashboard:')
             return True, None
 
         except Exception as e:
@@ -237,6 +245,8 @@ class DatasetService:
 
             db.session.delete(dataset)
             db.session.commit()
+            dashboard_cache.invalidate('dataset_stats:')
+            dashboard_cache.invalidate('dashboard:')
 
             logger.info(f"数据集已删除: {dataset.name}")
             return True, None
@@ -247,11 +257,94 @@ class DatasetService:
             return False, f'删除失败: {str(e)}'
 
     @staticmethod
+    def copy_dataset_to_user(dataset: Dataset, user: User) -> Tuple[Optional[Dataset], Optional[str]]:
+        """
+        将公开数据集复制到目标用户的名下
+
+        复制物理文件 + 创建新 Dataset 记录 (owner=user, is_public=False)
+        如果用户已拥有同名数据集，自动追加后缀避免冲突
+
+        Returns:
+            (new_dataset, error_message)
+        """
+        import shutil
+
+        # 检查是否已经复制过 (同名 + 同 owner)
+        existing = Dataset.query.filter_by(
+            name=dataset.name, owner_id=user.id
+        ).first()
+        if existing:
+            return existing, None  # 已存在，直接返回
+
+        # 生成新文件名 (避免冲突)
+        file_ext = dataset.file_format
+        new_uuid = uuid.uuid4().hex
+        unique_filename = f"{new_uuid}.{file_ext}"
+
+        # 确定保存路径
+        try:
+            from flask import current_app
+            upload_folder = current_app.config['UPLOAD_FOLDER']
+        except RuntimeError:
+            upload_folder = os.path.join(os.path.dirname(__file__), '..', '..', 'uploads')
+
+        dataset_dir = os.path.join(upload_folder, 'datasets')
+        os.makedirs(dataset_dir, exist_ok=True)
+        new_file_path = os.path.join(dataset_dir, unique_filename)
+
+        try:
+            # 复制物理文件 (硬链接优先，回退到拷贝)
+            if os.path.exists(dataset.file_path):
+                try:
+                    os.link(dataset.file_path, new_file_path)  # 硬链接 (节省空间)
+                except (OSError, NotImplementedError):
+                    shutil.copy2(dataset.file_path, new_file_path)  # 跨盘回退
+
+            # 创建新数据集记录
+            new_dataset = Dataset(
+                name=dataset.name,
+                description=dataset.description,
+                file_path=new_file_path,
+                file_size=dataset.file_size,
+                file_format=dataset.file_format,
+                category=dataset.category,
+                is_public=False,  # 复制品默认私有
+                owner_id=user.id,
+                status='ready',
+                row_count=dataset.row_count,
+                column_count=dataset.column_count,
+                summary_json=dataset.summary_json,
+                tags=dataset.tags,
+            )
+
+            db.session.add(new_dataset)
+            db.session.commit()
+
+            dashboard_cache.invalidate('dataset_stats:')
+            dashboard_cache.invalidate('dashboard:')
+
+            logger.info(f"数据集已复制: {dataset.name} -> {user.username} (id={new_dataset.id})")
+            return new_dataset, None
+
+        except Exception as e:
+            # 清理已复制的文件
+            if os.path.exists(new_file_path):
+                os.remove(new_file_path)
+            db.session.rollback()
+            logger.error(f"复制数据集失败: {e}")
+            return None, f'复制失败: {str(e)}'
+
+    @staticmethod
     def list_datasets(page: int = 1, per_page: int = 15,
                       category: str = None, owner_id: int = None,
-                      public_only: bool = False, search: str = None) -> dict:
+                      public_only: bool = False, include_public: bool = False,
+                      search: str = None) -> dict:
         """
         获取数据集列表 (支持筛选和搜索)
+
+        Args:
+            include_public: 当设置了 owner_id 时，同时包含其他用户的公开数据集
+                           用于训练创建页，允许用户选择公开数据集进行训练
 
         Returns:
             分页结果字典
@@ -264,7 +357,14 @@ class DatasetService:
         if category:
             query = query.filter_by(category=category)
         if owner_id:
-            query = query.filter_by(owner_id=owner_id)
+            if include_public:
+                # 用户自己的数据集 + 其他用户的公开数据集
+                from sqlalchemy import or_
+                query = query.filter(
+                    or_(Dataset.owner_id == owner_id, Dataset.is_public == True)  # noqa: E712
+                )
+            else:
+                query = query.filter_by(owner_id=owner_id)
         if search:
             search_term = f'%{search}%'
             query = query.filter(
@@ -293,11 +393,16 @@ class DatasetService:
     @staticmethod
     def get_dataset_statistics(user_id: int = None) -> dict:
         """
-        获取数据集统计信息
+        获取数据集统计信息 (带缓存, TTL=60s)
 
         Returns:
             统计数据字典
         """
+        cache_key = f'dataset_stats:{user_id or "all"}'
+        cached = dashboard_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
         query = Dataset.query
         if user_id:
             query = query.filter_by(owner_id=user_id)
@@ -312,7 +417,7 @@ class DatasetService:
             category_counts[d.category] = category_counts.get(d.category, 0) + 1
             format_counts[d.file_format] = format_counts.get(d.file_format, 0) + 1
 
-        return {
+        result = {
             'total_count': len(datasets),
             'total_size_bytes': total_size,
             'total_size_gb': round(total_size / (1024 ** 3), 2),
@@ -320,25 +425,18 @@ class DatasetService:
             'formats': format_counts,
             'public_count': sum(1 for d in datasets if d.is_public),
         }
+        dashboard_cache.set(cache_key, result)
+        return result
 
 
 # ============ 数据集文件自动解析 ============
 
 def _analyze_dataset_file(dataset, file_path: str, file_ext: str):
     """自动解析数据集文件，提取行列数、列名等统计信息"""
-    import pandas as pd
+    from app.utils.data_io import load_dataframe
 
-    if file_ext == 'csv':
-        df = pd.read_csv(file_path)
-    elif file_ext in ('xlsx', 'xls'):
-        df = pd.read_excel(file_path)
-    elif file_ext == 'json':
-        df = pd.read_json(file_path)
-    elif file_ext == 'parquet':
-        df = pd.read_parquet(file_path)
-    elif file_ext == 'txt':
-        df = pd.read_csv(file_path, sep='\t', nrows=1000)
-    else:
+    df = load_dataframe(file_path, file_ext)
+    if df is None:
         return
 
     dataset.row_count = len(df)

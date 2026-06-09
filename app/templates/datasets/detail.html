@@ -48,9 +48,18 @@
         <div class="card mt-3">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h6 class="mb-0">数据预览 (前 {{ preview.total_preview_rows }} 行)</h6>
+                {% if dataset.owner_id == current_user.id %}
                 <a href="{{ url_for('training.create_job') }}?dataset_id={{ dataset.id }}" class="btn btn-sm btn-info">
                     <i class="bi bi-play-fill"></i> 用此数据集训练
                 </a>
+                {% else %}
+                <form method="POST" action="{{ url_for('datasets.copy_and_train', dataset_id=dataset.id) }}" class="d-inline">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-sm btn-info">
+                        <i class="bi bi-play-fill"></i> 复制并训练
+                    </button>
+                </form>
+                {% endif %}
             </div>
             <div class="table-responsive" style="max-height:400px; overflow-y:auto;">
                 <table class="table table-sm table-striped table-hover mb-0">
@@ -182,9 +191,18 @@
         <div class="card mt-3">
             <div class="card-header"><h6 class="mb-0">快捷操作</h6></div>
             <div class="card-body d-grid gap-2">
-                <a href="{{ url_for('training.create_job') }}" class="btn btn-outline-info btn-sm">
-                    <i class="bi bi-play-fill"></i> 创建训练任务
+                {% if dataset.owner_id == current_user.id %}
+                <a href="{{ url_for('training.create_job') }}?dataset_id={{ dataset.id }}" class="btn btn-outline-info btn-sm">
+                    <i class="bi bi-play-fill"></i> 用此数据集训练
                 </a>
+                {% else %}
+                <form method="POST" action="{{ url_for('datasets.copy_and_train', dataset_id=dataset.id) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-outline-info btn-sm w-100">
+                        <i class="bi bi-box-arrow-down"></i> 添加到我的数据集并训练
+                    </button>
+                </form>
+                {% endif %}
             </div>
         </div>
     </div>
@@ -249,10 +267,18 @@ function loadRecommendation() {
                 html += '<div class="px-2 small"><code>' + JSON.stringify(d.param_presets).replace(/"/g, '').replace(/,/g, ', ') + '</code></div>';
             }
 
-            // 快速创建训练按钮
+            // 快速创建训练按钮 — 根据所有权决定行为
             html += '<div class="px-2 pt-2 pb-1">';
+            {% if dataset.owner_id == current_user.id %}
             html += '<a href="/training/create?dataset_id={{ dataset.id }}" class="btn btn-sm btn-primary w-100">';
-            html += '<i class="bi bi-rocket"></i> 使用推荐配置创建训练</a></div>';
+            html += '<i class="bi bi-rocket"></i> 使用推荐配置创建训练</a>';
+            {% else %}
+            html += '<form method="POST" action="/datasets/{{ dataset.id }}/copy-and-train" class="d-inline w-100">';
+            html += '<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">';
+            html += '<button type="submit" class="btn btn-sm btn-primary w-100">';
+            html += '<i class="bi bi-rocket"></i> 复制数据集并使用推荐配置训练</button></form>';
+            {% endif %}
+            html += '</div>';
 
             document.getElementById('recContent').innerHTML = html;
         })

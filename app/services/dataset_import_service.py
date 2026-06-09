@@ -9,7 +9,8 @@ import json
 import hashlib
 import pandas as pd
 import numpy as np
-from datetime import datetime, timezone
+from datetime import datetime
+from app._timezone import localnow
 from typing import Optional, Tuple
 from app import db, logger
 from app.models.dataset import Dataset
@@ -272,7 +273,7 @@ class DatasetImportService:
 
             # 生成文件名
             safe_key = dataset_key.replace('/', '_')
-            filename = f'public_{safe_key}_{datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")}.csv'
+            filename = f'public_{safe_key}_{localnow().strftime("%Y%m%d_%H%M%S")}.csv'
 
             # 保存到上传目录
             upload_dir = os.path.join('uploads', 'datasets')
@@ -545,7 +546,7 @@ class DatasetImportService:
             # 生成文件名
             content_hash = hashlib.md5(url.encode()).hexdigest()[:12]
             ext = file_format if file_format in ('csv', 'json', 'xlsx', 'parquet') else 'csv'
-            filename = f'imported_{content_hash}_{datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")}.{ext}'
+            filename = f'imported_{content_hash}_{localnow().strftime("%Y%m%d_%H%M%S")}.{ext}'
 
             upload_dir = os.path.join('uploads', 'datasets')
             os.makedirs(upload_dir, exist_ok=True)
@@ -655,7 +656,7 @@ class DatasetImportService:
 
             # 保存到上传目录
             safe_name = name.replace(' ', '_').lower()
-            filename = f'kaggle_{safe_name}_{datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")}.csv'
+            filename = f'kaggle_{safe_name}_{localnow().strftime("%Y%m%d_%H%M%S")}.csv'
             upload_dir = os.path.join('uploads', 'datasets')
             os.makedirs(upload_dir, exist_ok=True)
             file_path = os.path.join(upload_dir, filename)

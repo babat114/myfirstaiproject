@@ -5,16 +5,25 @@
 """
 import json
 import os
-from datetime import datetime, timezone
+from datetime import datetime
 from app import db, logger
 from app.models.training_job import TrainingJob
+from app._timezone import localnow
 
 
 class TrainingCallback:
-    """训练回调 — 每个 epoch 后更新 TrainingJob 状态"""
+    """训练回调 — 每个 epoch 后更新 TrainingJob 状态，同时发布事件到事件总线"""
 
     def __init__(self, job_id: int):
         self.job_id = job_id
+
+    def _publish(self, event_type: str, data: dict):
+        """发布事件到事件总线 (非阻塞，总线不可用时静默丢弃)"""
+        try:
+            from app.utils.event_bus import get_event_bus
+            get_event_bus().publish(self.job_id, event_type, data)
+        except Exception:
+            pass  # 事件总线故障不应影响训练
 
     def on_epoch_end(self, epoch: int, total_epochs: int, metrics: dict):
         """每个 epoch 结束时调用"""
@@ -30,13 +39,23 @@ class TrainingCallback:
 
         # 追加指标历史
         history = job.metrics_history
-        record = {'epoch': epoch + 1, 'timestamp': datetime.now(timezone.utc).isoformat()}
+        record = {'epoch': epoch + 1, 'timestamp': localnow().isoformat()}
         record.update(metrics)
         history.append(record)
         job.metrics_history_json = json.dumps(history, ensure_ascii=False)
         job.final_metrics_json = json.dumps(metrics, ensure_ascii=False)
 
         db.session.commit()
+
+        # 推送实时事件 — 携带完整 history 让前端直接渲染 (无需额外 HTTP 轮询)
+        self._publish('metrics', {
+            'current_epoch': job.current_epoch,
+            'total_epochs': job.total_epochs,
+            'progress_percent': job.progress_percent,
+            'metrics': metrics,
+            'metrics_history': history,          # 完整历史 → 前端直接渲染图表+关键帧
+            'log_tail': job.log_tail_last(3),    # 最近3行日志 → 前端增量追加
+        })
 
     def on_log(self, message: str):
         """追加训练日志"""
@@ -46,9 +65,12 @@ class TrainingCallback:
         job.append_log(message)
         db.session.commit()
 
-    def _utcnow(self):
-        """返回 naive UTC datetime (MySQL DATETIME 不存时区)"""
-        return datetime.now(timezone.utc).replace(tzinfo=None)
+        # 推送日志事件
+        self._publish('log', {'message': message})
+
+    def _localnow(self):
+        """返回 naive datetime 用于 MySQL DATETIME 列 (北京时间 UTC+8, 去时区)"""
+        return localnow().replace(tzinfo=None)
 
     def _safe_timedelta(self, started, completed) -> int:
         """安全计算两个 datetime 的秒数差 (兼容 aware/naive)"""
@@ -67,10 +89,11 @@ class TrainingCallback:
         if not job:
             return
         job.status = 'running'
-        job.started_at = self._utcnow()
+        job.started_at = self._localnow()
         job.append_log(f'[启动] 训练任务开始')
         job.error_message = None
         db.session.commit()
+        self._publish('status_change', {'status': 'running', 'message': '训练任务开始'})
 
     def on_complete(self, final_metrics: dict = None):
         """训练完成时调用"""
@@ -79,10 +102,13 @@ class TrainingCallback:
             return
         job.status = 'completed'
         job.progress_percent = 100.0
-        job.completed_at = self._utcnow()
+        job.completed_at = self._localnow()
         if final_metrics:
             job.final_metrics_json = json.dumps(final_metrics, ensure_ascii=False)
         job.append_log(f'[完成] 训练成功完成')
+        self._publish('status_change', {'status': 'completed', 'message': '训练成功完成'})
+        if final_metrics:
+            self._publish('metrics', {'final_metrics': final_metrics})
 
         # 更新关联模型的指标和训练时长
         if job.model:
@@ -91,46 +117,10 @@ class TrainingCallback:
                     from app.models.model_record import ModelRecord
                     model = db.session.get(ModelRecord, job.model.id)
                     if model:
-                        metrics_to_set = {}
-                        # 优先提取 macro 指标 (各类别等权, 能暴露类别间差异)
-                        for key in ('accuracy', 'precision_macro', 'recall_macro', 'f1_macro', 'loss'):
-                            for prefix in ('test_', 'train_', ''):
-                                full_key = f'{prefix}{key}'
-                                if full_key in final_metrics:
-                                    metrics_to_set[key] = final_metrics[full_key]
-                                    break
-                        # 如果 macro 指标不存在, 回退到旧版键名 (weighted 或裸键)
-                        if 'precision_macro' not in metrics_to_set:
-                            for key in ('precision', 'precision_weighted'):
-                                for prefix in ('test_', 'train_', ''):
-                                    full_key = f'{prefix}{key}'
-                                    if full_key in final_metrics:
-                                        metrics_to_set['precision_macro'] = final_metrics[full_key]
-                                        break
-                                if 'precision_macro' in metrics_to_set:
-                                    break
-                        if 'recall_macro' not in metrics_to_set:
-                            for key in ('recall', 'recall_weighted'):
-                                for prefix in ('test_', 'train_', ''):
-                                    full_key = f'{prefix}{key}'
-                                    if full_key in final_metrics:
-                                        metrics_to_set['recall_macro'] = final_metrics[full_key]
-                                        break
-                                if 'recall_macro' in metrics_to_set:
-                                    break
-                        if 'f1_macro' not in metrics_to_set:
-                            for key in ('f1_score', 'f1_weighted'):
-                                for prefix in ('test_', 'train_', ''):
-                                    full_key = f'{prefix}{key}'
-                                    if full_key in final_metrics:
-                                        metrics_to_set['f1_macro'] = final_metrics[full_key]
-                                        break
-                                if 'f1_macro' in metrics_to_set:
-                                    break
-                        if metrics_to_set:
-                            model.set_metrics(metrics_to_set)
-                            # 同时保存完整的评估指标到 metrics_json
-                            model.metrics_json = json.dumps(final_metrics, ensure_ascii=False)
+                        # 委托给 ModelRecord.set_metrics() — 自动检测分类/回归/聚类
+                        model.set_metrics(final_metrics)
+                        # 同时保存完整的评估指标到 metrics_json
+                        model.metrics_json = json.dumps(final_metrics, ensure_ascii=False)
                         model.status = 'trained'
                         model.training_duration_seconds = self._safe_timedelta(
                             job.started_at, job.completed_at
@@ -140,10 +130,13 @@ class TrainingCallback:
                         # 设置模型文件路径为实验目录下的模型文件
                         exp_model_pkl = os.path.join('experiments', job.uuid, 'model.pkl')
                         exp_model_pt = os.path.join('experiments', job.uuid, 'model.pt')
+                        exp_model_keras = os.path.join('experiments', job.uuid, 'model.keras')
                         if os.path.exists(exp_model_pkl):
                             model.model_file_path = exp_model_pkl
                         elif os.path.exists(exp_model_pt):
                             model.model_file_path = exp_model_pt
+                        elif os.path.exists(exp_model_keras):
+                            model.model_file_path = exp_model_keras
                         job.append_log(f'[模型] 已更新关联模型指标')
             except Exception as e:
                 logger.error(f'更新模型指标失败: {e}')
@@ -210,9 +203,10 @@ class TrainingCallback:
             return
         job.status = 'failed'
         job.error_message = error
-        job.completed_at = self._utcnow()
+        job.completed_at = self._localnow()
         job.append_log(f'[错误] {error}')
         db.session.commit()
+        self._publish('status_change', {'status': 'failed', 'message': error})
 
     def on_cancel(self):
         """训练取消时调用"""
@@ -220,6 +214,7 @@ class TrainingCallback:
         if not job:
             return
         job.status = 'cancelled'
-        job.completed_at = self._utcnow()
+        job.completed_at = self._localnow()
         job.append_log(f'[取消] 训练任务已取消')
         db.session.commit()
+        self._publish('status_change', {'status': 'cancelled', 'message': '训练任务已取消'})

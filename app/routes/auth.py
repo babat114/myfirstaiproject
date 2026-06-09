@@ -7,11 +7,13 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash
 from flask_login import login_user, logout_user, login_required, current_user
 from app.services.auth_service import AuthService
+from app.utils.decorators import rate_limit
 
 auth_bp = Blueprint('auth', __name__)
 
 
 @auth_bp.route('/login', methods=['GET', 'POST'])
+@rate_limit(max_calls=20, period=60)  # 每IP每分钟最多20次登录尝试
 def login():
     """用户登录页面"""
     if current_user.is_authenticated:

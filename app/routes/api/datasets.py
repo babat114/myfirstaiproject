@@ -182,7 +182,8 @@ def analyze_dataset_by_id(dataset_id):
             pass
 
     result = DatasetRecommendationService.recommend(
-        dataset.file_path, target_col, dataset.file_format
+        dataset.file_path, target_col, dataset.file_format,
+        known_n_samples=dataset.row_count or None
     )
 
     if 'error' in result:
@@ -193,15 +194,17 @@ def analyze_dataset_by_id(dataset_id):
 
 # 训练表单可用的算法白名单 (与 create.html 中的 ALGORITHMS 保持一致)
 _FORM_CLASSIFICATION_ALGOS = {'random_forest', 'logistic_regression', 'svm', 'knn', 'gradient_boosting'}
-_FORM_REGRESSION_ALGOS = {'random_forest_regressor', 'linear_regression', 'svr', 'gradient_boosting_regressor'}
+_FORM_REGRESSION_ALGOS = {'random_forest_regressor', 'linear_regression', 'ridge', 'svr', 'gradient_boosting_regressor'}
+_FORM_CLUSTERING_ALGOS = {'kmeans', 'dbscan', 'agglomerative', 'minibatch_kmeans'}
 
 # 推荐算法 → 表单算法映射 (推荐引擎可能返回表单不支持的算法)
 _ALGO_MAP = {
-    'ridge': 'linear_regression',           # Ridge → 线性回归
-    'knn_regressor': 'random_forest_regressor',  # KNN回归 → 随机森林回归
-    'tfidf_logistic': 'logistic_regression',     # TF-IDF逻辑回归 → 逻辑回归
-    'tfidf_svm': 'svm',                          # TF-IDF SVM → SVM
-    'mlp': None,  # MLP → 由框架决定
+    'ridge': 'ridge',                             # Ridge → 岭回归 (L2正则, 保留)
+    'knn_regressor': 'random_forest_regressor',   # KNN回归 → 随机森林回归
+    'tfidf_logistic': 'logistic_regression',      # TF-IDF逻辑回归 → 逻辑回归 (SklearnTrainer已加TF-IDF管道)
+    'tfidf_svm': 'svm',                           # TF-IDF SVM → SVM
+    'transformer_bert': 'transformer_bert',       # BERT → TransformersNLPTrainer
+    'mlp': 'mlp',                                 # MLP → PyTorch MLP (宽网络)
     'decision_tree': 'random_forest',
     'decision_tree_regressor': 'random_forest_regressor',
 }
@@ -241,7 +244,8 @@ def auto_config(dataset_id):
             pass
 
     result = DatasetRecommendationService.recommend(
-        dataset.file_path, target_col, dataset.file_format
+        dataset.file_path, target_col, dataset.file_format,
+        known_n_samples=dataset.row_count or None
     )
 
     if 'error' in result:
@@ -257,7 +261,7 @@ def auto_config(dataset_id):
     CATEGORY_TASK_MAP = {
         'classification': ('classification', None),     # 强制分类
         'regression':     ('regression', None),          # 强制回归
-        'clustering':     ('classification', '⚠ 此数据集标记为聚类类型，无监督任务不需要目标列。如需有监督学习，请确认目标列含义。'),
+        'clustering':     ('clustering', None),
         'nlp':            ('classification', '⚠ 此数据集为NLP文本类型，标准分类/回归可能不适用。建议使用TF-IDF+分类器或深度学习。'),
         'vision':         ('classification', '⚠ 此数据集为视觉类型，表格型算法不适用于图像特征。建议使用PyTorch/TensorFlow CNN。'),
         'synthetic':      (None, '⚠ 此数据集为合成/生成式数据，target列可能为随机合成值而非真实标签，模型可能无法学到有效模式。'),
@@ -272,7 +276,7 @@ def auto_config(dataset_id):
         ds_category, (None, None)
     )
 
-    # 启发式检测: 特征名全为 latent_* 格式 → 可能是生成式/合成数据
+    # 启发式检测
     column_names = analysis.get('column_names', [])
     latent_cols = [c for c in column_names if c.startswith('latent_')]
     is_latent_data = (len(latent_cols) > 0 and
@@ -282,6 +286,10 @@ def auto_config(dataset_id):
                            '特征为latent_*隐空间维度，此数据可能来自生成式模型（GAN/VAE/AE）。'
                            '隐空间特征与target之间的相关关系可能是随机噪声，模型可能无法学到有效模式。')
 
+    # NLP 专属: 强制 transformer 框架
+    is_nlp = ds_category == 'nlp'
+    is_vision = ds_category == 'vision'
+
     if forced_task:
         ml_task_type = forced_task
     elif target_type == 'continuous':
@@ -289,7 +297,12 @@ def auto_config(dataset_id):
     else:
         ml_task_type = 'classification'
 
-    form_algos = _FORM_REGRESSION_ALGOS if ml_task_type == 'regression' else _FORM_CLASSIFICATION_ALGOS
+    if ml_task_type == 'regression':
+        form_algos = _FORM_REGRESSION_ALGOS
+    elif ml_task_type == 'clustering':
+        form_algos = _FORM_CLUSTERING_ALGOS
+    else:
+        form_algos = _FORM_CLASSIFICATION_ALGOS
 
     # 警告信息拼入推荐理由
     reason_text = str(result.get('summary', ''))
@@ -315,7 +328,12 @@ def auto_config(dataset_id):
 
     # 如果推荐算法全部不匹配，使用默认值
     if algorithm is None:
-        algorithm = 'random_forest' if ml_task_type == 'classification' else 'random_forest_regressor'
+        if ml_task_type == 'clustering':
+            algorithm = 'kmeans'
+        elif ml_task_type == 'classification':
+            algorithm = 'random_forest'
+        else:
+            algorithm = 'random_forest_regressor'
 
     if not alternative_algorithms:
         # 至少提供一个备选
@@ -329,20 +347,56 @@ def auto_config(dataset_id):
     if not target_column and analysis.get('column_names'):
         target_column = analysis['column_names'][-1]
 
-    # --- 框架 ---
-    frameworks = result.get('recommended_frameworks', [])
-    framework = frameworks[0]['framework'] if frameworks else 'sklearn'
-
-    # --- 超参数预设 ---
-    params = result.get('param_presets', {})
-
-    # --- Epochs: sklearn 算法固定为1 ---
-    if algorithm in ('random_forest', 'gradient_boosting', 'random_forest_regressor',
-                     'gradient_boosting_regressor', 'svm', 'svr',
-                     'logistic_regression', 'linear_regression', 'knn'):
-        total_epochs = 1
+    # --- NLP 专属: 强制 Transformer 迁移学习 ---
+    if is_nlp:
+        algorithm = 'transformer_bert'
+        framework = 'transformers'
+        params = {
+            'epochs': 3,
+            'batch_size': 16,
+            'learning_rate': 2e-5,
+            'max_length': 256,
+            'test_size': 0.2,
+        }
+        total_epochs = 3
+        # 替换推荐理由
+        reason_text = ('[NLP Transformer] 使用预训练BERT模型进行迁移学习微调。'
+                       '自动检测文本列+语言，3轮训练即可达到高准确率。' + reason_text)
+    # --- 视觉专属: 强制 PyTorch 深度学习 ---
+    elif is_vision:
+        framework = 'pytorch'
+        algorithm = 'mlp'
+        params = result.get('param_presets', {})
+        # 视觉 embedding 通常高维，需要更宽的网络
+        n_feat = analysis.get('n_features', 100)
+        if n_feat > 500:
+            params['hidden_layers'] = [1024, 512, 256, 128]
+        elif n_feat > 200:
+            params['hidden_layers'] = [512, 256, 128, 64]
+        else:
+            params['hidden_layers'] = [256, 128, 64, 32]
+        params['epochs'] = 20
+        params['dropout'] = 0.4
+        params['batch_size'] = 32
+        total_epochs = 20
+        reason_text = ('[Vision DL] 视觉特征使用PyTorch MLP深度网络训练。'
+                       '自动加宽隐藏层+增加dropout防过拟合。' + reason_text)
     else:
-        total_epochs = params.get('epochs', 10)
+        # --- 框架 ---
+        frameworks = result.get('recommended_frameworks', [])
+        framework = frameworks[0]['framework'] if frameworks else 'sklearn'
+
+        # --- 超参数预设 ---
+        params = result.get('param_presets', {})
+
+        # --- Epochs: sklearn 算法固定为1 ---
+        if algorithm in ('random_forest', 'gradient_boosting', 'random_forest_regressor',
+                         'gradient_boosting_regressor', 'svm', 'svr',
+                         'logistic_regression', 'linear_regression', 'knn', 'ridge',
+                         'kmeans', 'dbscan', 'agglomerative', 'minibatch_kmeans'):
+            total_epochs = 1
+        else:
+            total_epochs = params.get('epochs', 10)
 
     # 转换 numpy 数值为 Python 原生类型 (避免 JSON 序列化失败)
     def _py(val):
@@ -367,9 +421,16 @@ def auto_config(dataset_id):
         'logistic_regression': '逻辑回归', 'svm': 'SVM', 'knn': 'KNN',
         'random_forest_regressor': '随机森林回归', 'linear_regression': '线性回归',
         'svr': 'SVR', 'gradient_boosting_regressor': '梯度提升回归',
+        'kmeans': 'K-Means', 'dbscan': 'DBSCAN',
+        'agglomerative': '层次聚类', 'minibatch_kmeans': 'MiniBatchKMeans',
     }
     algo_display = _ALGO_DISPLAY.get(algorithm, algorithm)
-    task_cn = '分类' if ml_task_type == 'classification' else '回归'
+    if ml_task_type == 'clustering':
+        task_cn = '聚类'
+    elif ml_task_type == 'regression':
+        task_cn = '回归'
+    else:
+        task_cn = '分类'
     # 避免名称重复: "线性回归" + "回归" → "线性回归回归" → 改为 "线性回归"
     if task_cn in algo_display:
         task_cn = ''  # 算法名已包含任务类型
@@ -491,6 +552,99 @@ def import_from_url():
         'message': f'数据集 "{dataset.name}" 导入成功',
         'data': dataset.to_dict(),
     }), 201
+
+
+@datasets_api_bp.route('/<int:dataset_id>/smart-params', methods=['GET'])
+@api_login_required
+def smart_params(dataset_id):
+    """GET /api/datasets/<id>/smart-params — AI智能推荐高级超参数
+
+    Query params:
+        algorithm:     算法名称 (必填)
+        ml_task_type:  任务类型 (默认 classification)
+        framework:     框架 (默认 sklearn)
+
+    返回:
+        params:     推荐参数键值对 (可直接填入表单)
+        reason:     推荐理由
+        confidence: 置信度
+        tips:       使用提示
+        gridsearch_suggestion: 是否建议使用GridSearchCV
+        gridsearch_reason:     推荐GridSearchCV的理由
+    """
+    from app.services.dataset_recommendation_service import DatasetAnalyzer
+    from app.services.parameter_guidance_service import ParameterGuidanceService
+
+    dataset = DatasetService.get_dataset_by_id(dataset_id)
+    if not dataset:
+        return jsonify({'success': False, 'message': '数据集不存在。'}), 404
+
+    if not dataset.file_path or not os.path.exists(dataset.file_path):
+        return jsonify({'success': False, 'message': '数据集文件不存在。'}), 404
+
+    algorithm = request.args.get('algorithm', 'random_forest')
+    ml_task_type = request.args.get('ml_task_type', 'classification')
+    framework = request.args.get('framework', 'sklearn')
+
+    # 分析数据集
+    target_col = None
+    if dataset.summary_json:
+        try:
+            summary = json.loads(dataset.summary_json)
+            target_col = summary.get('target_column')
+        except Exception:
+            pass
+
+    analysis = DatasetAnalyzer.analyze(
+        dataset.file_path, target_col, dataset.file_format,
+    )
+
+    if 'error' in analysis:
+        return jsonify({'success': False, 'message': analysis['error']}), 400
+
+    # 使用已知的实际样本数
+    if dataset.row_count and dataset.row_count > 0:
+        analysis['n_samples'] = dataset.row_count
+
+    # 生成推荐
+    result = ParameterGuidanceService.recommend_initial_params(
+        analysis=analysis,
+        algorithm=algorithm,
+        ml_task_type=ml_task_type,
+        framework=framework,
+    )
+
+    # 转换 numpy 类型
+    def _py(val):
+        if val is None:
+            return None
+        try:
+            if hasattr(val, 'item'):
+                return val.item()
+        except Exception:
+            pass
+        if isinstance(val, bool):
+            return bool(val)
+        if isinstance(val, (int, float)):
+            return val
+        if isinstance(val, list):
+            return [_py(v) for v in val]
+        if isinstance(val, dict):
+            return {str(k): _py(v) for k, v in val.items()}
+        return val
+
+    return jsonify({
+        'success': True,
+        'data': {
+            'params': _py(result['params']),
+            'reason': result['reason'],
+            'scale': result['scale'],
+            'confidence': _py(result['confidence']),
+            'tips': result['tips'],
+            'gridsearch_suggestion': result['gridsearch_suggestion'],
+            'gridsearch_reason': result['gridsearch_reason'],
+        },
+    })
 
 
 @datasets_api_bp.route('/stats', methods=['GET'])

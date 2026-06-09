@@ -87,18 +87,9 @@ class DatasetAnalyzer:
 
     @staticmethod
     def _load(df_path: str, fmt: str) -> Optional[pd.DataFrame]:
-        try:
-            if fmt == 'csv': return pd.read_csv(df_path, nrows=5000)
-            elif fmt in ('xlsx', 'xls'): return pd.read_excel(df_path, nrows=5000)
-            elif fmt == 'json': return pd.read_json(df_path)
-            elif fmt == 'parquet': return pd.read_parquet(df_path)
-        except Exception:
-            pass
-        # fallback
-        try:
-            return pd.read_csv(df_path, nrows=5000, encoding='latin-1')
-        except Exception:
-            return None
+        from app.utils.data_io import load_dataframe
+        # 加载最多 100000 行以准确分析数据集特征，避免因采样不足导致推荐偏差
+        return load_dataframe(df_path, fmt, nrows=100000)
 
     @staticmethod
     def _analyze_types(df) -> dict:
@@ -157,11 +148,22 @@ class DatasetRecommendationService:
 
     @staticmethod
     def recommend(file_path: str, target_col: str = None,
-                  file_format: str = 'csv') -> dict:
-        """分析数据集并返回推荐结果"""
+                  file_format: str = 'csv', known_n_samples: int = None) -> dict:
+        """分析数据集并返回推荐结果
+
+        Args:
+            file_path: 数据集文件路径
+            target_col: 目标列名
+            file_format: 文件格式
+            known_n_samples: 已知的实际样本数 (优先于分析器采样数, 来自 DB row_count)
+        """
         analysis = DatasetAnalyzer.analyze(file_path, target_col, file_format)
         if 'error' in analysis:
             return {'error': analysis['error']}
+
+        # 使用已知的实际样本数 (避免采样偏差)
+        if known_n_samples and known_n_samples > 0:
+            analysis['n_samples'] = known_n_samples
 
         # 基础信息
         n_samples = analysis['n_samples']
@@ -238,9 +240,15 @@ class DatasetRecommendationService:
 
         if text_heavy:
             algorithms = [
-                {'algorithm': 'tfidf_logistic', 'display': 'TF-IDF + LogisticRegression', 'confidence': 0.85, 'reason': '文本分类经典方案'},
-                {'algorithm': 'tfidf_svm', 'display': 'TF-IDF + SVM', 'confidence': 0.78, 'reason': '高维文本数据SVM效果好'},
-                {'algorithm': 'mlp', 'display': 'PyTorch MLP', 'confidence': 0.65, 'reason': '深度网络提取文本特征'},
+                {'algorithm': 'transformer_bert', 'display': 'BERT Transformer 微调', 'confidence': 0.95, 'reason': '预训练迁移学习，NLP首选方案'},
+                {'algorithm': 'tfidf_logistic', 'display': 'TF-IDF + LogisticRegression', 'confidence': 0.70, 'reason': '轻量文本分类，快速baseline'},
+                {'algorithm': 'tfidf_svm', 'display': 'TF-IDF + SVM', 'confidence': 0.65, 'reason': '高维稀疏文本数据SVM效果好'},
+            ]
+        elif high_dim and n_features > 200:
+            # 视觉embedding特征 → PyTorch深度学习
+            algorithms = [
+                {'algorithm': 'mlp', 'display': 'PyTorch MLP (宽网络)', 'confidence': 0.88, 'reason': f'{n_features}维视觉特征适合深度MLP'},
+                {'algorithm': 'random_forest', 'display': 'Random Forest', 'confidence': 0.55, 'reason': '传统方法baseline'},
             ]
         elif target_type == 'continuous':
             if n_samples > 5000:

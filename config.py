@@ -13,8 +13,18 @@ load_dotenv()
 
 class Config:
     """基础配置类"""
-    # Flask 密钥
-    SECRET_KEY = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
+    # Flask 密钥 — 生产环境必须设置环境变量，开发环境自动随机生成
+    _raw_secret = os.environ.get('SECRET_KEY')
+    if _raw_secret:
+        SECRET_KEY = _raw_secret
+    elif os.environ.get('FLASK_ENV', 'development') == 'development':
+        import secrets as _secrets
+        SECRET_KEY = _secrets.token_hex(32)
+    else:
+        raise RuntimeError(
+            '生产环境必须设置 SECRET_KEY 环境变量。'
+            '请在 .env 中设置 SECRET_KEY=<your-secure-key>'
+        )
 
     # 数据库配置
     MYSQL_USER = os.environ.get('MYSQL_USER', 'root')
@@ -36,9 +46,9 @@ class Config:
         'echo': False,
     }
 
-    # 会话配置
+    # 会话配置 — 安全优先: 默认开启 Secure (仅开发环境关闭)
     PERMANENT_SESSION_LIFETIME = timedelta(hours=8)
-    SESSION_COOKIE_SECURE = False  # 生产环境设为 True
+    SESSION_COOKIE_SECURE = True  # 默认开启 HTTPS-only
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = 'Lax'
 
@@ -54,18 +64,32 @@ class Config:
     WTF_CSRF_ENABLED = True
     WTF_CSRF_TIME_LIMIT = 3600  # 1小时
 
-    # JWT 配置
-    JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY', 'jwt-secret-key')
+    # JWT 配置 — 生产环境必须设置环境变量，开发环境自动随机生成
+    _raw_jwt_secret = os.environ.get('JWT_SECRET_KEY')
+    if _raw_jwt_secret:
+        JWT_SECRET_KEY = _raw_jwt_secret
+    elif os.environ.get('FLASK_ENV', 'development') == 'development':
+        import secrets as _jwt_secrets
+        JWT_SECRET_KEY = _jwt_secrets.token_hex(32)
+    else:
+        raise RuntimeError(
+            '生产环境必须设置 JWT_SECRET_KEY 环境变量。'
+            '请在 .env 中设置 JWT_SECRET_KEY=<your-secure-key>'
+        )
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=2)
     JWT_REFRESH_TOKEN_EXPIRES = timedelta(days=30)
 
     # 日志配置
     LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO')
 
+    # 训练执行引擎配置
+    TRAINING_MAX_WORKERS = int(os.environ.get('TRAINING_MAX_WORKERS', '2'))
+
 
 class DevelopmentConfig(Config):
     """开发环境配置"""
     DEBUG = True
+    SESSION_COOKIE_SECURE = False  # 本地开发无 HTTPS
     SQLALCHEMY_ENGINE_OPTIONS = {
         **Config.SQLALCHEMY_ENGINE_OPTIONS,
         'echo': True,  # 开发环境打印 SQL

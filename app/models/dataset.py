@@ -6,23 +6,24 @@
 """
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from app import db
+from app._timezone import localnow
 
 
 # 数据集分类映射 (数据库值 → 中文标签 + 图标)
 CATEGORY_LABELS = {
-    'classification':  '📊 分类数据',
-    'regression':      '📈 回归数据',
-    'clustering':      '🔵 聚类数据',
-    'nlp':             '📝 自然语言处理',
-    'vision':          '👁 计算机视觉',
-    'time_series':     '📅 时间序列',
-    'biology':         '🧬 生物医学',
-    'finance':         '💰 金融经济',
-    'synthetic':       '🔧 合成数据',
-    'tabular':         '📋 通用表格',
-    'other':           '📦 其他',
+    'classification':  '分类数据',
+    'regression':      '回归数据',
+    'clustering':      '聚类数据',
+    'nlp':             '自然语言处理',
+    'vision':          '计算机视觉',
+    'time_series':     '时间序列',
+    'biology':         '生物医学',
+    'finance':         '金融经济',
+    'synthetic':       '合成数据',
+    'tabular':         '通用表格',
+    'other':           '其他',
 }
 
 
@@ -93,11 +94,11 @@ class Dataset(db.Model):
     owner_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
 
     # 时间戳
-    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    created_at = db.Column(db.DateTime, default=lambda: localnow(), nullable=False)
     updated_at = db.Column(
         db.DateTime,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: localnow(),
+        onupdate=lambda: localnow(),
         nullable=False
     )
 
@@ -135,8 +136,8 @@ class Dataset(db.Model):
 
     @property
     def category_label(self) -> str:
-        """获取分类的中文标签 (含图标)"""
-        return CATEGORY_LABELS.get(self.category, f'📦 {self.category}')
+        """获取分类的中文标签"""
+        return CATEGORY_LABELS.get(self.category, self.category)
 
     @staticmethod
     def get_category_choices() -> list:
@@ -147,7 +148,7 @@ class Dataset(db.Model):
 
     def update_statistics(self, row_count: int = None, column_count: int = None,
                           summary: str = None):
-        """更新数据集统计信息"""
+        """更新数据集统计信息 (不提交 — 由调用方服务层控制)"""
         if row_count is not None:
             self.row_count = row_count
         if column_count is not None:
@@ -155,7 +156,6 @@ class Dataset(db.Model):
         if summary is not None:
             self.summary_json = summary
         self.status = 'ready'
-        db.session.commit()
 
     def to_dict(self, include_file_path: bool = False) -> dict:
         """转换为字典"""
@@ -187,3 +187,17 @@ class Dataset(db.Model):
 
     def __repr__(self):
         return f'<Dataset {self.name} v{self.version}>'
+
+    # ============ 权限检查 ============
+
+    def is_viewable_by(self, user) -> bool:
+        """检查用户是否有权查看此数据集"""
+        if user is None:
+            return self.is_public
+        return self.is_public or self.owner_id == user.id or user.is_admin
+
+    def is_editable_by(self, user) -> bool:
+        """检查用户是否有权编辑此数据集"""
+        if user is None:
+            return False
+        return self.owner_id == user.id or user.is_admin

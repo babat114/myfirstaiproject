@@ -6,8 +6,14 @@
 """
 import json
 import hashlib
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import Any
+
+# 北京时区 (UTC+8) — 保留供外部引用
+BEIJING_TZ = timezone(timedelta(hours=8))
+
+# 统一使用 _timezone 模块的 localnow，避免重复实现
+from app._timezone import localnow  # noqa: E402, F401 — re-export for backward compatibility
 
 
 def format_file_size(size_bytes: int) -> str:
@@ -107,25 +113,25 @@ def get_status_color(status: str) -> str:
 
 
 def get_status_icon(status: str) -> str:
-    """根据状态返回对应的图标"""
+    """根据状态返回对应的 Bootstrap Icons 类名"""
     icons = {
-        'ready': '✅',
-        'uploading': '⬆️',
-        'processing': '⚙️',
-        'error': '❌',
-        'draft': '📝',
-        'trained': '🎓',
-        'deployed': '🚀',
-        'archived': '📦',
-        'failed': '💥',
-        'queued': '⏳',
-        'preparing': '🔧',
-        'running': '▶️',
-        'paused': '⏸️',
-        'completed': '✅',
-        'cancelled': '🚫',
+        'ready': 'bi-check-circle-fill',
+        'uploading': 'bi-cloud-upload-fill',
+        'processing': 'bi-gear-fill',
+        'error': 'bi-x-circle-fill',
+        'draft': 'bi-pencil-fill',
+        'trained': 'bi-mortarboard-fill',
+        'deployed': 'bi-rocket-takeoff-fill',
+        'archived': 'bi-archive-fill',
+        'failed': 'bi-exclamation-triangle-fill',
+        'queued': 'bi-hourglass-split',
+        'preparing': 'bi-tools',
+        'running': 'bi-play-circle-fill',
+        'paused': 'bi-pause-circle-fill',
+        'completed': 'bi-check-circle-fill',
+        'cancelled': 'bi-x-octagon-fill',
     }
-    return icons.get(status, '❓')
+    return icons.get(status, 'bi-question-circle-fill')
 
 
 def chart_colors() -> list:

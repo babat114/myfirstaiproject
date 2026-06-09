@@ -6,8 +6,9 @@ AI模型注册模型
 """
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from app import db
+from app._timezone import localnow
 
 
 class ModelRecord(db.Model):
@@ -70,12 +71,17 @@ class ModelRecord(db.Model):
     # 性能指标 (JSON 字符串)
     metrics_json = db.Column(db.Text, nullable=True)
 
-    # 关键指标
+    # 关键指标 — 分类任务
     accuracy = db.Column(db.Float, nullable=True)
     precision = db.Column(db.Float, nullable=True)
     recall = db.Column(db.Float, nullable=True)
     f1_score = db.Column(db.Float, nullable=True)
     loss = db.Column(db.Float, nullable=True)
+
+    # 关键指标 — 回归任务
+    r2 = db.Column(db.Float, nullable=True, comment='R² 决定系数')
+    mse = db.Column(db.Float, nullable=True, comment='均方误差')
+    mae = db.Column(db.Float, nullable=True, comment='平均绝对误差')
 
     # 训练信息
     training_dataset_id = db.Column(db.Integer, db.ForeignKey('datasets.id'), nullable=True)
@@ -99,11 +105,11 @@ class ModelRecord(db.Model):
     owner_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
 
     # 时间戳
-    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    created_at = db.Column(db.DateTime, default=lambda: localnow(), nullable=False)
     updated_at = db.Column(
         db.DateTime,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: localnow(),
+        onupdate=lambda: localnow(),
         nullable=False
     )
 
@@ -130,7 +136,8 @@ class ModelRecord(db.Model):
 
     @property
     def file_size_mb(self) -> float:
-        return round(self.file_size / (1024 * 1024), 2)
+        size = self.file_size or 0
+        return round(size / (1024 * 1024), 2)
 
     @property
     def name_slug(self) -> str:
@@ -145,28 +152,54 @@ class ModelRecord(db.Model):
         设置性能指标
 
         存储策略:
-        - accuracy/precision/recall/f1_score 列存 macro 平均值 (各类别等权)
-        - metrics_json 存完整指标 (含 weighted/macro 两种平均方式)
+        - 分类: accuracy/precision/recall/f1_score 列存 macro 平均值
+        - 回归: r2/mse/mae 列存测试集指标 (优先 test_ 前缀)
+        - metrics_json 存完整指标
         - loss 单独存储
         """
-        # 只在传入新的 metrics_json 时才覆盖 (否则保留已有的完整报告)
-        if 'accuracy' in metrics or 'precision_macro' in metrics:
+        # 检测是否包含回归指标 (含 test_/train_ 前缀 或 裸键)
+        _reg_suffixes = ('mse', 'mae', 'r2', 'rmse', 'r2_score')
+        has_reg = any(
+            k.endswith(_reg_suffixes) for k in metrics
+        )
+        has_cls = 'accuracy' in metrics or 'precision_macro' in metrics or any(
+            '_accuracy' in k or '_precision_' in k for k in metrics)
+        has_cluster = any(
+            k.endswith(suffix) for k in metrics
+            for suffix in ('silhouette_score', 'davies_bouldin_score',
+                           'calinski_harabasz_score', 'inertia',
+                           'adjusted_rand_score', 'normalized_mutual_info_score')
+        )
+
+        if has_cls or has_reg or has_cluster:
             self.metrics_json = json.dumps(metrics, ensure_ascii=False)
+
+        # 分类指标
         self.accuracy = metrics.get('accuracy')
         self.precision = metrics.get('precision_macro', metrics.get('precision'))
         self.recall = metrics.get('recall_macro', metrics.get('recall'))
         self.f1_score = metrics.get('f1_macro', metrics.get('f1_score'))
         self.loss = metrics.get('loss')
 
+        # 回归指标 — 优先取 test_ 前缀 (测试集指标), 回退到裸键
+        self.r2 = None
+        self.mse = None
+        self.mae = None
+        for key, attr in [('r2', 'r2'), ('mse', 'mse'), ('mae', 'mae')]:
+            for prefix in ('test_', ''):
+                full = f'{prefix}{key}'
+                if full in metrics:
+                    setattr(self, attr, float(metrics[full]))
+                    break  # test_ 前缀优先, 找到即停
+
     def set_hyperparameters(self, params: dict):
         """设置超参数"""
         self.hyperparameters_json = json.dumps(params, ensure_ascii=False)
 
     def deploy(self, url: str):
-        """标记模型为已部署"""
+        """标记模型为已部署 (不提交 — 由调用方服务层控制)"""
         self.status = 'deployed'
         self.deployment_url = url
-        db.session.commit()
 
     def to_dict(self, include_files: bool = False) -> dict:
         """转换为字典"""
@@ -180,11 +213,16 @@ class ModelRecord(db.Model):
             'framework': self.framework,
             'status': self.status,
             'is_public': self.is_public,
+            # 分类指标
             'accuracy': self.accuracy,
             'precision': self.precision,
             'recall': self.recall,
             'f1_score': self.f1_score,
             'loss': self.loss,
+            # 回归指标
+            'r2': self.r2,
+            'mse': self.mse,
+            'mae': self.mae,
             'metrics': self.metrics_dict,
             'hyperparameters': self.hyperparameters_dict,
             'training_duration_seconds': self.training_duration_seconds,
@@ -205,3 +243,15 @@ class ModelRecord(db.Model):
 
     def __repr__(self):
         return f'<ModelRecord {self.name} v{self.version} ({self.status})>'
+
+    # ============ 权限检查 ============
+
+    def is_viewable_by(self, user) -> bool:
+        if user is None:
+            return self.is_public
+        return self.is_public or self.owner_id == user.id or user.is_admin
+
+    def is_editable_by(self, user) -> bool:
+        if user is None:
+            return False
+        return self.owner_id == user.id or user.is_admin

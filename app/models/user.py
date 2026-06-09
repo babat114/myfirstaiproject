@@ -4,10 +4,11 @@
 管理用户账户、角色和认证信息
 ============================================
 """
-from datetime import datetime, timezone
+from datetime import datetime
 from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
 from app import db, login_manager
+from app._timezone import localnow
 
 
 class User(UserMixin, db.Model):
@@ -42,11 +43,11 @@ class User(UserMixin, db.Model):
     api_key = db.Column(db.String(128), unique=True, nullable=True)
 
     # 时间戳
-    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    created_at = db.Column(db.DateTime, default=lambda: localnow(), nullable=False)
     updated_at = db.Column(
         db.DateTime,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: localnow(),
+        onupdate=lambda: localnow(),
         nullable=False
     )
     last_login_at = db.Column(db.DateTime, nullable=True)

@@ -171,7 +171,7 @@ class ModelInferenceService:
 
             # 预测 - 根据框架类型选择不同路径
             framework = (metadata or {}).get('framework', 'sklearn')
-            X = data.values.astype(np.float32)
+            X = data.values.astype('float32')
 
             if framework in ('pytorch', 'tensorflow'):
                 import torch
@@ -279,18 +279,10 @@ class ModelInferenceService:
 
         try:
             # 加载数据集
-            fmt = train_dataset.file_format.lower()
-            file_path = train_dataset.file_path
-            if fmt == 'csv':
-                df = pd.read_csv(file_path)
-            elif fmt in ('xlsx', 'xls'):
-                df = pd.read_excel(file_path)
-            elif fmt == 'json':
-                df = pd.read_json(file_path)
-            elif fmt == 'parquet':
-                df = pd.read_parquet(file_path)
-            else:
-                return {'success': False, 'error': f'不支持的数据格式: {fmt}'}
+            from app.utils.data_io import load_dataframe
+            df = load_dataframe(train_dataset.file_path, train_dataset.file_format.lower())
+            if df is None:
+                return {'success': False, 'error': f'不支持的数据格式或文件已损坏'}
 
             # 获取超参数中的 target_column
             hyperparams = model.hyperparameters_dict

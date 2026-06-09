@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% block title %}错误{% endblock %}
+{% block title %}{{ error_title | default('错误') }}{% endblock %}
 {% block content %}
 <div class="text-center py-5">
-    <h1 class="display-1 text-muted">{{ error.code }}</h1>
-    <p class="lead">{{ error.name }}</p>
-    <p class="text-muted">{{ error.description }}</p>
+    <h1 class="display-1 {{ error_color | default('text-muted') }}">{{ error_code | default('500') }}</h1>
+    <p class="lead">{{ error_title | default('服务器错误') }}</p>
+    <p class="text-muted">{{ error_message | default('抱歉，服务器遇到了问题，请稍后重试。') }}</p>
     <a href="{{ url_for('dashboard.index') }}" class="btn btn-primary">返回首页</a>
 </div>
 {% endblock %}

@@ -164,7 +164,7 @@ def dataset_detail(dataset_id):
         return redirect(url_for('datasets.list_datasets'))
 
     # 权限检查
-    if not dataset.is_public and dataset.owner_id != current_user.id and not current_user.is_admin:
+    if not dataset.is_viewable_by(current_user):
         flash('您没有权限查看此数据集。', 'danger')
         return redirect(url_for('datasets.list_datasets'))
 
@@ -196,7 +196,7 @@ def edit_dataset(dataset_id):
         flash('数据集不存在。', 'danger')
         return redirect(url_for('datasets.list_datasets'))
 
-    if dataset.owner_id != current_user.id and not current_user.is_admin:
+    if not dataset.is_editable_by(current_user):
         flash('您没有权限编辑此数据集。', 'danger')
         return redirect(url_for('datasets.list_datasets'))
 
@@ -300,6 +300,34 @@ def import_from_url():
     return redirect(url_for('datasets.import_datasets'))
 
 
+@datasets_bp.route('/<int:dataset_id>/copy-and-train', methods=['POST'])
+@login_required
+def copy_and_train(dataset_id):
+    """复制公开数据集到当前用户目录，然后跳转到训练创建页"""
+    dataset = DatasetService.get_dataset_by_id(dataset_id)
+    if not dataset:
+        flash('数据集不存在。', 'danger')
+        return redirect(url_for('datasets.list_datasets'))
+
+    # 如果已经是自己的数据集，直接跳转训练
+    if dataset.owner_id == current_user.id:
+        return redirect(url_for('training.create_job', dataset_id=dataset.id))
+
+    # 必须是公开数据集或有查看权限
+    if not dataset.is_viewable_by(current_user):
+        flash('您没有权限访问此数据集。', 'danger')
+        return redirect(url_for('datasets.list_datasets'))
+
+    # 复制到用户目录
+    new_dataset, error = DatasetService.copy_dataset_to_user(dataset, current_user)
+    if error:
+        flash(f'复制数据集失败: {error}', 'danger')
+        return redirect(url_for('datasets.dataset_detail', dataset_id=dataset.id))
+
+    flash(f'数据集 "{dataset.name}" 已添加到您的目录！', 'success')
+    return redirect(url_for('training.create_job', dataset_id=new_dataset.id))
+
+
 @datasets_bp.route('/<int:dataset_id>/delete', methods=['POST'])
 @login_required
 def delete_dataset(dataset_id):
@@ -309,7 +337,7 @@ def delete_dataset(dataset_id):
         flash('数据集不存在。', 'danger')
         return redirect(url_for('datasets.list_datasets'))
 
-    if dataset.owner_id != current_user.id and not current_user.is_admin:
+    if not dataset.is_editable_by(current_user):
         flash('您没有权限删除此数据集。', 'danger')
         return redirect(url_for('datasets.list_datasets'))
 

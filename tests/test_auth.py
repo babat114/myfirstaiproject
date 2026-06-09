@@ -15,14 +15,14 @@ class TestUserRegistration:
             user, error = AuthService.register(
                 username='newuser',
                 email='new@test.com',
-                password='ValidPass123',
+                password='ValidPass123!',
                 full_name='New User',
             )
             assert user is not None
             assert error is None
             assert user.username == 'newuser'
             assert user.email == 'new@test.com'
-            assert user.check_password('ValidPass123')
+            assert user.check_password('ValidPass123!')
 
     def test_register_duplicate_username(self, app, test_user):
         """测试重复用户名注册"""
@@ -30,7 +30,7 @@ class TestUserRegistration:
             user, error = AuthService.register(
                 username='testuser',
                 email='different@test.com',
-                password='ValidPass123',
+                password='ValidPass123!',
             )
             assert user is None
             assert '用户名已被注册' in error
@@ -87,16 +87,16 @@ class TestPasswordManagement:
         """测试修改密码"""
         with app.app_context():
             success, error = AuthService.change_password(
-                test_user, 'Test123456', 'NewPass456'
+                test_user, 'Test123456', 'NewPass456!'
             )
             assert success is True
-            assert test_user.check_password('NewPass456')
+            assert test_user.check_password('NewPass456!')
 
     def test_change_password_wrong_old(self, app, test_user):
         """测试错误的旧密码"""
         with app.app_context():
             success, error = AuthService.change_password(
-                test_user, 'WrongOldPass', 'NewPass456'
+                test_user, 'WrongOldPass', 'NewPass456!'
             )
             assert success is False
 

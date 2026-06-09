@@ -82,7 +82,17 @@ class BaseTrainer(ABC):
     # ============ 模板方法 (子类无需重写) ============
 
     def run(self):
-        """训练主流程 — 模板方法"""
+        """训练主流程 — 模板方法
+
+        子类可通过设置 self._early_stop = True 来触发早停 (在 train_epoch 中设置)
+        子类可通过 self._best_val_metric 记录最佳验证指标供日志输出
+        """
+        # 早停标志 (子类在 train_epoch 中设置)
+        if not hasattr(self, '_early_stop'):
+            self._early_stop = False
+        if not hasattr(self, '_best_val_metric'):
+            self._best_val_metric = None
+
         try:
             self.callback.on_start()
             self.callback.on_log(f'框架: {self.__class__.__name__}')
@@ -108,13 +118,45 @@ class BaseTrainer(ABC):
                 # 检查暂停
                 self._pause_event.wait()
 
+                # 检查早停
+                if self._early_stop:
+                    stopped_at = epoch
+                    self.callback.on_log(
+                        f'[早停] 验证指标连续未改善，在第 {stopped_at}/{self.total_epochs} 轮提前停止'
+                    )
+                    break
+
                 # 训练一个 epoch
                 metrics = self.train_epoch(epoch)
                 self.callback.on_epoch_end(epoch, self.total_epochs, metrics)
 
-                # 日志
-                metrics_str = ', '.join(f'{k}={v:.4f}' if isinstance(v, float) else f'{k}={v}' for k, v in metrics.items())
-                self.callback.on_log(f'Epoch {epoch + 1}/{self.total_epochs} - {metrics_str}')
+                # 检查子类是否在 train_epoch 中设置了早停
+                if self._early_stop:
+                    stopped_at = epoch + 1
+                    self.callback.on_log(
+                        f'[早停] 验证指标连续未改善，在第 {stopped_at}/{self.total_epochs} 轮提前停止'
+                    )
+                    break
+
+                # 日志 — 突出 val metrics
+                train_items = {k: v for k, v in metrics.items()
+                              if isinstance(v, float) and k.startswith('train_')}
+                val_items = {k: v for k, v in metrics.items()
+                            if isinstance(v, float) and k.startswith('val_')}
+                other_items = {k: v for k, v in metrics.items()
+                              if isinstance(v, float) and not k.startswith(('train_', 'val_'))}
+
+                parts = []
+                if train_items:
+                    parts.append('train: ' + ' '.join(
+                        f'{k[6:]}={v:.4f}' for k, v in train_items.items()))
+                if val_items:
+                    parts.append('val: ' + ' '.join(
+                        f'{k[4:]}={v:.4f}' for k, v in val_items.items()))
+                if other_items:
+                    parts.append(' '.join(f'{k}={v:.4f}' if isinstance(v, float) else f'{k}={v}'
+                                         for k, v in other_items.items()))
+                self.callback.on_log(f'Epoch {epoch + 1}/{self.total_epochs} - {", ".join(parts)}')
 
             # 评估
             self.callback.on_log('正在最终评估...')

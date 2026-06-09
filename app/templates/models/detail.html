@@ -44,13 +44,193 @@
                 {% endif %}
             </div>
             <div class="card-body">
-                <!-- 指标说明 -->
-                {% if model.metrics_dict.get('test_accuracy') is not none or model.metrics_dict.get('accuracy') is not none %}
+                {% set is_reg = model.model_type == 'regression' %}
+
+                {% if is_reg %}
+                <!-- 回归模型指标说明 -->
+                <div class="alert alert-info small py-2 mb-3">
+                    <i class="bi bi-info-circle me-1"></i>
+                    回归任务使用 <strong>R² (决定系数)</strong>、<strong>MSE (均方误差)</strong>、<strong>MAE (平均绝对误差)</strong> 评估预测精度
+                </div>
+
+                <div class="row g-3">
+                    <div class="col-md-7">
+                        <div class="row text-center g-2">
+                            <div class="col-4">
+                                <div class="border rounded p-3 bg-light">
+                                    <h3 class="text-primary mb-1">{% if model.r2 is not none %}{{ "%.4f"|format(model.r2) }}{% else %}-{% endif %}</h3>
+                                    <small class="text-muted">R² 决定系数</small>
+                                </div>
+                            </div>
+                            <div class="col-4">
+                                <div class="border rounded p-3 bg-light">
+                                    <h3 class="text-danger mb-1">{% if model.mse is not none %}{{ "%.4f"|format(model.mse) }}{% else %}-{% endif %}</h3>
+                                    <small class="text-muted">MSE 均方误差</small>
+                                </div>
+                            </div>
+                            <div class="col-4">
+                                <div class="border rounded p-3 bg-light">
+                                    <h3 class="text-warning mb-1">{% if model.mae is not none %}{{ "%.4f"|format(model.mae) }}{% else %}-{% endif %}</h3>
+                                    <small class="text-muted">MAE 平均绝对误差</small>
+                                </div>
+                            </div>
+                        </div>
+                        {% if model.loss is not none %}
+                        <div class="text-center mt-2"><small class="text-muted">损失 (Loss): <strong>{{ "%.4f"|format(model.loss) }}</strong></small></div>
+                        {% endif %}
+                    </div>
+                    <div class="col-md-5">
+                        <canvas id="metricsBarChart" height="180"></canvas>
+                    </div>
+                </div>
+
+                <!-- 完整回归指标 (测试集+训练集对比) -->
+                {% set mm = model.metrics_dict %}
+                {% if mm.get('test_mse') is not none or mm.get('test_r2') is not none %}
+                <hr class="my-3">
+                <div class="row small text-center">
+                    <div class="col-4">
+                        <span class="text-muted">测试 R²:</span>
+                        <strong>{{ "%.4f"|format(mm.get('test_r2', 0)) }}</strong>
+                    </div>
+                    <div class="col-4">
+                        <span class="text-muted">测试 MSE:</span>
+                        <strong>{{ "%.4f"|format(mm.get('test_mse', 0)) }}</strong>
+                    </div>
+                    <div class="col-4">
+                        <span class="text-muted">测试 MAE:</span>
+                        <strong>{{ "%.4f"|format(mm.get('test_mae', 0)) }}</strong>
+                    </div>
+                    <div class="col-4 mt-1">
+                        <span class="text-muted">训练 R²:</span>
+                        <strong>{{ "%.4f"|format(mm.get('train_r2', 0)) }}</strong>
+                    </div>
+                    <div class="col-4 mt-1">
+                        <span class="text-muted">训练 MSE:</span>
+                        <strong>{{ "%.4f"|format(mm.get('train_mse', 0)) }}</strong>
+                    </div>
+                    <div class="col-4 mt-1">
+                        <span class="text-muted">训练 MAE:</span>
+                        <strong>{{ "%.4f"|format(mm.get('train_mae', 0)) }}</strong>
+                    </div>
+                </div>
+                {% endif %}
+
+                {% elif model.model_type == 'clustering' %}
+                <!-- 聚类模型指标说明 -->
+                {% set mm = model.metrics_dict %}
+                {% set has_cluster_metrics = mm.get('test_silhouette_score') is not none or mm.get('test_davies_bouldin_score') is not none or mm.get('test_calinski_harabasz_score') is not none %}
+
+                {% if has_cluster_metrics %}
+                <!-- 有聚类专用指标 → 显示聚类卡片 -->
+                <div class="alert alert-info small py-2 mb-3">
+                    <i class="bi bi-info-circle me-1"></i>
+                    聚类为无监督任务，使用 <strong>轮廓系数</strong>、<strong>DB指数</strong>、<strong>CH指数</strong> 评估聚类质量
+                </div>
+                <div class="row g-3">
+                    <div class="col-md-7">
+                        <div class="row text-center g-2">
+                            <div class="col-4">
+                                <div class="border rounded p-3 bg-light">
+                                    <h3 class="text-primary mb-1">{{ "%.4f"|format(mm.get('test_silhouette_score', 0)) }}</h3>
+                                    <small class="text-muted">轮廓系数 (Silhouette)</small>
+                                </div>
+                            </div>
+                            <div class="col-4">
+                                <div class="border rounded p-3 bg-light">
+                                    <h3 class="text-danger mb-1">{{ "%.4f"|format(mm.get('test_davies_bouldin_score', 0)) }}</h3>
+                                    <small class="text-muted">DB 指数 (越低越好)</small>
+                                </div>
+                            </div>
+                            <div class="col-4">
+                                <div class="border rounded p-3 bg-light">
+                                    <h3 class="text-success mb-1">{{ "%.2f"|format(mm.get('test_calinski_harabasz_score', 0)) }}</h3>
+                                    <small class="text-muted">CH 指数 (越高越好)</small>
+                                </div>
+                            </div>
+                        </div>
+                        {% if mm.get('test_inertia') is not none %}
+                        <div class="text-center mt-2"><small class="text-muted">惯性 (Inertia): <strong>{{ "%.2f"|format(mm.get('test_inertia', 0)) }}</strong></small></div>
+                        {% endif %}
+                    </div>
+                    <div class="col-md-5">
+                        <canvas id="metricsBarChart" height="180"></canvas>
+                    </div>
+                </div>
+                {% else %}
+                <!-- 无聚类专用指标 (深度学习训练器) → 回退显示实际可用指标 -->
+                {% set has_loss_metrics = mm.get('test_mse') is not none or mm.get('test_r2') is not none or mm.get('best_val_loss') is not none %}
+                {% if has_loss_metrics %}
+                <div class="alert alert-info small py-2 mb-3">
+                    <i class="bi bi-info-circle me-1"></i>
+                    该聚类模型使用深度学习训练，未计算聚类专用指标。以下为训练过程中记录的性能指标。
+                </div>
+                <div class="row g-3">
+                    <div class="col-md-7">
+                        <div class="row text-center g-2">
+                            {% if mm.get('best_val_loss') is not none %}
+                            <div class="col-4">
+                                <div class="border rounded p-3 bg-light">
+                                    <h3 class="text-danger mb-1">{{ "%.4f"|format(mm.get('best_val_loss', 0)) }}</h3>
+                                    <small class="text-muted">最佳验证 Loss</small>
+                                </div>
+                            </div>
+                            {% endif %}
+                            {% if mm.get('test_r2') is not none %}
+                            <div class="col-4">
+                                <div class="border rounded p-3 bg-light">
+                                    <h3 class="text-primary mb-1">{{ "%.4f"|format(mm.get('test_r2', 0)) }}</h3>
+                                    <small class="text-muted">R² 决定系数</small>
+                                </div>
+                            </div>
+                            {% endif %}
+                            {% if mm.get('test_mse') is not none %}
+                            <div class="col-4">
+                                <div class="border rounded p-3 bg-light">
+                                    <h3 class="text-warning mb-1">{{ "%.4f"|format(mm.get('test_mse', 0)) }}</h3>
+                                    <small class="text-muted">MSE 均方误差</small>
+                                </div>
+                            </div>
+                            {% endif %}
+                        </div>
+                        {% if model.loss is not none %}
+                        <div class="text-center mt-2"><small class="text-muted">损失 (Loss): <strong>{{ "%.4f"|format(model.loss) }}</strong></small></div>
+                        {% endif %}
+                    </div>
+                    <div class="col-md-5">
+                        <canvas id="metricsBarChart" height="180"></canvas>
+                    </div>
+                </div>
+                {% else %}
+                <div class="text-center py-4 text-muted">
+                    <i class="bi bi-exclamation-circle"></i> 暂无性能指标数据
+                </div>
+                {% endif %}
+                {% endif %}
+                    </div>
+                </div>
+
+                <!-- 外部验证指标 (如有 ground truth) -->
+                {% if mm.get('test_adjusted_rand_score') is not none or mm.get('test_normalized_mutual_info_score') is not none %}
+                <hr class="my-3">
+                <div class="row small text-center">
+                    <div class="col-6">
+                        <span class="text-muted">调整Rand指数 (ARI):</span>
+                        <strong>{{ "%.4f"|format(mm.get('test_adjusted_rand_score', 0)) }}</strong>
+                    </div>
+                    <div class="col-6">
+                        <span class="text-muted">归一化互信息 (NMI):</span>
+                        <strong>{{ "%.4f"|format(mm.get('test_normalized_mutual_info_score', 0)) }}</strong>
+                    </div>
+                </div>
+                {% endif %}
+
+                {% else %}
+                <!-- 分类模型指标说明 -->
                 <div class="alert alert-info small py-2 mb-3">
                     <i class="bi bi-info-circle me-1"></i>
                     查准率/召回率/F1 使用 <strong>macro 平均</strong> (各类别等权), 能更真实反映模型在不同类别上的均衡表现
                 </div>
-                {% endif %}
 
                 <div class="row g-3">
                     <div class="col-md-7">
@@ -120,6 +300,8 @@
                     </div>
                 </div>
                 {% endif %}
+                {% endif %}
+                {# closes if is_reg #}
             </div>
         </div>
 
@@ -246,47 +428,134 @@
 <script>
 // ============ 模型详情页 — 雷达图 + 训练历史折线图 ============
 
-// 雷达图: 4维性能指标可视化 (准确率/查准率/召回率/F1)
+// 指标可视化图表 — 分类用雷达图, 回归/聚类用柱状图
 (function() {
-    var hasMetrics = {{ 'true' if model.accuracy is not none or model.precision is not none or model.recall is not none or model.f1_score is not none else 'false' }};
-    if (!hasMetrics) return;
+    var isRegression = {{ 'true' if model.model_type == 'regression' else 'false' }};
+    var isClustering = {{ 'true' if model.model_type == 'clustering' else 'false' }};
+    var chartElId = (isRegression || isClustering) ? 'metricsBarChart' : 'metricsRadarChart';
+    var ctx = document.getElementById(chartElId).getContext('2d');
 
-    var ctx = document.getElementById('metricsRadarChart').getContext('2d');
-    new Chart(ctx, {
-        type: 'radar',  // 雷达图: 多维度指标一目了然
-        data: {
-            labels: ['准确率', '查准率', '召回率', 'F1分数'],
-            datasets: [{
-                label: '{{ model.name }}',
-                data: [
-                    {{ (model.accuracy or 0) }},
-                    {{ (model.precision or 0) }},
-                    {{ (model.recall or 0) }},
-                    {{ (model.f1_score or 0) }},
-                ],
-                backgroundColor: 'rgba(78, 115, 223, 0.2)',
-                borderColor: '#4e73df',
-                borderWidth: 2,
-                pointBackgroundColor: '#4e73df',
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            scales: { r: { beginAtZero: true, max: 1, ticks: { stepSize: 0.2 } } },
-            plugins: { legend: { display: false } }
+    if (isRegression) {
+        // 回归: 柱状图 (R² / MSE / MAE)
+        var hasRegMetrics = {{ 'true' if model.r2 is not none or model.mse is not none or model.mae is not none else 'false' }};
+        if (!hasRegMetrics) return;
+        new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: ['R² 决定系数', 'MSE 均方误差', 'MAE 平均绝对误差'],
+                datasets: [{
+                    label: '{{ model.name }}',
+                    data: [{{ (model.r2 or 0) }}, {{ (model.mse or 0) }}, {{ (model.mae or 0) }}],
+                    backgroundColor: ['rgba(28,200,138,0.6)', 'rgba(231,74,59,0.6)', 'rgba(246,194,62,0.6)'],
+                    borderColor: ['#1cc88a', '#e74a3b', '#f6c23e'],
+                    borderWidth: 1,
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: { y: { beginAtZero: true } }
+            }
+        });
+    } else if (isClustering) {
+        // 聚类: 柱状图 — 优先聚类指标, 无则回退可用指标
+        var mm = {{ model.metrics_dict | tojson }};
+        var sc = mm.test_silhouette_score || mm.silhouette_score || null;
+        var db = mm.test_davies_bouldin_score || mm.davies_bouldin_score || null;
+        var ch = mm.test_calinski_harabasz_score || mm.calinski_harabasz_score || null;
+
+        if (sc === null && db === null && ch === null) {
+            // 无聚类指标 → 回退显示 loss/r2/mse 等实际存在的指标
+            var fallbackLabels = [], fallbackData = [], fallbackColors = [], fallbackBorders = [];
+            var hasBestLoss = mm.best_val_loss != null;
+            var hasR2 = mm.test_r2 != null;
+            var hasMSE = mm.test_mse != null;
+            if (hasBestLoss) {
+                fallbackLabels.push('最佳 Val Loss'); fallbackData.push(mm.best_val_loss);
+                fallbackColors.push('rgba(231,74,59,0.6)'); fallbackBorders.push('#e74a3b');
+            }
+            if (hasR2) {
+                fallbackLabels.push('R² 决定系数'); fallbackData.push(mm.test_r2);
+                fallbackColors.push('rgba(28,200,138,0.6)'); fallbackBorders.push('#1cc88a');
+            }
+            if (hasMSE) {
+                fallbackLabels.push('MSE 均方误差'); fallbackData.push(mm.test_mse);
+                fallbackColors.push('rgba(246,194,62,0.6)'); fallbackBorders.push('#f6c23e');
+            }
+            if (fallbackLabels.length === 0) return;
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: fallbackLabels,
+                    datasets: [{ label: '{{ model.name }}', data: fallbackData,
+                        backgroundColor: fallbackColors, borderColor: fallbackBorders, borderWidth: 1 }]
+                },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
+                    scales: { y: { beginAtZero: true } } }
+            });
+            return;
         }
-    });
+
+        new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: ['轮廓系数', 'DB 指数', 'CH 指数'],
+                datasets: [{
+                    label: '{{ model.name }}',
+                    data: [sc || 0, db || 0, ch || 0],
+                    backgroundColor: ['rgba(78,115,223,0.6)', 'rgba(231,74,59,0.6)', 'rgba(28,200,138,0.6)'],
+                    borderColor: ['#4e73df', '#e74a3b', '#1cc88a'],
+                    borderWidth: 1,
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: { y: { beginAtZero: true } }
+            }
+        });
+    } else {
+        // 分类: 雷达图 (Accuracy/Precision/Recall/F1)
+        var hasMetrics = {{ 'true' if model.accuracy is not none or model.precision is not none or model.recall is not none or model.f1_score is not none else 'false' }};
+        if (!hasMetrics) return;
+        new Chart(ctx, {
+            type: 'radar',
+            data: {
+                labels: ['准确率', '查准率', '召回率', 'F1分数'],
+                datasets: [{
+                    label: '{{ model.name }}',
+                    data: [
+                        {{ (model.accuracy or 0) }},
+                        {{ (model.precision or 0) }},
+                        {{ (model.recall or 0) }},
+                        {{ (model.f1_score or 0) }},
+                    ],
+                    backgroundColor: 'rgba(78, 115, 223, 0.2)',
+                    borderColor: '#4e73df',
+                    borderWidth: 2,
+                    pointBackgroundColor: '#4e73df',
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: { r: { beginAtZero: true, max: 1, ticks: { stepSize: 0.2 } } },
+                plugins: { legend: { display: false } }
+            }
+        });
+    }
 })();
 
-// 训练历史折线图 (双Y轴: Accuracy + Loss 或 MSE + R²)
+// 训练历史折线图 — 自动检测实际指标键，适配分类/回归/聚类/深度学习
 {% if model.training_job and model.training_job.metrics_history %}
 (function() {
     var ctx = document.getElementById('trainingHistoryChart').getContext('2d');
     var history = {{ model.training_job.metrics_history | tojson }};
     var isRegression = {{ 'true' if model.model_type == 'regression' else 'false' }};
+    var isClustering = {{ 'true' if model.model_type == 'clustering' else 'false' }};
 
-    // 通用取值函数 — 兼容多种键名 (train_accuracy/accuracy/acc 等)
     function pickVal(m, keys) {
         for (var i = 0; i < keys.length; i++) {
             var v = m[keys[i]];
@@ -295,31 +564,68 @@
         return null;
     }
 
-    var epochs = history.map(function(h) { return h.epoch || ''; });
+    // 自动检测历史数据中存在的键
+    var availKeys = new Set();
+    history.forEach(function(h) { Object.keys(h).forEach(function(k) { availKeys.add(k); }); });
+    function hasKey(candidates) { return candidates.some(function(k) { return availKeys.has(k); }); }
 
-    var datasets;
-    var useY1 = false;
-    if (isRegression) {
-        datasets = [
-            { label: 'MSE', data: history.map(function(h) { return pickVal(h, ['train_mse', 'mse']); }), borderColor: '#e74a3b', tension: 0.3, fill: false, spanGaps: true },
-            { label: 'R²', data: history.map(function(h) { return pickVal(h, ['train_r2', 'r2']); }), borderColor: '#1cc88a', tension: 0.3, fill: false, spanGaps: true },
-        ];
+    var epochs = history.map(function(h) { return h.epoch || ''; });
+    var datasets = [], scalesConfig = { y: { beginAtZero: false, title: { display: true, text: 'Value' } } };
+
+    // 按优先级自动匹配指标对
+    var pair0, pair1, label0, label1;
+    if (isClustering) {
+        pair0 = ['train_silhouette_score', 'silhouette_score', 'test_silhouette_score'];
+        pair1 = ['train_calinski_harabasz_score', 'calinski_harabasz_score'];
+        if (!hasKey(pair0) && !hasKey(pair1)) {
+            // 深度学习聚类 → 回退 loss/val_loss
+            pair0 = ['train_loss', 'loss'];
+            pair1 = ['val_loss'];
+            label0 = 'Train Loss'; label1 = 'Val Loss';
+        } else {
+            label0 = 'Silhouette'; label1 = 'Calinski-Harabasz';
+        }
+        scalesConfig.y.min = -1; scalesConfig.y.max = 1;
+    } else if (isRegression) {
+        pair0 = ['train_mse', 'mse', 'test_mse'];
+        pair1 = ['train_r2', 'r2'];
+        label0 = 'MSE'; label1 = 'R²';
     } else {
-        var lossData = history.map(function(h) { return pickVal(h, ['loss', 'train_loss']); });
-        useY1 = lossData.some(function(v) { return v !== null; }); // 仅当有 loss 数据时才开双轴
-        datasets = [
-            { label: 'Accuracy', data: history.map(function(h) { return pickVal(h, ['train_accuracy', 'accuracy', 'acc']); }), borderColor: '#1cc88a', tension: 0.3, fill: false, spanGaps: true },
-        ];
-        if (useY1) {
-            datasets.push({ label: 'Loss', data: lossData, borderColor: '#e74a3b', tension: 0.3, fill: false, yAxisID: 'y1', spanGaps: true });
+        // 分类 — 也兼容聚类指标
+        pair0 = ['train_accuracy', 'accuracy', 'acc'];
+        pair1 = ['train_f1_score', 'f1_score', 'f1'];
+        if (!hasKey(pair0) && !hasKey(pair1)) {
+            if (hasKey(['train_silhouette_score', 'silhouette_score'])) {
+                pair0 = ['train_silhouette_score', 'silhouette_score'];
+                pair1 = ['train_davies_bouldin_score', 'davies_bouldin_score'];
+                label0 = 'Silhouette'; label1 = 'Davies-Bouldin';
+                scalesConfig.y.min = -1; scalesConfig.y.max = 1;
+            } else {
+                pair0 = ['train_loss', 'loss'];
+                pair1 = ['val_loss'];
+                label0 = 'Train Loss'; label1 = 'Val Loss';
+            }
+        } else {
+            label0 = 'Accuracy'; label1 = 'F1 Score';
         }
     }
 
-    var scalesConfig = {
-        y: { beginAtZero: false, title: { display: true, text: 'Score' } }
-    };
-    if (useY1) {
-        scalesConfig.y1 = { position: 'right', beginAtZero: true, title: { display: true, text: 'Loss' }, grid: { drawOnChartArea: false } };
+    // 构建数据集
+    var data0 = history.map(function(h) { return pickVal(h, pair0); });
+    var data1 = history.map(function(h) { return pickVal(h, pair1); });
+    datasets.push({ label: label0, data: data0, borderColor: '#1cc88a', tension: 0.3, fill: false, spanGaps: true });
+    if (data1.some(function(v) { return v !== null; })) {
+        var isLoss = label1.indexOf('Loss') >= 0 || label1.indexOf('DB') >= 0;
+        datasets.push({ label: label1, data: data1,
+            borderColor: isLoss ? '#e74a3b' : '#4e73df',
+            tension: 0.3, fill: false, spanGaps: true,
+            yAxisID: (isLoss || label1 === 'Calinski-Harabasz') ? 'y1' : undefined
+        });
+        if (label1 === 'Calinski-Harabasz') {
+            scalesConfig.y1 = { position: 'right', beginAtZero: true, title: { display: true, text: 'CH Index' }, grid: { drawOnChartArea: false } };
+        } else if (isLoss) {
+            scalesConfig.y1 = { position: 'right', beginAtZero: true, title: { display: true, text: 'Loss' }, grid: { drawOnChartArea: false } };
+        }
     }
 
     new Chart(ctx, {

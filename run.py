@@ -14,17 +14,6 @@ config_name = os.environ.get('FLASK_ENV', 'development')
 app = create_app(config_name)
 
 
-# 添加根路由 (首页)
-@app.route('/')
-def index():
-    """首页 - 登录前展示介绍页，登录后跳转仪表盘"""
-    from flask import render_template, redirect, url_for
-    from flask_login import current_user
-    if current_user.is_authenticated:
-        return redirect(url_for('dashboard.index'))
-    return render_template('index.html')
-
-
 if __name__ == '__main__':
     host = os.environ.get('FLASK_HOST', '127.0.0.1')
     port = int(os.environ.get('FLASK_PORT', 5000))

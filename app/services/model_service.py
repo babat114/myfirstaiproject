@@ -6,14 +6,16 @@ AI模型服务
 """
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional, Tuple
+from app._timezone import localnow
 from werkzeug.utils import secure_filename
 from werkzeug.datastructures import FileStorage
 from flask import current_app
 from app import db, logger
 from app.models.model_record import ModelRecord
 from app.models.user import User
+from app.utils.cache import dashboard_cache, leaderboard_cache
 
 
 class ModelService:
@@ -55,6 +57,8 @@ class ModelService:
 
             db.session.add(model)
             db.session.commit()
+            dashboard_cache.invalidate('model_stats:')
+            dashboard_cache.invalidate('dashboard:')
 
             logger.info(f"模型注册成功: {name} v{version} by {user.username}")
             return model, None
@@ -93,7 +97,7 @@ class ModelService:
             model.model_file_path = file_path
             model.file_size = file_size
             model.status = 'trained'
-            model.updated_at = datetime.now(timezone.utc)
+            model.updated_at = localnow()
 
             db.session.commit()
 
@@ -117,7 +121,7 @@ class ModelService:
         """
         try:
             model.set_metrics(metrics)
-            model.updated_at = datetime.now(timezone.utc)
+            model.updated_at = localnow()
             db.session.commit()
             return True, None
         except Exception as e:
@@ -150,8 +154,11 @@ class ModelService:
             if 'hyperparameters' in data and isinstance(data['hyperparameters'], dict):
                 model.set_hyperparameters(data['hyperparameters'])
 
-            model.updated_at = datetime.now(timezone.utc)
+            model.updated_at = localnow()
             db.session.commit()
+            dashboard_cache.invalidate('model_stats:')
+            dashboard_cache.invalidate('dashboard:')
+            leaderboard_cache.clear()
             return True, None
 
         except Exception as e:
@@ -178,6 +185,9 @@ class ModelService:
 
             db.session.delete(model)
             db.session.commit()
+            dashboard_cache.invalidate('model_stats:')
+            dashboard_cache.invalidate('dashboard:')
+            leaderboard_cache.clear()
 
             logger.info(f"模型已删除: {model.name}")
             return True, None
@@ -187,16 +197,27 @@ class ModelService:
             logger.error(f"删除模型失败: {e}")
             return False, str(e)
 
+    # 允许排序的列名白名单 (防SQL注入)
+    _SORTABLE_COLUMNS = {
+        'accuracy', 'precision', 'recall', 'f1_score', 'loss',
+        'r2', 'mse', 'mae', 'created_at', 'updated_at', 'name',
+    }
+
     @staticmethod
     def list_models(page: int = 1, per_page: int = 15,
                     model_type: str = None, framework: str = None,
                     owner_id: int = None, status: str = None,
-                    search: str = None, is_public: bool = None) -> dict:
+                    search: str = None, is_public: bool = None,
+                    include_public: bool = False,
+                    sort_by: str = 'created_at', sort_order: str = 'desc') -> dict:
         """
-        获取模型列表 (支持多条件筛选)
+        获取模型列表 (支持多条件筛选 + 排序)
 
         Args:
             is_public: 按公开/私有筛选 (None=全部, True=仅公开, False=仅私有)
+            include_public: 当设置了 owner_id 时，同时包含其他用户的公开模型
+            sort_by: 排序字段 (accuracy/precision/recall/f1_score/loss/r2/mse/mae/created_at/updated_at/name)
+            sort_order: 排序方向 (asc/desc)
 
         Returns:
             分页结果字典
@@ -208,7 +229,16 @@ class ModelService:
         if framework:
             query = query.filter_by(framework=framework)
         if owner_id:
-            query = query.filter_by(owner_id=owner_id)
+            if include_public:
+                # 用户自己的模型 + 其他用户的公开模型
+                query = query.filter(
+                    db.or_(
+                        ModelRecord.owner_id == owner_id,
+                        ModelRecord.is_public == True  # noqa: E712
+                    )
+                )
+            else:
+                query = query.filter_by(owner_id=owner_id)
         if status:
             query = query.filter_by(status=status)
         if is_public is not None:
@@ -222,7 +252,16 @@ class ModelService:
                 )
             )
 
-        query = query.order_by(ModelRecord.created_at.desc())
+        # 排序 (白名单校验)
+        sort_by = sort_by if sort_by in ModelService._SORTABLE_COLUMNS else 'created_at'
+        sort_order = sort_order if sort_order in ('asc', 'desc') else 'desc'
+        sort_column = getattr(ModelRecord, sort_by, ModelRecord.created_at)
+
+        # NULL值排在最后 (升序时NULL最小，降序时NULL...都需要排最后)
+        if sort_order == 'asc':
+            query = query.order_by(sort_column.is_(None), sort_column.asc())
+        else:
+            query = query.order_by(sort_column.is_(None), sort_column.desc())
 
         pagination = query.paginate(
             page=page, per_page=per_page, error_out=False
@@ -240,15 +279,13 @@ class ModelService:
     @staticmethod
     def get_top_models(limit: int = 5, metric: str = 'accuracy') -> list:
         """
-        获取性能最佳的模型
-
-        Args:
-            limit: 返回数量
-            metric: 排序指标
-
-        Returns:
-            模型列表
+        获取性能最佳的模型 (带缓存, TTL=300s)
         """
+        cache_key = f'leaderboard:{limit}:{metric}'
+        cached = leaderboard_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
         sort_column = getattr(ModelRecord, metric, ModelRecord.accuracy)
         models = ModelRecord.query \
             .filter(ModelRecord.status.in_(['trained', 'deployed'])) \
@@ -257,11 +294,18 @@ class ModelService:
             .limit(limit) \
             .all()
 
-        return [m.to_dict() for m in models]
+        result = [m.to_dict() for m in models]
+        leaderboard_cache.set(cache_key, result)
+        return result
 
     @staticmethod
     def get_model_statistics(user_id: int = None) -> dict:
-        """获取模型统计数据"""
+        """获取模型统计数据 (带缓存, TTL=60s)"""
+        cache_key = f'model_stats:{user_id or "all"}'
+        cached = dashboard_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
         query = ModelRecord.query
         if user_id:
             query = query.filter_by(owner_id=user_id)
@@ -278,15 +322,22 @@ class ModelService:
             if m.framework:
                 framework_counts[m.framework] = framework_counts.get(m.framework, 0) + 1
 
+        # 公开/私有计数
+        public_count = sum(1 for m in models if m.is_public)
+
         # 计算平均准确率
         accuracies = [m.accuracy for m in models if m.accuracy is not None]
 
-        return {
+        result = {
             'total_count': len(models),
             'deployed_count': status_counts.get('deployed', 0),
+            'public_count': public_count,
+            'private_count': len(models) - public_count,
             'types': type_counts,
             'statuses': status_counts,
             'frameworks': framework_counts,
             'avg_accuracy': round(sum(accuracies) / len(accuracies), 4) if accuracies else None,
             'max_accuracy': round(max(accuracies), 4) if accuracies else None,
         }
+        dashboard_cache.set(cache_key, result)
+        return result

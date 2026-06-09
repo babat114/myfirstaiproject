@@ -6,13 +6,14 @@ RESTful 认证接口 — 登录获取 Token、刷新 Token
 """
 from flask import Blueprint, request, jsonify
 from app.services.auth_service import AuthService
-from app.utils.decorators import api_login_required
+from app.utils.decorators import api_login_required, rate_limit
 from app.utils.auth_helpers import get_current_user
 
 auth_api_bp = Blueprint('auth_api', __name__)
 
 
 @auth_api_bp.route('/login', methods=['POST'])
+@rate_limit(max_calls=10, period=60)  # 每IP每分钟最多10次登录尝试
 def login():
     """
     用户登录 — 返回 JWT Token 对

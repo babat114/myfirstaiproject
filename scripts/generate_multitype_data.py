@@ -45,12 +45,12 @@ TYPE_ALGORITHMS = {
         ('mlp_regressor', 'pytorch', 'MLP 神经网络回归器'),
     ],
     'clustering': [
-        ('random_forest', 'sklearn', 'RF 聚类特征分类'),
-        ('gradient_boosting', 'sklearn', 'GB 聚类特征分类'),
-        ('svm', 'sklearn', 'SVM 聚类边界分类'),
-        ('knn', 'sklearn', 'KNN 密度分类'),
-        ('logistic_regression', 'sklearn', 'LR 聚类判别'),
-        ('mlp', 'pytorch', 'MLP 聚类模式识别'),
+        ('kmeans', 'sklearn', 'K-Means 聚类'),
+        ('dbscan', 'sklearn', 'DBSCAN 密度聚类'),
+        ('agglomerative', 'sklearn', 'AgglomerativeClustering 层次聚类'),
+        ('minibatch_kmeans', 'sklearn', 'MiniBatch K-Means 聚类'),
+        ('random_forest', 'sklearn', 'RF 聚类特征分类 (监督baseline)'),
+        ('mlp', 'pytorch', 'MLP 聚类模式识别 (监督baseline)'),
     ],
     'nlp': [
         ('random_forest', 'sklearn', 'RF 文本特征分类'),
@@ -271,6 +271,7 @@ def train_sklearn_model(X_train, y_train, X_test, y_test, algorithm, task_type):
     from sklearn.impute import SimpleImputer
     from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
     from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+    from sklearn.metrics import silhouette_score, davies_bouldin_score, calinski_harabasz_score
 
     # 预处理
     num_cols = X_train.select_dtypes(include=[np.number]).columns
@@ -294,6 +295,67 @@ def train_sklearn_model(X_train, y_train, X_test, y_test, algorithm, task_type):
         X_test_proc[col] = le.transform(X_test[col].astype(str))
         label_encoders[col] = le
 
+    # 导入模型注册表
+    from app.executor.trainers.sklearn_trainer import (
+        _CLASSIFIERS, _REGRESSORS, _CLUSTERERS, _import_model
+    )
+
+    # ================================================================
+    # 聚类: 无监督训练
+    # ================================================================
+    if task_type == 'clustering':
+        if algorithm in _CLUSTERERS:
+            module_path, class_name = _CLUSTERERS[algorithm]
+        else:
+            raise ValueError(f'未知聚类算法: {algorithm}')
+
+        model_cls = _import_model(module_path, class_name)
+        try:
+            model = model_cls(random_state=42)
+        except TypeError:
+            model = model_cls()
+
+        # 训练 (无监督, 不需要 y)
+        if hasattr(model, 'fit_predict'):
+            model.fit_predict(X_train_proc.values)
+        else:
+            model.fit(X_train_proc.values)
+
+        # 在测试集上预测
+        if hasattr(model, 'predict'):
+            labels_test = model.predict(X_test_proc.values)
+        elif hasattr(model, 'fit_predict'):
+            labels_test = model.fit_predict(X_test_proc.values)
+        else:
+            model.fit(X_test_proc.values)
+            labels_test = model.labels_
+
+        metrics = {}
+        try:
+            unique_labels = set(labels_test)
+            if len(unique_labels) >= 2 and len(unique_labels) < len(labels_test):
+                metrics['silhouette_score'] = round(
+                    float(silhouette_score(X_test_proc.values, labels_test)), 4)
+                metrics['davies_bouldin_score'] = round(
+                    float(davies_bouldin_score(X_test_proc.values, labels_test)), 4)
+                metrics['calinski_harabasz_score'] = round(
+                    float(calinski_harabasz_score(X_test_proc.values, labels_test)), 4)
+        except Exception:
+            pass
+        if hasattr(model, 'inertia_'):
+            metrics['inertia'] = round(float(model.inertia_), 4)
+
+        bundle = {
+            'model': model, 'scaler': scaler, 'label_encoders': label_encoders,
+            'feature_names': list(X_train.columns),
+            'task_type': task_type, 'algorithm': algorithm,
+        }
+        return model, bundle, metrics
+
+    # ================================================================
+    # 监督学习 (分类/回归)
+    # ================================================================
+
     # 编码目标
     target_le = None
     if task_type == 'classification':
@@ -303,9 +365,6 @@ def train_sklearn_model(X_train, y_train, X_test, y_test, algorithm, task_type):
     else:
         y_train_enc = y_train.values.astype(float)
         y_test_enc = y_test.values.astype(float)
-
-    # 导入并训练模型
-    from app.executor.trainers.sklearn_trainer import _CLASSIFIERS, _REGRESSORS, _import_model
 
     if algorithm in _CLASSIFIERS:
         model_info = _CLASSIFIERS[algorithm]
@@ -564,9 +623,14 @@ def create_trained_model(user, dataset, model_name, model_type, framework,
     file_size = os.path.getsize(model_path)
 
     # 构建超参数
+    if model_type == 'clustering':
+        hp_task_type = 'clustering'
+    elif model_type == 'regression':
+        hp_task_type = 'regression'
+    else:
+        hp_task_type = 'classification'
     hyperparams = {
-        'task_type': 'classification' if model_type in ('classification', 'clustering', 'nlp',
-                                                         'computer_vision', 'generative', 'other') else 'regression',
+        'task_type': hp_task_type,
         'algorithm': algorithm,
         'target_column': json.loads(dataset.summary_json).get('target_column', 'target'),
         'test_size': 0.2,
@@ -687,9 +751,15 @@ def main():
             print(f'  保存: {file_path} ({file_size_mb:.1f}MB, {len(df)}行×{len(df.columns)}列)')
 
             # 创建 Dataset 记录
+            if config['data_type'] == 'blobs':
+                ds_task_type = 'clustering'
+            elif config['n_classes'] > 1:
+                ds_task_type = 'classification'
+            else:
+                ds_task_type = 'regression'
             dataset = create_dataset_record(
                 admin, df, config['name'], config['description'],
-                target_col, 'classification' if config['n_classes'] > 1 else 'regression',
+                target_col, ds_task_type,
                 file_path
             )
             dataset_ids[model_type] = dataset.id
@@ -748,14 +818,17 @@ def main():
             print(f'  训练集: {len(X_train)} 样本, 测试集: {len(X_test)} 样本')
 
             for algo, framework, algo_desc in algorithms:
-                task_type = 'classification'
-                if algo in ('random_forest_regressor', 'gradient_boosting_regressor',
+                if model_type == 'clustering':
+                    task_type = 'clustering'
+                elif algo in ('random_forest_regressor', 'gradient_boosting_regressor',
                             'linear_regression', 'svr', 'knn_regressor', 'mlp_regressor'):
                     task_type = 'regression'
                 elif model_type == 'reinforcement' and algo in ('random_forest_regressor',
                                                                  'gradient_boosting_regressor',
                                                                  'linear_regression'):
                     task_type = 'regression'
+                else:
+                    task_type = 'classification'
 
                 try:
                     print(f'    训练: {algo} ({framework})...', end=' ')
@@ -786,6 +859,8 @@ def main():
                         print(f'OK (acc={metrics["accuracy"]:.4f})')
                     elif 'r2' in metrics:
                         print(f'OK (r2={metrics["r2"]:.4f})')
+                    elif 'silhouette_score' in metrics:
+                        print(f'OK (silhouette={metrics["silhouette_score"]:.4f})')
                     else:
                         print('OK')
 

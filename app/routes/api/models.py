@@ -7,7 +7,6 @@ RESTful JSON 接口
 import os
 from flask import Blueprint, request, jsonify, current_app
 from app.services.model_service import ModelService
-from app.services.auth_service import AuthService
 from app.utils.decorators import api_login_required
 from app.utils.auth_helpers import get_current_user
 
@@ -17,13 +16,15 @@ models_api_bp = Blueprint('models_api', __name__)
 @models_api_bp.route('/', methods=['GET'])
 @api_login_required
 def list_models():
-    """GET /api/models - 获取模型列表"""
+    """GET /api/models - 获取模型列表 (支持排序: ?sort_by=accuracy&sort_order=desc)"""
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 15, type=int)
     model_type = request.args.get('model_type')
     framework = request.args.get('framework')
     status = request.args.get('status')
     search = request.args.get('search')
+    sort_by = request.args.get('sort_by', 'created_at')
+    sort_order = request.args.get('sort_order', 'desc')
 
     user = get_current_user()
     # 支持 is_public 查询参数: ?is_public=true 仅显示公开模型
@@ -39,6 +40,7 @@ def list_models():
         model_type=model_type, framework=framework,
         owner_id=owner_id, status=status, search=search,
         is_public=is_public,
+        sort_by=sort_by, sort_order=sort_order,
     )
 
     return jsonify({'success': True, 'data': result})

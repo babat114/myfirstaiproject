@@ -12,6 +12,7 @@
                 </div>
 
                 <form method="POST" action="{{ url_for('auth.login') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <div class="mb-3">
                         <label for="login_id" class="form-label">用户名或邮箱</label>
                         <input type="text" class="form-control" id="login_id" name="login_id"
@@ -52,11 +53,4 @@
 </div>
 {% endblock %}
 
-{% block extra_js %}
-<script>
-function togglePassword(id) {
-    const el = document.getElementById(id);
-    el.type = el.type === 'password' ? 'text' : 'password';
-}
-</script>
-{% endblock %}
+{% block extra_js %}{% endblock %}

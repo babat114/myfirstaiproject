@@ -6,8 +6,9 @@
 """
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from app import db
+from app._timezone import localnow
 
 
 class TrainingJob(db.Model):
@@ -96,11 +97,11 @@ class TrainingJob(db.Model):
     model_id = db.Column(db.Integer, db.ForeignKey('model_records.id', use_alter=True, name='fk_training_jobs_model_id'), nullable=True)
 
     # 时间戳
-    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    created_at = db.Column(db.DateTime, default=lambda: localnow(), nullable=False)
     updated_at = db.Column(
         db.DateTime,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: localnow(),
+        onupdate=lambda: localnow(),
         nullable=False
     )
 
@@ -115,7 +116,7 @@ class TrainingJob(db.Model):
     def duration_seconds(self) -> float | None:
         """计算已运行时长 (秒)"""
         if self.started_at:
-            end = self.completed_at or datetime.now(timezone.utc)
+            end = self.completed_at or localnow()
             # MySQL DATETIME 不存时区，统一转为 naive 再计算
             try:
                 s = self.started_at.replace(tzinfo=None) if self.started_at.tzinfo else self.started_at
@@ -157,13 +158,12 @@ class TrainingJob(db.Model):
     # ============ 方法 ============
 
     def start(self):
-        """开始训练"""
+        """开始训练 (不提交 — 由调用方服务层控制)"""
         self.status = 'running'
-        self.started_at = datetime.now(timezone.utc)
-        db.session.commit()
+        self.started_at = localnow()
 
     def update_progress(self, epoch: int, step: int, metrics: dict = None):
-        """更新训练进度"""
+        """更新训练进度 (不提交 — 由调用方服务层控制)"""
         self.current_epoch = epoch
         self.current_step = step
         if self.total_steps > 0:
@@ -175,33 +175,36 @@ class TrainingJob(db.Model):
             self.metrics_history_json = json.dumps(history, ensure_ascii=False)
             self.final_metrics_json = json.dumps(metrics, ensure_ascii=False)
 
-        db.session.commit()
-
     def complete(self):
-        """标记训练完成"""
+        """标记训练完成 (不提交 — 由调用方服务层控制)"""
         self.status = 'completed'
         self.progress_percent = 100.0
-        self.completed_at = datetime.now(timezone.utc)
-        db.session.commit()
+        self.completed_at = localnow()
 
     def fail(self, error_msg: str):
-        """标记训练失败"""
+        """标记训练失败 (不提交 — 由调用方服务层控制)"""
         self.status = 'failed'
         self.error_message = error_msg
-        self.completed_at = datetime.now(timezone.utc)
-        db.session.commit()
+        self.completed_at = localnow()
 
     def cancel(self):
-        """取消训练"""
+        """取消训练 (不提交 — 由调用方服务层控制)"""
         self.status = 'cancelled'
-        self.completed_at = datetime.now(timezone.utc)
-        db.session.commit()
+        self.completed_at = localnow()
 
     def append_log(self, message: str):
         """追加日志"""
-        timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+        timestamp = localnow().strftime('%Y-%m-%d %H:%M:%S')
         line = f'[{timestamp}] {message}'
         self.log_text = (self.log_text or '') + line + '\n'
+
+    def log_tail_last(self, n: int = 3) -> str:
+        """获取最近 N 行日志 (SSE 事件推送给前端增量追加)"""
+        text = self.log_text or ''
+        if not text:
+            return ''
+        lines = text.strip().split('\n')
+        return '\n'.join(lines[-n:]) + '\n' if lines and lines[-1] else '\n'.join(lines[-n:])
 
     def to_dict(self) -> dict:
         """转换为字典"""
@@ -236,3 +239,15 @@ class TrainingJob(db.Model):
 
     def __repr__(self):
         return f'<TrainingJob {self.name} ({self.status}) {self.progress_percent}%>'
+
+    # ============ 权限检查 ============
+
+    def is_viewable_by(self, user) -> bool:
+        if user is None:
+            return False
+        return self.owner_id == user.id or user.is_admin
+
+    def is_editable_by(self, user) -> bool:
+        if user is None:
+            return False
+        return self.owner_id == user.id or user.is_admin

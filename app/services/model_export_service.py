@@ -9,7 +9,8 @@ import pickle
 import json
 import shutil
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime
+from app._timezone import localnow
 from typing import Optional, Tuple
 from flask import current_app
 
@@ -109,7 +110,7 @@ async def predict(req: PredictRequest):
     if MODEL is None:
         raise HTTPException(503, "Model not loaded")
 
-    X = np.array(req.features, dtype=np.float32)
+    X = np.array(req.features, dtype='float32')
 
     if SCALER is not None:
         X = SCALER.transform(X)
@@ -343,7 +344,7 @@ services:
             model_name=model.name,
             framework=framework,
             task_type=task_type,
-            timestamp=datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC'),
+            timestamp=localnow().strftime('%Y-%m-%d %H:%M:%S UTC'),
         )
         with open(os.path.join(package_dir, 'serve.py'), 'w', encoding='utf-8') as f:
             f.write(serve_py)

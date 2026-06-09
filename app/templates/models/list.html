@@ -1,13 +1,29 @@
 {% extends "base.html" %}
-{% block title %}我的模型{% endblock %}
+{% block title %}模型管理{% endblock %}
+
+{# 排序链接宏: 保留当前筛选参数，切换排序字段/方向 #}
+{% macro sort_link(label, field, current_sort, current_order) %}
+{% set new_order = 'asc' if (current_sort == field and current_order == 'desc') else 'desc' %}
+<a href="?visibility={{ current_visibility }}&model_type={{ current_type or '' }}&framework={{ current_framework or '' }}&search={{ search_query or '' }}&sort_by={{ field }}&sort_order={{ new_order }}" class="text-decoration-none text-dark d-flex align-items-center justify-content-center gap-1">
+  {{ label }}
+  {% if current_sort == field %}
+    <i class="bi bi-caret-{{ 'up-fill' if current_order == 'desc' else 'down-fill' }} small text-primary"></i>
+  {% else %}
+    <i class="bi bi-caret-up small text-muted opacity-25"></i>
+  {% endif %}
+</a>
+{% endmacro %}
 
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
     <div>
-        <h2 class="mb-1"><i class="bi bi-cpu"></i> 我的模型</h2>
-        <small class="text-muted">管理已训练的 AI 模型</small>
+        <h2 class="mb-1"><i class="bi bi-cpu"></i> 模型管理</h2>
+        <small class="text-muted">浏览、排序和筛选 AI 模型</small>
     </div>
     <div>
+        <a href="{{ url_for('models.leaderboard') }}" class="btn btn-outline-warning me-2">
+            <i class="bi bi-trophy-fill"></i> 排行榜
+        </a>
         <a href="{{ url_for('models.compare') }}" class="btn btn-outline-info me-2">
             <i class="bi bi-bar-chart-fill"></i> 模型对比
         </a>
@@ -17,37 +33,62 @@
     </div>
 </div>
 
-<!-- 搜索和筛选 -->
-<div class="card mb-4">
+<!-- 可见性切换 + 搜索筛选 -->
+<div class="card mb-3">
     <div class="card-body py-2">
-        <form method="GET" class="row g-2 align-items-end">
+        <div class="row g-2 align-items-end">
+            <!-- 可见性切换 tabs -->
             <div class="col-md-3">
-                <label class="form-label small text-muted">搜索</label>
-                <input type="text" name="search" class="form-control" placeholder="搜索模型名称..." value="{{ search_query or '' }}">
+                <label class="form-label small text-muted mb-1">显示范围</label>
+                <div class="btn-group w-100" role="group">
+                    <a href="{{ url_for('models.list_models', visibility='owned', model_type=current_type, framework=current_framework, search=search_query, sort_by=current_sort, sort_order=current_order) }}"
+                       class="btn btn-sm {{ 'btn-primary' if current_visibility == 'owned' else 'btn-outline-primary' }}">
+                        <i class="bi bi-person"></i> 我的
+                    </a>
+                    <a href="{{ url_for('models.list_models', visibility='public', model_type=current_type, framework=current_framework, search=search_query, sort_by='accuracy', sort_order='desc') }}"
+                       class="btn btn-sm {{ 'btn-primary' if current_visibility == 'public' else 'btn-outline-primary' }}">
+                        <i class="bi bi-globe2"></i> 公开
+                    </a>
+                    <a href="{{ url_for('models.list_models', visibility='all', model_type=current_type, framework=current_framework, search=search_query, sort_by=current_sort, sort_order=current_order) }}"
+                       class="btn btn-sm {{ 'btn-primary' if current_visibility == 'all' else 'btn-outline-primary' }}">
+                        <i class="bi bi-layers"></i> 全部
+                    </a>
+                </div>
             </div>
-            <div class="col-md-2">
-                <label class="form-label small text-muted">类型</label>
-                <select name="model_type" class="form-select">
-                    <option value="">全部类型</option>
-                    {% for t in ['classification','regression','clustering','nlp','computer_vision','other'] %}
-                    <option value="{{ t }}" {% if current_type == t %}selected{% endif %}>{{ model_type_labels.get(t, t) }}</option>{% endfor %}
-                </select>
-            </div>
-            <div class="col-md-2">
-                <label class="form-label small text-muted">框架</label>
-                <select name="framework" class="form-select">
-                    <option value="">全部框架</option>
-                    {% for f in ['PyTorch','TensorFlow','sklearn','ONNX','Other'] %}
-                    <option value="{{ f }}" {% if current_framework == f %}selected{% endif %}>{{ f }}</option>{% endfor %}
-                </select>
-            </div>
-            <div class="col-md-2 d-grid">
-                <button type="submit" class="btn btn-primary"><i class="bi bi-search"></i> 搜索</button>
-            </div>
-            <div class="col-md-2 d-grid">
-                <a href="{{ url_for('models.list_models') }}" class="btn btn-outline-secondary"><i class="bi bi-arrow-clockwise"></i> 重置</a>
-            </div>
-        </form>
+            <!-- 搜索 + 筛选 -->
+            <form method="GET" class="col-md-9">
+                <div class="row g-2">
+                    {# 保留可见性和排序参数 #}
+                    <input type="hidden" name="visibility" value="{{ current_visibility }}">
+                    <input type="hidden" name="sort_by" value="{{ current_sort }}">
+                    <input type="hidden" name="sort_order" value="{{ current_order }}">
+                    <div class="col-md-4">
+                        <label class="form-label small text-muted">搜索</label>
+                        <input type="text" name="search" class="form-control form-control-sm" placeholder="搜索模型名称..." value="{{ search_query or '' }}">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small text-muted">类型</label>
+                        <select name="model_type" class="form-select form-select-sm">
+                            <option value="">全部类型</option>
+                            {% for t in ['classification','regression','clustering','nlp','computer_vision','reinforcement','generative','other'] %}
+                            <option value="{{ t }}" {% if current_type == t %}selected{% endif %}>{{ model_type_labels.get(t, t) }}</option>{% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small text-muted">框架</label>
+                        <select name="framework" class="form-select form-select-sm">
+                            <option value="">全部框架</option>
+                            {% for f in ['PyTorch','TensorFlow','sklearn','ONNX','Other'] %}
+                            <option value="{{ f }}" {% if current_framework == f %}selected{% endif %}>{{ f }}</option>{% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-2 d-flex gap-1">
+                        <button type="submit" class="btn btn-primary btn-sm flex-fill"><i class="bi bi-search"></i></button>
+                        <a href="{{ url_for('models.list_models', visibility=current_visibility) }}" class="btn btn-outline-secondary btn-sm" title="重置"><i class="bi bi-arrow-clockwise"></i></a>
+                    </div>
+                </div>
+            </form>
+        </div>
     </div>
 </div>
 
@@ -55,15 +96,32 @@
 <div class="card">
     <div class="table-responsive">
         <table class="table table-hover align-middle mb-0">
+            {% set is_reg_filter = current_type == 'regression' %}
+            {% set is_cluster_filter = current_type == 'clustering' %}
             <thead class="table-light">
                 <tr>
-                    <th>名称</th>
+                    <th style="min-width:160px;">
+                        {% if current_visibility != 'owned' %}拥有者{% else %}
+                        {{ sort_link('名称', 'name', current_sort, current_order) }}
+                        {% endif %}
+                    </th>
                     <th>类型</th>
                     <th>框架</th>
-                    <th>版本</th>
-                    <th class="text-center">准确率</th>
-                    <th class="text-center">F1</th>
+                    {% if is_reg_filter %}
+                    <th class="text-center">{{ sort_link('R²', 'r2', current_sort, current_order) }}</th>
+                    <th class="text-center">{{ sort_link('MSE', 'mse', current_sort, current_order) }}</th>
+                    <th class="text-center">{{ sort_link('MAE', 'mae', current_sort, current_order) }}</th>
+                    {% elif is_cluster_filter %}
+                    <th class="text-center">{{ sort_link('F1', 'f1_score', current_sort, current_order) }}</th>
+                    <th class="text-center">轮廓系数</th>
+                    {% else %}
+                    <th class="text-center">{{ sort_link('准确率', 'accuracy', current_sort, current_order) }}</th>
+                    <th class="text-center">{{ sort_link('查准率', 'precision', current_sort, current_order) }}</th>
+                    <th class="text-center">{{ sort_link('召回率', 'recall', current_sort, current_order) }}</th>
+                    <th class="text-center">{{ sort_link('F1', 'f1_score', current_sort, current_order) }}</th>
+                    {% endif %}
                     <th>状态</th>
+                    <th class="text-center">{{ sort_link('创建时间', 'created_at', current_sort, current_order) }}</th>
                     <th>操作</th>
                 </tr>
             </thead>
@@ -71,12 +129,40 @@
                 {% for m in models %}
                 <tr data-href="{{ url_for('models.model_detail', model_id=m.id) }}" class="clickable-row">
                     <td>
-                        <a href="{{ url_for('models.model_detail', model_id=m.id) }}" class="text-decoration-none fw-bold d-block">{{ m.name }}</a>
+                        <a href="{{ url_for('models.model_detail', model_id=m.id) }}" class="text-decoration-none fw-bold d-block">
+                            {{ m.name }}
+                            {% if m.is_public %}<i class="bi bi-globe2 text-info small ms-1" title="公开模型"></i>{% endif %}
+                        </a>
                         {% if m.description %}<small class="text-muted text-truncate d-inline-block" style="max-width:200px;">{{ m.description }}</small>{% endif %}
+                        {% if current_visibility != 'owned' and m.owner_name %}
+                        <small class="text-muted d-block"><i class="bi bi-person"></i> {{ m.owner_name }}</small>
+                        {% endif %}
                     </td>
                     <td><span class="badge bg-secondary">{{ model_type_labels.get(m.model_type, m.model_type) }}</span></td>
-                    <td>{{ m.framework or '-' }}</td>
-                    <td><small>v{{ m.version }}</small></td>
+                    <td><small>{{ m.framework or '-' }}</small></td>
+                    {% if is_reg_filter %}
+                    <td class="text-center">
+                        {% if m.r2 is not none %}
+                        <span class="fw-bold text-{{ 'success' if m.r2 > 0.7 else 'warning' if m.r2 > 0.4 else 'danger' }}">
+                            {{ "%.4f"|format(m.r2) }}
+                        </span>
+                        {% else %}<span class="text-muted">-</span>{% endif %}
+                    </td>
+                    <td class="text-center">
+                        {% if m.mse is not none %}<small>{{ "%.4f"|format(m.mse) }}</small>{% else %}<span class="text-muted">-</span>{% endif %}
+                    </td>
+                    <td class="text-center">
+                        {% if m.mae is not none %}<small>{{ "%.4f"|format(m.mae) }}</small>{% else %}<span class="text-muted">-</span>{% endif %}
+                    </td>
+                    {% elif is_cluster_filter %}
+                    <td class="text-center">
+                        {% if m.f1_score is not none %}{{ "%.4f"|format(m.f1_score) }}{% else %}<span class="text-muted">-</span>{% endif %}
+                    </td>
+                    <td class="text-center">
+                        {% set sc = m.metrics.get('test_silhouette_score') or m.metrics.get('silhouette_score') %}
+                        {% if sc is not none %}{{ "%.4f"|format(sc) }}{% else %}<span class="text-muted">-</span>{% endif %}
+                    </td>
+                    {% else %}
                     <td class="text-center">
                         {% if m.accuracy is not none %}
                         <span class="fw-bold text-{{ 'success' if m.accuracy > 0.8 else 'warning' if m.accuracy > 0.6 else 'danger' }}">
@@ -85,13 +171,21 @@
                         {% else %}<span class="text-muted">-</span>{% endif %}
                     </td>
                     <td class="text-center">
-                        {% if m.f1_score is not none %}{{ "%.2f"|format(m.f1_score) }}{% else %}-{% endif %}
+                        {% if m.precision is not none %}{{ "%.4f"|format(m.precision) }}{% else %}<span class="text-muted">-</span>{% endif %}
                     </td>
+                    <td class="text-center">
+                        {% if m.recall is not none %}{{ "%.4f"|format(m.recall) }}{% else %}<span class="text-muted">-</span>{% endif %}
+                    </td>
+                    <td class="text-center">
+                        {% if m.f1_score is not none %}{{ "%.2f"|format(m.f1_score) }}{% else %}<span class="text-muted">-</span>{% endif %}
+                    </td>
+                    {% endif %}
                     <td>
                         <span class="badge bg-{{ 'success' if m.status == 'deployed' else 'primary' if m.status == 'trained' else 'secondary' }}">
                             {{ m.status }}
                         </span>
                     </td>
+                    <td class="text-center"><small>{{ m.created_at[:19].replace('T', ' ') if m.created_at else '-' }}</small></td>
                     <td>
                         <div class="btn-group btn-group-sm">
                             <a href="{{ url_for('models.model_detail', model_id=m.id) }}" class="btn btn-outline-primary" title="详情"><i class="bi bi-eye"></i></a>
@@ -116,7 +210,15 @@
 <div class="text-center py-5">
     <i class="bi bi-cpu text-muted" style="font-size:4rem;"></i>
     <h4 class="text-muted mt-3">暂无模型</h4>
-    <p class="text-muted">训练模型后会自动注册，也可以手动注册已有模型</p>
+    <p class="text-muted">
+        {% if current_visibility == 'public' %}
+        暂无公开模型。你可以<a href="{{ url_for('models.list_models', visibility='owned') }}">查看自己的模型</a>。
+        {% elif current_visibility == 'all' %}
+        暂无任何模型。训练模型后会自动注册。
+        {% else %}
+        你还没有模型。训练模型后会自动注册，也可以手动注册。
+        {% endif %}
+    </p>
     <a href="{{ url_for('models.create_model') }}" class="btn btn-success mt-2">
         <i class="bi bi-plus-circle"></i> 注册模型
     </a>

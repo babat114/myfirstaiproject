@@ -1,14 +1,26 @@
-{# 分页组件 #}
+{# 分页组件 — 自动保留所有查询参数 #}
 {% if pagination and pagination.pages > 1 %}
 <nav class="mt-3"><ul class="pagination justify-content-center">
-    <li class="page-item {{ 'disabled' if not pagination.has_prev }}"><a class="page-link" href="?page={{ pagination.current_page - 1 }}{% if search_query %}&search={{ search_query }}{% endif %}{% if current_category %}&category={{ current_category }}{% endif %}{% if current_status %}&status={{ current_status }}{% endif %}{% if current_type %}&model_type={{ current_type }}{% endif %}{% if current_framework %}&framework={{ current_framework }}{% endif %}">上一页</a></li>
+    {% set page_args = '' %}
+    {% for key, values in request.args.lists() if key != 'page' %}
+        {% for v in values %}
+            {% set page_args = page_args + '&' + key + '=' + (v|string) %}
+        {% endfor %}
+    {% endfor %}
+    <li class="page-item {{ 'disabled' if not pagination.has_prev }}">
+        <a class="page-link" href="?page={{ pagination.current_page - 1 }}{{ page_args|safe }}">上一页</a>
+    </li>
     {% for p in range(1, pagination.pages + 1) %}
         {% if p == 1 or p == pagination.pages or (p >= pagination.current_page - 2 and p <= pagination.current_page + 2) %}
-        <li class="page-item {{ 'active' if p == pagination.current_page }}"><a class="page-link" href="?page={{ p }}{% if search_query %}&search={{ search_query }}{% endif %}{% if current_category %}&category={{ current_category }}{% endif %}{% if current_status %}&status={{ current_status }}{% endif %}{% if current_type %}&model_type={{ current_type }}{% endif %}{% if current_framework %}&framework={{ current_framework }}{% endif %}">{{ p }}</a></li>
+        <li class="page-item {{ 'active' if p == pagination.current_page }}">
+            <a class="page-link" href="?page={{ p }}{{ page_args|safe }}">{{ p }}</a>
+        </li>
         {% elif p == pagination.current_page - 3 or p == pagination.current_page + 3 %}
         <li class="page-item disabled"><span class="page-link">...</span></li>
         {% endif %}
     {% endfor %}
-    <li class="page-item {{ 'disabled' if not pagination.has_next }}"><a class="page-link" href="?page={{ pagination.current_page + 1 }}{% if search_query %}&search={{ search_query }}{% endif %}{% if current_category %}&category={{ current_category }}{% endif %}{% if current_status %}&status={{ current_status }}{% endif %}{% if current_type %}&model_type={{ current_type }}{% endif %}{% if current_framework %}&framework={{ current_framework }}{% endif %}">下一页</a></li>
+    <li class="page-item {{ 'disabled' if not pagination.has_next }}">
+        <a class="page-link" href="?page={{ pagination.current_page + 1 }}{{ page_args|safe }}">下一页</a>
+    </li>
 </ul></nav>
 {% endif %}

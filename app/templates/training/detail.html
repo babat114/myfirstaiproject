@@ -208,34 +208,44 @@
         </ul>
 
         <div class="tab-content">
-            {# ── Tab 1: AI 诊断 ── #}
+            {# ── Tab 1: AI 科学诊断 (v2 — 5维子评分 + 决策树) ── #}
             <div class="tab-pane fade show active" id="aiPaneDiagnosis" role="tabpanel">
-                <div class="row g-3">
-                    <div class="col-md-4">
-                        <div class="card bg-light h-100">
-                            <div class="card-body text-center py-3">
-                                <div class="display-6 fw-bold" id="aiHealthScore">--</div>
-                                <small class="text-muted">健康度评分 (0-100)</small>
+                {# 健康度总览行 #}
+                <div class="row g-2 mb-3">
+                    <div class="col-md-3">
+                        <div class="card bg-light h-100 border-0">
+                            <div class="card-body text-center py-2">
+                                <div class="display-5 fw-bold" id="aiHealthScore">--</div>
+                                <small class="text-muted">综合健康度</small>
                             </div>
                         </div>
                     </div>
-                    <div class="col-md-8">
-                        <div id="aiDiagnosisProblems" class="small">
-                            <span class="text-muted">点击下方按钮开始AI诊断...</span>
-                        </div>
-                        <div class="mt-2 d-flex gap-2">
-                            <button type="button" class="btn btn-info btn-sm" id="aiDiagBtn"
-                                    onclick="runAIDiagnosis()">
-                                <i class="bi bi-clipboard2-pulse me-1"></i>开始AI诊断
-                            </button>
-                            <button type="button" class="btn btn-outline-info btn-sm" id="aiDiagFillBtn"
-                                    onclick="applyAIDiagToForm()" style="display:none;">
-                                <i class="bi bi-magic me-1"></i>应用推荐参数到表单
-                            </button>
-                        </div>
+                    <div class="col-md-9">
+                        <div id="aiDiagDiagnosis" class="small fw-bold mb-2"></div>
+                        <div id="aiSubScores" class="row g-1"></div>
                     </div>
                 </div>
-                <div id="aiDiagSuggestions" class="mt-3 small"></div>
+                {# 决策树路径 #}
+                <div id="aiDecisionPath" class="mb-2 small" style="display:none;"></div>
+                {# 问题列表 #}
+                <div id="aiDiagnosisProblems" class="small mb-2">
+                    <span class="text-muted">点击下方按钮开始科学诊断...</span>
+                </div>
+                {# 按钮组 #}
+                <div class="d-flex gap-2 mb-2">
+                    <button type="button" class="btn btn-info btn-sm" id="aiDiagBtn"
+                            onclick="runAIDiagnosis()">
+                        <i class="bi bi-clipboard2-pulse me-1"></i>开始科学诊断
+                    </button>
+                    <button type="button" class="btn btn-outline-info btn-sm" id="aiDiagFillBtn"
+                            onclick="applyAIDiagToForm()" style="display:none;">
+                        <i class="bi bi-magic me-1"></i>应用推荐参数
+                    </button>
+                </div>
+                {# 调参路线图 #}
+                <div id="aiTuningRoadmap" class="small" style="display:none;"></div>
+                {# 反模式警告 #}
+                <div id="aiAntiPatterns" style="display:none;"></div>
             </div>
 
             {# ── Tab 2: GridSearchCV 单算法调优 ── #}
@@ -554,7 +564,7 @@ async function confirmRetrain() {
 async function submitRetrainWithParams() {
     const ok = await showConfirmModal('确定使用调整后的参数重新训练吗？\n\n这将使用新参数重置并重启训练。', '调参重训', '确认执行', 'btn-primary');
     if (!ok) return;
-    document.getElementById('retrainParamsForm').submit();
+    document.getElementById('paramRetrainForm').submit();
 }
 
 function toggleParamForm() {
@@ -850,17 +860,22 @@ function toggleAIOptimizationPanel() {
     }
 }
 
-// ── Tab 1: AI 诊断 ──
+// ── Tab 1: AI 科学诊断 (v2 — 5维子评分 + 决策树路径 + 反模式 + 调参路线图) ──
 var aiDiagRan = false;
 var aiDiagData = null;
 
 function runAIDiagnosis() {
     var btn = document.getElementById('aiDiagBtn');
     var scoreEl = document.getElementById('aiHealthScore');
+    var diagTextEl = document.getElementById('aiDiagDiagnosis');
+    var subScoresEl = document.getElementById('aiSubScores');
     var problemsEl = document.getElementById('aiDiagnosisProblems');
-    var suggestEl = document.getElementById('aiDiagSuggestions');
+    var decisionPathEl = document.getElementById('aiDecisionPath');
+    var roadmapEl = document.getElementById('aiTuningRoadmap');
+    var antiPatternsEl = document.getElementById('aiAntiPatterns');
+
     btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>分析中...';
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>科学诊断中...';
 
     fetch('/api/training/' + jobUuid + '/guidance')
         .then(function(r) { return r.json(); })
@@ -875,29 +890,116 @@ function runAIDiagnosis() {
             }
             aiDiagData = data.data;
             var g = data.data;
+
+            // ── 1. 综合健康度 ──
             scoreEl.textContent = g.health_score || '?';
-            scoreEl.className = 'display-6 fw-bold ' +
-                (g.health_score >= 80 ? 'text-success' : g.health_score >= 60 ? 'text-warning' : g.health_score >= 40 ? 'text-orange' : 'text-danger');
+            scoreEl.className = 'display-5 fw-bold ' +
+                (g.health_score >= 80 ? 'text-success' : g.health_score >= 60 ? 'text-warning' :
+                 g.health_score >= 40 ? 'text-orange' : 'text-danger');
 
-            problemsEl.innerHTML = '<strong>检测到的问题:</strong>' +
-                (g.problems && g.problems.length ? g.problems.map(function(p) {
-                    return '<div class="mt-1"><span class="badge bg-warning text-dark me-1">' + (p.severity || 'warn') + '</span>' + p.description + '</div>';
-                }).join('') : '<div class="text-success mt-1">✓ 未检测到明显问题</div>');
+            // ── 2. 综合诊断文字 ──
+            diagTextEl.innerHTML = '<i class="bi bi-robot me-1"></i>' + (g.diagnosis || '');
 
-            if (g.suggestions && g.suggestions.length) {
-                var sugHtml = '<strong>参数调整建议:</strong><ul class="mb-0 mt-1">';
-                g.suggestions.forEach(function(s) {
-                    sugHtml += '<li><code>' + s.param + '</code> → <strong>' + JSON.stringify(s.suggested) + '</strong> (' + (s.reason || '') + ')</li>';
+            // ── 3. 5维子评分进度条 ──
+            var subScores = g.sub_scores || {};
+            var dimLabels = {
+                'absolute_perf': '绝对性能', 'overfitting_risk': '过拟合风险',
+                'convergence_quality': '收敛质量', 'class_balance': '类别均衡',
+                'generalization': '泛化能力'
+            };
+            var html = '';
+            for (var dim in dimLabels) {
+                var s = subScores[dim] !== undefined ? subScores[dim] : 0;
+                var barColor = s >= 80 ? 'bg-success' : s >= 60 ? 'bg-info' : s >= 40 ? 'bg-warning' : 'bg-danger';
+                html += '<div class="col-6 col-md-' + (dim === 'class_balance' || dim === 'generalization' ? '6' : '4') + ' mb-1">' +
+                    '<div class="d-flex justify-content-between"><small>' + dimLabels[dim] + '</small><small class="fw-bold">' + s.toFixed(0) + '</small></div>' +
+                    '<div class="progress" style="height:5px;"><div class="progress-bar ' + barColor + '" style="width:' + s + '%"></div></div>' +
+                    '</div>';
+            }
+            subScoresEl.innerHTML = html;
+
+            // ── 4. 诊断决策树路径 ──
+            var path = g.decision_path || [];
+            if (path.length > 0) {
+                decisionPathEl.style.display = '';
+                var pathHtml = '<div class="card border-info"><div class="card-header bg-info bg-opacity-10 py-1 px-2">' +
+                    '<small class="fw-bold"><i class="bi bi-diagram-3 me-1"></i>诊断决策路径</small></div>' +
+                    '<div class="card-body py-1 px-2">';
+                path.forEach(function(node) {
+                    var icon = node.answer.indexOf('YES') >= 0 ? '⚠️' : '✅';
+                    pathHtml += '<div class="small"><span class="badge bg-' +
+                        (node.severity === 'high' ? 'danger' : node.severity === 'medium' ? 'warning' : 'success') +
+                        ' me-1">' + node.node + '</span>' + icon + ' ' + node.question +
+                        ' <span class="text-' + (node.answer.indexOf('YES') >= 0 ? 'danger' : 'success') + '">' +
+                        node.answer + '</span></div>';
                 });
-                sugHtml += '</ul>';
-                suggestEl.innerHTML = sugHtml;
+                pathHtml += '</div></div>';
+                decisionPathEl.innerHTML = pathHtml;
+            } else {
+                decisionPathEl.style.display = 'none';
             }
 
-            document.getElementById('aiDiagFillBtn').style.display = '';
+            // ── 5. 检测到的问题 ──
+            problemsEl.innerHTML = '<strong>检测到的问题:</strong>' +
+                (g.issues && g.issues.length ? g.issues.map(function(p) {
+                    var sevBadge = p.severity === 'critical' ? 'bg-danger' :
+                                   p.severity === 'high' ? 'bg-warning text-dark' :
+                                   'bg-info text-dark';
+                    return '<div class="mt-1"><span class="badge ' + sevBadge + ' me-1">' +
+                        (p.severity || 'warn') + '</span>' +
+                        (p.category ? '<span class="badge bg-secondary me-1">' + p.category + '</span>' : '') +
+                        (p.message || p.description || '') + '</div>';
+                }).join('') : '<div class="text-success mt-1">✓ 未检测到明显问题</div>');
+
+            // ── 6. 反模式警告 ──
+            var antiPats = g.anti_patterns || [];
+            if (antiPats.length > 0) {
+                antiPatternsEl.style.display = '';
+                var apHtml = '<div class="card border-danger mt-2"><div class="card-header bg-danger bg-opacity-10 py-1 px-2">' +
+                    '<small class="fw-bold"><i class="bi bi-shield-exclamation me-1"></i>检测到反模式 (' + antiPats.length + ')</small></div>' +
+                    '<div class="card-body py-1 px-2">';
+                antiPats.forEach(function(ap) {
+                    apHtml += '<div class="small mb-1"><span class="badge bg-danger me-1">' +
+                        (ap.severity || 'warn') + '</span><strong>' + ap.name + '</strong>: ' +
+                        ap.message + '<br><small class="text-success">修复: ' + ap.fix + '</small></div>';
+                });
+                apHtml += '</div></div>';
+                antiPatternsEl.innerHTML = apHtml;
+            } else {
+                antiPatternsEl.style.display = 'none';
+            }
+
+            // ── 7. 调参路线图 ──
+            var roadmap = g.tuning_roadmap || [];
+            if (roadmap.length > 0) {
+                roadmapEl.style.display = '';
+                var rmHtml = '<div class="card border-success mt-2"><div class="card-header bg-success bg-opacity-10 py-1 px-2">' +
+                    '<small class="fw-bold"><i class="bi bi-map me-1"></i>系统性调参路线图 (Phase 1→5)</small></div>' +
+                    '<div class="card-body py-1 px-2">';
+                roadmap.forEach(function(phase) {
+                    var urgencyIcon = phase.urgency === 'high' ? '🔴' : phase.urgency === 'medium' ? '🟡' : '🟢';
+                    rmHtml += '<div class="small d-flex align-items-center mb-1">' +
+                        '<span class="badge bg-primary me-2">P' + phase.phase + '</span>' +
+                        urgencyIcon + ' <strong>' + phase.name + '</strong>' +
+                        ' — ' + phase.method +
+                        (phase.note ? ' <em class="text-danger">' + phase.note + '</em>' : '') +
+                        (phase.current !== undefined ? ' <span class="text-muted">[当前: ' + phase.current + ']</span>' : '') +
+                        '</div>';
+                });
+                rmHtml += '</div></div>';
+                roadmapEl.innerHTML = rmHtml;
+            } else {
+                roadmapEl.style.display = 'none';
+            }
+
+            // ── 8. 建议 (保留兼容) ──
+            if (g.suggestions && g.suggestions.length) {
+                document.getElementById('aiDiagFillBtn').style.display = '';
+            }
         })
         .catch(function(err) {
             btn.disabled = false;
-            btn.innerHTML = '<i class="bi bi-clipboard2-pulse me-1"></i>开始AI诊断';
+            btn.innerHTML = '<i class="bi bi-clipboard2-pulse me-1"></i>开始科学诊断';
             problemsEl.innerHTML = '<span class="text-danger">网络错误: ' + err.message + '</span>';
         });
 }
@@ -1150,8 +1252,7 @@ function applyAutoMLAlgo(algo, framework) {
 }
 
 // ── 旧兼容: toggleParamForm auto-load AI ──
-var aiRetrainGuidance = null;
-var guidanceLoaded = false;
+// (aiRetrainGuidance / guidanceLoaded 已在前面分别声明，此处不再重复)
 
 /** 渲染关键帧时间线 — 每个epoch一个彩色pill徽章显示指标快照 */
 function renderKeyframes(historyArr) {
@@ -1620,7 +1721,7 @@ function showFinalMetrics(metricsStr) {
     } catch(e) {}
 }
 
-// ========== 参数调优引导 ==========
+// ========== 科学参数调优引导 (v2 — 5维子评分 + 路线图 + 反模式) ==========
 let guidanceLoaded = false;
 function loadGuidance() {
     var body = document.getElementById('guidanceBody');
@@ -1635,7 +1736,7 @@ function loadGuidance() {
     body.style.display = '';
     document.getElementById('guidanceLoading').style.display = '';
     document.getElementById('guidanceContent').innerHTML = '';
-    status.textContent = '分析中...';
+    status.textContent = '科学诊断中...';
 
     fetch('/api/training/' + jobUuid + '/guidance')
         .then(function(r) { return r.json(); })
@@ -1652,45 +1753,111 @@ function loadGuidance() {
             status.textContent = '健康度: ' + g.health_score + '/100';
 
             var html = '';
-            // 诊断
-            html += '<div class="px-3 pt-2"><strong>' + g.diagnosis + '</strong></div>';
 
-            // 健康度条
-            var barColor = g.health_score >= 90 ? 'bg-success' : (g.health_score >= 75 ? 'bg-info' : (g.health_score >= 60 ? 'bg-warning' : 'bg-danger'));
-            html += '<div class="px-3 py-1"><div class="progress" style="height:6px;">';
+            // ── 1. 诊断总览 ──
+            html += '<div class="px-3 pt-2"><i class="bi bi-robot me-1"></i><strong>' + g.diagnosis + '</strong></div>';
+
+            // ── 2. 健康度 + 5维子评分 ──
+            var barColor = g.health_score >= 80 ? 'bg-success' : (g.health_score >= 60 ? 'bg-warning' : (g.health_score >= 40 ? 'bg-orange' : 'bg-danger'));
+            html += '<div class="px-3 py-1"><div class="progress" style="height:8px;">';
             html += '<div class="progress-bar ' + barColor + '" style="width:' + g.health_score + '%"></div></div>';
-            html += '<small class="text-muted px-3">健康度 ' + g.health_score + '/100</small></div>';
+            html += '<small class="text-muted px-3">综合健康度 ' + g.health_score + '/100</small></div>';
 
-            // 问题列表
+            // 子评分条
+            var subScores = g.sub_scores || {};
+            if (Object.keys(subScores).length > 0) {
+                var dimLabels = {
+                    'absolute_perf': '绝对性能', 'overfitting_risk': '过拟合风险',
+                    'convergence_quality': '收敛质量', 'class_balance': '类别均衡',
+                    'generalization': '泛化能力'
+                };
+                html += '<div class="px-3 py-1">';
+                for (var dim in dimLabels) {
+                    var s = subScores[dim] !== undefined ? subScores[dim] : 0;
+                    var sBarColor = s >= 80 ? 'bg-success' : s >= 60 ? 'bg-info' : s >= 40 ? 'bg-warning' : 'bg-danger';
+                    html += '<div class="d-flex align-items-center mb-1 small">' +
+                        '<span style="width:70px;">' + dimLabels[dim] + '</span>' +
+                        '<div class="progress flex-grow-1 me-2" style="height:5px;">' +
+                        '<div class="progress-bar ' + sBarColor + '" style="width:' + s + '%"></div></div>' +
+                        '<strong style="width:28px;text-align:right;">' + s.toFixed(0) + '</strong></div>';
+                }
+                html += '</div>';
+            }
+
+            // ── 3. 问题列表 ──
             if (g.issues && g.issues.length > 0) {
-                html += '<div class="px-3 pt-2"><strong class="small"><i class="bi bi-exclamation-triangle-fill text-warning me-1"></i>检测到的问题:</strong></div>';
+                html += '<div class="px-3 pt-2"><strong class="small"><i class="bi bi-exclamation-triangle-fill text-warning me-1"></i>检测到的问题 (' + g.issues.length + '):</strong></div>';
                 html += '<ul class="small mb-0 px-3">';
                 g.issues.forEach(function(issue) {
-                    html += '<li class="' + (issue.severity === 'high' ? 'text-danger' : 'text-warning') + '">' + issue.message + '</li>';
+                    var sevCls = issue.severity === 'critical' ? 'text-danger fw-bold' :
+                                 issue.severity === 'high' ? 'text-danger' : 'text-warning';
+                    html += '<li class="' + sevCls + '">' +
+                        (issue.category ? '[' + issue.category + '] ' : '') +
+                        issue.message + '</li>';
                 });
                 html += '</ul>';
             }
 
-            // 建议
+            // ── 4. 反模式警告 ──
+            var antiPats = g.anti_patterns || [];
+            if (antiPats.length > 0) {
+                html += '<div class="px-3 pt-2"><strong class="small"><i class="bi bi-shield-exclamation text-danger me-1"></i>检测到反模式:</strong></div>';
+                antiPats.forEach(function(ap) {
+                    html += '<div class="px-3 small"><span class="badge bg-danger me-1">' +
+                        (ap.severity || 'warn') + '</span>' + ap.message +
+                        '<br><small class="text-success">→ ' + ap.fix + '</small></div>';
+                });
+            }
+
+            // ── 5. 参数调整建议 (按Phase分组) ──
             if (g.suggestions && g.suggestions.length > 0) {
-                html += '<div class="px-3 pt-2"><strong class="small"><i class="bi bi-lightbulb-fill text-warning me-1"></i>参数调整建议:</strong></div>';
+                html += '<div class="px-3 pt-2"><strong class="small"><i class="bi bi-lightbulb-fill text-warning me-1"></i>科学调参建议 (按Phase顺序):</strong></div>';
                 html += '<div class="table-responsive px-2"><table class="table table-sm table-borderless small mb-0">';
-                html += '<thead><tr><th>参数</th><th>操作</th><th>原因</th></tr></thead><tbody>';
+                html += '<thead><tr><th>参数</th><th>类别</th><th>操作</th><th>原因</th></tr></thead><tbody>';
                 g.suggestions.forEach(function(s) {
-                    var actionIcon = s.action === 'increase' ? '↗' : (s.action === 'decrease' ? '↘' : '→');
-                    var suggestedVal = s.suggested !== undefined ? ' → ' + JSON.stringify(s.suggested) : '';
-                    html += '<tr><td><code>' + s.param + '</code></td>';
+                    var phaseBadge = s.phase ? '<span class="badge bg-secondary me-1">P' + s.phase + '</span>' : '';
+                    var actionIcon = s.action === 'increase' ? '↗' : (s.action === 'decrease' ? '↘' : (s.action === 'change' ? '↻' : '→'));
+                    var catBadge = s.category === 'scientific' ?
+                        '<span class="badge bg-primary me-1">架构</span>' :
+                        s.category === 'nuisance' ?
+                        '<span class="badge bg-info me-1">优化器</span>' : '';
+                    var suggestedVal = s.suggested !== undefined ? ' → <strong>' + JSON.stringify(s.suggested) + '</strong>' : '';
+                    html += '<tr><td>' + phaseBadge + '<code>' + s.param + '</code></td>';
+                    html += '<td>' + catBadge + '</td>';
                     html += '<td>' + actionIcon + ' <strong>' + s.action + '</strong>' + suggestedVal + '</td>';
                     html += '<td class="text-muted">' + s.reason + '</td></tr>';
                 });
                 html += '</tbody></table></div>';
             }
 
-            // 下一步
+            // ── 6. 调参路线图 ──
+            var roadmap = g.tuning_roadmap || [];
+            if (roadmap.length > 0) {
+                html += '<div class="px-3 pt-2"><strong class="small"><i class="bi bi-map me-1"></i>系统调参路线图:</strong></div>';
+                html += '<div class="px-2 small">';
+                roadmap.slice(0, 5).forEach(function(phase) {
+                    var urg = phase.urgency === 'high' ? '🔴' : phase.urgency === 'medium' ? '🟡' : '🟢';
+                    html += '<div class="d-flex align-items-center mb-1">' +
+                        '<span class="badge bg-primary me-1">P' + phase.phase + '</span>' +
+                        urg + ' <strong>' + phase.name + '</strong>' +
+                        '<span class="text-muted ms-1">— ' + phase.method + '</span>' +
+                        (phase.note ? ' <em class="text-danger">' + phase.note + '</em>' : '') +
+                        '</div>';
+                });
+                html += '</div>';
+            }
+
+            // ── 7. 下一步操作 ──
             if (g.next_steps && g.next_steps.length > 0) {
                 html += '<div class="px-3 py-2"><strong class="small"><i class="bi bi-list-check me-1"></i>建议操作:</strong></div>';
                 html += '<ol class="small mb-0 px-3">';
-                g.next_steps.forEach(function(s) { html += '<li>' + s + '</li>'; });
+                g.next_steps.forEach(function(s) {
+                    if (typeof s === 'object') {
+                        html += '<li><strong>' + s.action + '</strong>: ' + s.detail + '</li>';
+                    } else {
+                        html += '<li>' + s + '</li>';
+                    }
+                });
                 html += '</ol>';
             }
 

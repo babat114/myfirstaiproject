@@ -60,6 +60,7 @@
                     <form method="POST">
                         <input type="hidden" name="action" value="predict_manual">
                         <input type="hidden" name="feature_count" value="{{ feature_names|length or 5 }}">
+                        <input type="hidden" name="feature_names_json" value="{{ feature_names|tojson|forceescape if feature_names else '[]' }}">
                         {% if feature_names %}
                             {% for name in feature_names[:10] %}
                             <div class="mb-2">

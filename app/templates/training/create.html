@@ -41,11 +41,36 @@
             {% if datasets %}
             <select name="dataset_id" class="form-select" id="datasetSelect" required>
                 <option value="">-- 请选择数据集 --</option>
+                {% set ns = namespace(has_own=false, has_public=false) %}
                 {% for ds in datasets %}
-                <option value="{{ ds.id }}" data-columns="{{ ds.columns|tojson|forceescape if ds.columns else '[]' }}">
-                    {{ ds.name }} ({{ ds.file_format }}, {{ ds.file_size_mb }} MB{% if ds.row_count %}, {{ ds.row_count }} 行{% endif %})
-                </option>
+                    {% if ds.owner_id == current_user.id %}
+                        {% set ns.has_own = true %}
+                    {% else %}
+                        {% set ns.has_public = true %}
+                    {% endif %}
                 {% endfor %}
+                {% if ns.has_own %}
+                <optgroup label="-- 我的数据集 --">
+                {% for ds in datasets %}
+                    {% if ds.owner_id == current_user.id %}
+                    <option value="{{ ds.id }}" data-columns="{{ ds.columns|tojson|forceescape if ds.columns else '[]' }}">
+                        {{ ds.name }} ({{ ds.file_format }}, {{ ds.file_size_mb }} MB{% if ds.row_count %}, {{ ds.row_count }} 行{% endif %})
+                    </option>
+                    {% endif %}
+                {% endfor %}
+                </optgroup>
+                {% endif %}
+                {% if ns.has_public %}
+                <optgroup label="-- 公开数据集 --">
+                {% for ds in datasets %}
+                    {% if ds.owner_id != current_user.id %}
+                    <option value="{{ ds.id }}" data-columns="{{ ds.columns|tojson|forceescape if ds.columns else '[]' }}">
+                        {{ ds.name }} ({{ ds.file_format }}, {{ ds.file_size_mb }} MB{% if ds.row_count %}, {{ ds.row_count }} 行{% endif %}{% if ds.owner_name %} - {{ ds.owner_name }}{% endif %})
+                    </option>
+                    {% endif %}
+                {% endfor %}
+                </optgroup>
+                {% endif %}
             </select>
             <div id="datasetInfo" class="mt-2 text-muted small"></div>
             {% else %}
@@ -75,6 +100,7 @@
                     <select name="ml_task_type" class="form-select" id="taskTypeSelect">
                         <option value="classification">分类 (Classification)</option>
                         <option value="regression">回归 (Regression)</option>
+                        <option value="clustering">聚类 (Clustering)</option>
                     </select>
                 </div>
                 <div class="col-md-6">
@@ -117,7 +143,9 @@
         </div>
         <div class="collapse" id="advancedOptions">
             <div class="card-body">
-                <div class="row g-3">
+                <!-- 基础高级设置 -->
+                <h6 class="text-muted mb-3">运行环境</h6>
+                <div class="row g-3 mb-4">
                     <div class="col-md-4">
                         <label class="form-label">框架</label>
                         <select name="framework" class="form-select">
@@ -142,6 +170,94 @@
                         <input type="number" name="cpu_cores" class="form-control" value="2" min="1">
                     </div>
                 </div>
+
+                <!-- 防过拟合设置 (PyTorch/TensorFlow) -->
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h6 class="text-muted mb-0">
+                        <i class="bi bi-shield-check text-success me-1"></i>防过拟合设置
+                        <small class="text-muted">(PyTorch/TensorFlow 生效，留空使用智能默认)</small>
+                    </h6>
+                    <button type="button" class="btn btn-info btn-sm" id="aiSmartFillBtn" disabled
+                            title="AI分析数据集+算法，智能推荐最优超参数">
+                        <i class="bi bi-magic"></i> AI智能填充参数
+                    </button>
+                </div>
+                <div class="row g-3 mb-3">
+                    <div class="col-md-3">
+                        <label class="form-label">验证集比例</label>
+                        <input type="number" name="val_size" class="form-control" placeholder="0.15" min="0.05" max="0.3" step="0.05">
+                        <small class="text-muted">默认 15%</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Dropout</label>
+                        <input type="number" name="dropout" class="form-control" placeholder="0.5" min="0.1" max="0.8" step="0.1">
+                        <small class="text-muted">默认 0.5</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">学习率</label>
+                        <input type="text" name="learning_rate" class="form-control" placeholder="0.0001">
+                        <small class="text-muted">默认 1e-4</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">早停耐心值</label>
+                        <input type="number" name="early_stopping_patience" class="form-control" placeholder="10" min="3" max="50">
+                        <small class="text-muted">默认 10 轮</small>
+                    </div>
+                </div>
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <label class="form-label">权重衰减 (L2)</label>
+                        <input type="text" name="weight_decay" class="form-control" placeholder="0.001">
+                        <small class="text-muted">默认 1e-3</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Batch Size</label>
+                        <input type="number" name="batch_size" class="form-control" placeholder="64" min="8" max="1024">
+                        <small class="text-muted">默认 64</small>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">隐藏层结构</label>
+                        <input type="text" name="hidden_layers_str" class="form-control" placeholder="留空=智能推断 (如 128,64,32)">
+                        <small class="text-muted">逗号分隔，如 256,128,64。留空自动根据数据量推断最优结构</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- GridSearchCV 自动调优 -->
+    <div class="card mb-4" id="gridsearchCard">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">
+                <i class="bi bi-sliders text-warning me-1"></i>GridSearchCV 自动调优
+                <span class="badge bg-warning text-dark ms-2">新手推荐</span>
+            </h5>
+        </div>
+        <div class="card-body">
+            <div id="gridsearchInfo" class="alert alert-info py-2 mb-2">
+                <small><i class="bi bi-info-circle me-1"></i>选择数据集和算法后，AI将分析是否需要自动调优</small>
+            </div>
+            <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" name="auto_tune" id="autoTuneCheck" disabled>
+                <label class="form-check-label fw-bold" for="autoTuneCheck">
+                    训练前使用 GridSearchCV 自动搜索最佳超参数
+                </label>
+            </div>
+            <small class="text-muted" id="gridsearchReason"></small>
+            <div class="mt-2 d-none" id="tuneOptionsBox">
+                <div class="row g-2">
+                    <div class="col-auto">
+                        <label class="form-label small">搜索方法</label>
+                        <select name="tuning_method" class="form-select form-select-sm">
+                            <option value="random">Random Search (快速)</option>
+                            <option value="grid">Grid Search (精确)</option>
+                        </select>
+                    </div>
+                    <div class="col-auto">
+                        <label class="form-label small">CV折数</label>
+                        <input type="number" name="tuning_cv" class="form-control form-control-sm" value="5" min="2" max="10" style="width:80px">
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -162,22 +278,33 @@
 <script>
 const ALGORITHMS = {
     classification: [
+        {value: 'transformer_bert', label: 'BERT Transformer (NLP迁移学习)'},
         {value: 'random_forest', label: '随机森林 (Random Forest)'},
+        {value: 'gradient_boosting', label: '梯度提升 (Gradient Boosting)'},
         {value: 'logistic_regression', label: '逻辑回归 (Logistic Regression)'},
         {value: 'svm', label: '支持向量机 (SVM)'},
         {value: 'knn', label: 'K近邻 (KNN)'},
-        {value: 'gradient_boosting', label: '梯度提升 (Gradient Boosting)'},
     ],
     regression: [
         {value: 'random_forest_regressor', label: '随机森林回归 (Random Forest)'},
+        {value: 'gradient_boosting_regressor', label: '梯度提升回归 (Gradient Boosting)'},
+        {value: 'ridge', label: '岭回归 (Ridge, L2正则)'},
         {value: 'linear_regression', label: '线性回归 (Linear Regression)'},
         {value: 'svr', label: '支持向量回归 (SVR)'},
-        {value: 'gradient_boosting_regressor', label: '梯度提升回归 (Gradient Boosting)'},
+    ],
+    clustering: [
+        {value: 'kmeans', label: 'K-Means 聚类'},
+        {value: 'dbscan', label: 'DBSCAN 密度聚类'},
+        {value: 'agglomerative', label: '层次聚类 (Agglomerative)'},
+        {value: 'minibatch_kmeans', label: 'MiniBatch K-Means'},
     ]
 };
 
 const sklearnAlgos = ['random_forest', 'gradient_boosting', 'random_forest_regressor',
-    'gradient_boosting_regressor', 'svm', 'svr', 'logistic_regression', 'linear_regression', 'knn'];
+    'gradient_boosting_regressor', 'svm', 'svr', 'logistic_regression', 'linear_regression', 'ridge', 'knn',
+    'kmeans', 'dbscan', 'agglomerative', 'minibatch_kmeans'];
+// transformer/mlp are deep learning frameworks — not single-epoch sklearn models
+const dlAlgos = ['transformer_bert', 'mlp'];
 
 // 算法中文名映射
 const ALGO_LABELS = {};
@@ -195,12 +322,28 @@ function updateAlgorithms() {
 function updateEpoch() {
     const algo = document.getElementById('algorithmSelect').value;
     const epochInput = document.getElementById('epochInput');
-    if (sklearnAlgos.includes(algo)) {
+    const epochHelp = epochInput.nextElementSibling;
+    if (closedFormAlgos.includes(algo)) {
         epochInput.value = 1;
         epochInput.disabled = true;
+        if (epochHelp) epochHelp.textContent = 'sklearn 模型固定为 1';
+    } else if (algo === 'transformer_bert') {
+        epochInput.value = 3;
+        epochInput.disabled = false;
+        if (epochHelp) epochHelp.textContent = 'BERT 微调推荐 3-5 轮';
     } else {
         epochInput.disabled = false;
-        if (epochInput.value == 1) epochInput.value = 10;
+        if (epochHelp) epochHelp.textContent = '';
+        if (epochInput.value == 1 && algo === 'mlp') epochInput.value = 20;
+        else if (epochInput.value == 1) epochInput.value = 10;
+    }
+
+    // 更新框架提示
+    const fwSelect = document.querySelector('select[name="framework"]');
+    if (algo === 'transformer_bert') {
+        if (fwSelect) fwSelect.value = 'transformers';
+    } else if (algo === 'mlp') {
+        if (fwSelect) fwSelect.value = 'pytorch';
     }
 }
 
@@ -433,6 +576,18 @@ function showAiError(msg) {
     document.getElementById('algoRecommendBadge').classList.add('d-none');
 }
 
+// 表单提交前: 确保 disabled 的 epoch 值被提交 (disabled input 不会被浏览器提交)
+document.getElementById('createJobForm').addEventListener('submit', function() {
+    const epochInput = document.getElementById('epochInput');
+    if (epochInput.disabled) {
+        const hidden = document.createElement('input');
+        hidden.type = 'hidden';
+        hidden.name = 'total_epochs';
+        hidden.value = epochInput.value;
+        this.appendChild(hidden);
+    }
+});
+
 document.getElementById('createAndStartBtn').addEventListener('click', function() {
     const input = document.createElement('input');
     input.type = 'hidden';
@@ -443,6 +598,19 @@ document.getElementById('createAndStartBtn').addEventListener('click', function(
 });
 
 updateAlgorithms();
+
+// ========== URL参数预选: 从 ?dataset_id=X 自动选中数据集并触发AI分析 ==========
+(function() {
+    const params = new URLSearchParams(window.location.search);
+    const presetId = params.get('dataset_id');
+    if (presetId) {
+        const select = document.getElementById('datasetSelect');
+        if (select && select.querySelector(`option[value="${presetId}"]`)) {
+            select.value = presetId;
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+    }
+})();
 
 // 用户手动编辑名称/描述时清除AI标记，避免切换数据集后被覆盖
 document.getElementById('jobNameInput').addEventListener('input', function() {
@@ -455,5 +623,366 @@ document.getElementById('jobDescInput').addEventListener('input', function() {
     document.getElementById('descAiIcon').classList.add('d-none');
     document.getElementById('descHint').classList.add('d-none');
 });
+
+// ========== AI智能填充高级参数 ==========
+let smartParamsCache = null;
+let smartParamsLoaded = false;
+
+// 当数据集或算法改变时，启用智能填充按钮并重新分析GridSearchCV建议
+function onConfigChanged() {
+    const datasetId = document.getElementById('datasetSelect').value;
+    const algorithm = document.getElementById('algorithmSelect').value;
+    const smartFillBtn = document.getElementById('aiSmartFillBtn');
+    const autoTuneCheck = document.getElementById('autoTuneCheck');
+
+    if (datasetId && algorithm) {
+        smartFillBtn.disabled = false;
+        smartFillBtn.title = '点击自动填充 ' + algorithm + ' 的最优超参数';
+        // 重置缓存，允许重新获取
+        smartParamsCache = null;
+        smartParamsLoaded = false;
+        // 检查GridSearchCV建议
+        checkGridSearchSuggestion(datasetId, algorithm);
+    } else {
+        smartFillBtn.disabled = true;
+        smartFillBtn.title = '请先选择数据集和算法';
+        autoTuneCheck.disabled = true;
+        autoTuneCheck.checked = false;
+        document.getElementById('gridsearchReason').textContent = '';
+        hideAllAiParamIcons();
+    }
+}
+
+// 监听数据集变化 (扩展已有handler)
+const origDatasetChange = document.getElementById('datasetSelect').onchange;
+document.getElementById('datasetSelect').addEventListener('change', function() {
+    onConfigChanged();
+});
+
+// 监听算法变化
+document.getElementById('algorithmSelect').addEventListener('change', function() {
+    onConfigChanged();
+    updateEpoch(); // 保持原有逻辑
+});
+
+// 任务类型变化时也触发
+document.getElementById('taskTypeSelect').addEventListener('change', function() {
+    onConfigChanged();
+});
+
+// 智能填充按钮点击
+document.getElementById('aiSmartFillBtn').addEventListener('click', function() {
+    const datasetId = document.getElementById('datasetSelect').value;
+    const algorithm = document.getElementById('algorithmSelect').value;
+    const mlTaskType = document.getElementById('taskTypeSelect').value;
+    const framework = document.querySelector('select[name="framework"]').value;
+
+    if (!datasetId || !algorithm) {
+        showCenteredMessage('请先选择数据集和算法', 'warning', 2500);
+        return;
+    }
+
+    // 展开高级选项
+    const advancedCollapse = document.getElementById('advancedOptions');
+    if (!advancedCollapse.classList.contains('show')) {
+        new bootstrap.Collapse(advancedCollapse, {toggle: true});
+    }
+
+    const btn = this;
+    const origHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>AI分析中...';
+    btn.classList.add('btn-warning');
+    btn.classList.remove('btn-info');
+
+    // 使用缓存避免重复请求
+    const cacheKey = datasetId + '|' + algorithm + '|' + mlTaskType + '|' + framework;
+    if (smartParamsCache && smartParamsCache._key === cacheKey) {
+        applySmartParams(smartParamsCache);
+        restoreBtn(btn, origHtml);
+        return;
+    }
+
+    fetch('/api/datasets/' + datasetId + '/smart-params?algorithm=' + encodeURIComponent(algorithm)
+        + '&ml_task_type=' + encodeURIComponent(mlTaskType)
+        + '&framework=' + encodeURIComponent(framework))
+        .then(resp => {
+            if (!resp.ok) throw new Error('API error ' + resp.status);
+            return resp.json();
+        })
+        .then(data => {
+            if (!data.success) {
+                showCenteredMessage(data.message || '参数推荐失败', 'danger', 3000);
+                restoreBtn(btn, origHtml);
+                return;
+            }
+            data.data._key = cacheKey;
+            smartParamsCache = data.data;
+            smartParamsLoaded = true;
+            applySmartParams(data.data);
+            showCenteredMessage('AI参数已智能填充! 置信度: ' + Math.round(data.data.confidence * 100) + '%', 'success', 3000);
+            restoreBtn(btn, origHtml);
+        })
+        .catch(err => {
+            console.error('Smart params error:', err);
+            showCenteredMessage('AI参数推荐暂时不可用，请手动填写', 'warning', 3000);
+            restoreBtn(btn, origHtml);
+        });
+
+    function restoreBtn(b, orig) {
+        b.disabled = false;
+        b.innerHTML = orig;
+        b.classList.remove('btn-warning');
+        b.classList.add('btn-info');
+    }
+});
+
+function applySmartParams(data) {
+    const params = data.params;
+    const tips = data.tips || [];
+
+    // 学习率
+    if (params.learning_rate !== undefined) {
+        const el = document.querySelector('input[name="learning_rate"]');
+        if (el && (!el.value || el.dataset.aiFilled === 'true' || !smartParamsLoaded)) {
+            el.value = params.learning_rate;
+            el.dataset.aiFilled = 'true';
+            addAiDot(el);
+        }
+    }
+
+    // Dropout
+    if (params.dropout !== undefined) {
+        const el = document.querySelector('input[name="dropout"]');
+        if (el && (!el.value || el.dataset.aiFilled === 'true' || !smartParamsLoaded)) {
+            el.value = params.dropout;
+            el.dataset.aiFilled = 'true';
+            addAiDot(el);
+        }
+    }
+
+    // Batch Size
+    if (params.batch_size !== undefined) {
+        const el = document.querySelector('input[name="batch_size"]');
+        if (el && (!el.value || el.dataset.aiFilled === 'true' || !smartParamsLoaded)) {
+            el.value = params.batch_size;
+            el.dataset.aiFilled = 'true';
+            addAiDot(el);
+        }
+    }
+
+    // Weight Decay
+    if (params.weight_decay !== undefined) {
+        const el = document.querySelector('input[name="weight_decay"]');
+        if (el && (!el.value || el.dataset.aiFilled === 'true' || !smartParamsLoaded)) {
+            el.value = params.weight_decay;
+            el.dataset.aiFilled = 'true';
+            addAiDot(el);
+        }
+    }
+
+    // Early Stopping
+    if (params.early_stopping_patience !== undefined) {
+        const el = document.querySelector('input[name="early_stopping_patience"]');
+        if (el && (!el.value || el.dataset.aiFilled === 'true' || !smartParamsLoaded)) {
+            el.value = params.early_stopping_patience;
+            el.dataset.aiFilled = 'true';
+            addAiDot(el);
+        }
+    }
+
+    // Validation Size
+    if (params.val_size !== undefined) {
+        const el = document.querySelector('input[name="val_size"]');
+        if (el && (!el.value || el.dataset.aiFilled === 'true' || !smartParamsLoaded)) {
+            el.value = params.val_size;
+            el.dataset.aiFilled = 'true';
+            addAiDot(el);
+        }
+    }
+
+    // Hidden Layers
+    if (params.hidden_layers !== undefined) {
+        const el = document.querySelector('input[name="hidden_layers_str"]');
+        if (el && (!el.value || el.dataset.aiFilled === 'true' || !smartParamsLoaded)) {
+            el.value = Array.isArray(params.hidden_layers) ? params.hidden_layers.join(',') : params.hidden_layers;
+            el.dataset.aiFilled = 'true';
+            addAiDot(el);
+        }
+    }
+
+    // 算法特定参数: n_estimators, max_depth 等 (展示在提示中)
+    if (params.n_estimators !== undefined || params.max_depth !== undefined
+        || params.C !== undefined || params.n_neighbors !== undefined) {
+        const algoParams = [];
+        if (params.n_estimators) algoParams.push('n_estimators=' + params.n_estimators);
+        if (params.max_depth !== undefined) algoParams.push('max_depth=' + (params.max_depth || 'None'));
+        if (params.C !== undefined) algoParams.push('C=' + params.C);
+        if (params.n_neighbors !== undefined) algoParams.push('n_neighbors=' + params.n_neighbors);
+        if (params.learning_rate !== undefined && algoParams.length === 0) algoParams.push('lr=' + params.learning_rate);
+        if (algoParams.length) {
+            tips.unshift('算法内置最佳参数: ' + algoParams.join(', '));
+        }
+    }
+
+    // 显示提示
+    if (tips.length > 0) {
+        showAiTips(tips);
+    }
+
+    // 标记所有AI填充字段
+    smartParamsLoaded = true;
+}
+
+function addAiDot(el) {
+    // 在输入框后面添加AI小标记
+    let dot = el.parentElement.querySelector('.ai-param-dot');
+    if (!dot) {
+        dot = document.createElement('span');
+        dot.className = 'ai-param-dot badge bg-info ms-1';
+        dot.innerHTML = '<i class="bi bi-robot"></i> AI';
+        dot.title = '此参数由AI智能推荐';
+        dot.style.fontSize = '0.65rem';
+        el.parentElement.appendChild(dot);
+    }
+    dot.classList.remove('d-none');
+}
+
+function hideAllAiParamIcons() {
+    document.querySelectorAll('.ai-param-dot').forEach(d => d.classList.add('d-none'));
+    document.querySelectorAll('input[data-ai-filled="true"]').forEach(el => {
+        el.dataset.aiFilled = 'false';
+    });
+}
+
+function showAiTips(tips) {
+    const reasonBox = document.getElementById('aiReasonBox');
+    const reasonText = document.getElementById('aiReasonText');
+    if (reasonBox && reasonText) {
+        reasonText.innerHTML = tips.map(t => '<i class="bi bi-check2-circle text-success me-1"></i>' + t).join('<br>');
+        reasonBox.classList.remove('d-none', 'alert-warning');
+        reasonBox.classList.add('alert-info');
+    }
+}
+
+// ========== GridSearchCV 建议检查 ==========
+function checkGridSearchSuggestion(datasetId, algorithm) {
+    const autoTuneCheck = document.getElementById('autoTuneCheck');
+    const tuneOptionsBox = document.getElementById('tuneOptionsBox');
+    const gsReason = document.getElementById('gridsearchReason');
+    const gsInfo = document.getElementById('gridsearchInfo');
+
+    if (!datasetId || !algorithm) {
+        autoTuneCheck.disabled = true;
+        autoTuneCheck.checked = false;
+        return;
+    }
+
+    // 只有sklearn算法适合GridSearchCV
+    const sklearnAlgos = ['random_forest', 'gradient_boosting', 'logistic_regression', 'svm', 'knn',
+        'linear_regression', 'random_forest_regressor', 'gradient_boosting_regressor', 'ridge', 'svr'];
+    if (!sklearnAlgos.includes(algorithm)) {
+        autoTuneCheck.disabled = true;
+        autoTuneCheck.checked = false;
+        tuneOptionsBox.classList.add('d-none');
+        gsReason.textContent = algorithm + ' 不支持 GridSearchCV 自动调优，请手动调整参数';
+        gsInfo.innerHTML = '<small><i class="bi bi-info-circle me-1"></i>深度学习模型请手动调整参数后直接训练</small>';
+        return;
+    }
+
+    // 如果已有缓存的smart参数结果，直接使用
+    if (smartParamsCache && smartParamsCache._key && smartParamsCache._key.startsWith(datasetId + '|')) {
+        applyGridSearchSuggestion(smartParamsCache);
+        return;
+    }
+
+    // 异步获取推荐
+    const mlTaskType = document.getElementById('taskTypeSelect').value;
+    const framework = document.querySelector('select[name="framework"]').value;
+
+    autoTuneCheck.disabled = true;
+    gsInfo.innerHTML = '<small><span class="spinner-border spinner-border-sm me-1"></span>AI正在分析是否需要GridSearchCV...</small>';
+
+    fetch('/api/datasets/' + datasetId + '/smart-params?algorithm=' + encodeURIComponent(algorithm)
+        + '&ml_task_type=' + encodeURIComponent(mlTaskType)
+        + '&framework=' + encodeURIComponent(framework))
+        .then(resp => resp.json())
+        .then(data => {
+            if (!data.success) {
+                gsInfo.innerHTML = '<small><i class="bi bi-exclamation-triangle me-1"></i>无法分析，请手动选择</small>';
+                return;
+            }
+            applyGridSearchSuggestion(data.data);
+        })
+        .catch(err => {
+            console.error('GridSearch check error:', err);
+            gsInfo.innerHTML = '<small><i class="bi bi-exclamation-triangle me-1"></i>分析失败，请手动选择</small>';
+        });
+}
+
+function applyGridSearchSuggestion(data) {
+    const autoTuneCheck = document.getElementById('autoTuneCheck');
+    const tuneOptionsBox = document.getElementById('tuneOptionsBox');
+    const gsReason = document.getElementById('gridsearchReason');
+    const gsInfo = document.getElementById('gridsearchInfo');
+
+    autoTuneCheck.disabled = false;
+
+    if (data.gridsearch_suggestion) {
+        autoTuneCheck.checked = true;
+        tuneOptionsBox.classList.remove('d-none');
+        gsReason.textContent = data.gridsearch_reason;
+        gsReason.classList.remove('text-muted');
+        gsReason.classList.add('text-success');
+        gsInfo.innerHTML = '<small><i class="bi bi-lightbulb-fill text-warning me-1"></i><strong>AI建议:</strong> 使用GridSearchCV自动调优可获得更好的模型</small>';
+    } else {
+        autoTuneCheck.checked = false;
+        tuneOptionsBox.classList.add('d-none');
+        gsReason.textContent = data.gridsearch_reason;
+        gsReason.classList.remove('text-success');
+        gsReason.classList.add('text-muted');
+        gsInfo.innerHTML = '<small><i class="bi bi-info-circle me-1"></i>当前参数已针对数据特征优化，可直接训练。如需调优可手动开启。</small>';
+    }
+}
+
+// 自动调优复选框切换时显示/隐藏选项
+document.getElementById('autoTuneCheck').addEventListener('change', function() {
+    const tuneOptionsBox = document.getElementById('tuneOptionsBox');
+    if (this.checked) {
+        tuneOptionsBox.classList.remove('d-none');
+    } else {
+        tuneOptionsBox.classList.add('d-none');
+    }
+});
+
+// 表单提交前处理 auto_tune
+const origFormSubmit = document.getElementById('createJobForm').onsubmit;
+document.getElementById('createJobForm').addEventListener('submit', function(e) {
+    const autoTuneCheck = document.getElementById('autoTuneCheck');
+    if (autoTuneCheck.checked) {
+        // 确保 auto_tune 值被提交 (如果checkbox在form内且checked, 应该已经被提交)
+        // 额外添加 hidden input 确保
+        let hidden = document.querySelector('input[name="auto_tune_hidden"]');
+        if (!hidden) {
+            hidden = document.createElement('input');
+            hidden.type = 'hidden';
+            hidden.name = 'auto_tune_hidden';
+            hidden.value = 'true';
+            this.appendChild(hidden);
+        }
+        // 如果 GridSearchCV 选中，设置 start_immediately
+        if (!document.querySelector('input[name="start_immediately"]')) {
+            const si = document.createElement('input');
+            si.type = 'hidden';
+            si.name = 'start_immediately';
+            si.value = 'on';
+            this.appendChild(si);
+        }
+    }
+});
+
+// 初始化: 检查当前状态
+updateAlgorithms();
+setTimeout(onConfigChanged, 100);
 </script>
 {% endblock %}

@@ -773,7 +773,8 @@ def _make_progress_scorer(actual_scoring, total_steps: int, progress_callback: C
 # ===================================================================
 
 def _manual_clustering_search(base_model, param_grid, X,
-                              progress_callback: Callable = None) -> dict:
+                              progress_callback: Callable = None,
+                              max_combos: int = None) -> dict:
     """手动遍历参数组合 — 聚类在全量数据上fit+evaluate, 无需CV
 
     为什么不用 GridSearchCV?
@@ -788,6 +789,9 @@ def _manual_clustering_search(base_model, param_grid, X,
       3. 计算 silhouette_score(X, labels) — 全量数据
       4. 调用 progress_callback (如果提供)
 
+    Args:
+        max_combos: 最大参数组合数 (采样限制, 用于AutoML快速扫描)
+
     Returns:
         dict: 兼容 GridSearchCV cv_results_ 的格式, 可直接传入 _build_result
     """
@@ -796,6 +800,16 @@ def _manual_clustering_search(base_model, param_grid, X,
 
     param_list = list(ParameterGrid(param_grid))
     n_combinations = len(param_list)
+
+    # AutoML 快速扫描: 采样限制组合数
+    if max_combos and n_combinations > max_combos:
+        rng_samp = np.random.RandomState(42)
+        param_list = [param_list[i] for i in
+                      rng_samp.choice(n_combinations, max_combos, replace=False)]
+        n_combinations = max_combos
+        logger.info(
+            f'聚类参数采样: {len(list(ParameterGrid(param_grid)))} → {max_combos} 组合'
+        )
 
     if n_combinations == 0:
         return {
@@ -1275,7 +1289,8 @@ class HyperparameterTuningService:
     def run_random_search(dataset: Dataset, algorithm: str, task_type: str,
                           target_column: str, n_iter: int = 30,
                           scoring: str = 'accuracy', cv: int = 5,
-                          n_jobs: int = 2) -> Dict:
+                          n_jobs: int = 2,
+                          progress_callback: Callable = None) -> Dict:
         """运行 RandomizedSearchCV — 与 GridSearchCV 相同的多层防御策略"""
         from sklearn.model_selection import RandomizedSearchCV
         from scipy.stats import randint, loguniform
@@ -1387,28 +1402,60 @@ class HyperparameterTuningService:
 
                 base_model = _create_model(try_algo, final_task, is_mlp)
 
-                if final_is_clustering:
-                    actual_scoring = _clustering_scorer
-                else:
-                    actual_scoring = final_scoring
-
                 start_time = time.time()
-                search = RandomizedSearchCV(
-                    base_model, distributions,
-                    n_iter=min(n_iter, 100),
-                    scoring=actual_scoring,
-                    cv=effective_cv,
-                    n_jobs=n_jobs,
-                    random_state=42,
-                    error_score=0,   # AutoML模式: 跳过非法参数组合, 不崩溃
-                )
-                search.fit(X, y)
-                search_time = round(time.time() - start_time, 2)
 
-                result = _build_result(
-                    search, search_time, final_scoring, final_task,
-                    effective_cv, is_mlp
-                )
+                # ── 聚类路径: 使用手动全量搜索 (CV对无监督无意义) ──
+                if final_is_clustering:
+                    param_grid = SEARCH_SPACES.get(try_algo, param_distributions)
+                    if not param_grid:
+                        return {'success': False, 'error': f'聚类算法 "{try_algo}" 无搜索空间'}
+                    result = _manual_clustering_search(
+                        base_model, param_grid, X,
+                        progress_callback=progress_callback,
+                        max_combos=n_iter,
+                    )
+                    search_time = round(time.time() - start_time, 2)
+                    result = _build_result(
+                        result, search_time, final_scoring, final_task,
+                        effective_cv, is_mlp
+                    )
+                else:
+                    # ── 监督学习路径 ──
+                    if final_is_clustering:
+                        actual_scoring = _clustering_scorer
+                    else:
+                        actual_scoring = final_scoring
+
+                    # 进度回调 → n_jobs=1 + 委托式评分器
+                    if progress_callback is not None:
+                        from sklearn.model_selection import ParameterGrid
+                        param_list = list(ParameterGrid(param_distributions))
+                        n_combos_r = len(param_list) if param_list else 0
+                        total_steps_r = min(n_iter, 100) * effective_cv
+                        scoring_for_rnd = _make_progress_scorer(
+                            actual_scoring, total_steps_r, progress_callback
+                        )
+                        effective_n_jobs_rnd = 1
+                    else:
+                        scoring_for_rnd = actual_scoring
+                        effective_n_jobs_rnd = n_jobs
+
+                    search = RandomizedSearchCV(
+                        base_model, distributions,
+                        n_iter=min(n_iter, 100),
+                        scoring=scoring_for_rnd,
+                        cv=effective_cv,
+                        n_jobs=effective_n_jobs_rnd,
+                        random_state=42,
+                        error_score=0,   # AutoML模式: 跳过非法参数组合, 不崩溃
+                    )
+                    search.fit(X, y)
+                    search_time = round(time.time() - start_time, 2)
+
+                    result = _build_result(
+                        search, search_time, final_scoring, final_task,
+                        effective_cv, is_mlp
+                    )
                 logger.info(
                     f'RandomizedSearchCV 完成 (attempt {attempt_idx+1}): '
                     f'{try_algo}/{final_task}, best={search.best_score_:.4f}'
@@ -1729,6 +1776,7 @@ class HyperparameterTuningService:
                                         'silhouette',
                                 cv=cv,
                                 n_jobs=n_jobs,
+                                progress_callback=algo_progress_cb,
                             )
                         else:
                             result = {'success': False, 'error': '无搜索空间'}

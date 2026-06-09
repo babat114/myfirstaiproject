@@ -70,6 +70,9 @@ def create_app(config_name=None):
     # 注册上下文处理器
     register_context_processors(app)
 
+    # 注册健康检查端点
+    register_health_check(app)
+
     # 注意: 数据库表通过 Flask-Migrate 管理
     # 首次部署运行: flask db upgrade
     # 生成迁移: flask db migrate -m "描述"
@@ -129,21 +132,37 @@ def register_blueprints(app):
     from app.routes.api.stream import stream_bp
     from app.routes.api.users import users_api_bp
 
-    app.register_blueprint(auth_api_bp, url_prefix='/api/auth')
-    app.register_blueprint(datasets_api_bp, url_prefix='/api/datasets')
-    app.register_blueprint(models_api_bp, url_prefix='/api/models')
-    app.register_blueprint(training_api_bp, url_prefix='/api/training')
-    app.register_blueprint(stream_bp, url_prefix='/api/stream')
-    app.register_blueprint(users_api_bp, url_prefix='/api/users')
+    # API v1 (当前版本)
+    app.register_blueprint(auth_api_bp, url_prefix='/api/v1/auth')
+    app.register_blueprint(datasets_api_bp, url_prefix='/api/v1/datasets')
+    app.register_blueprint(models_api_bp, url_prefix='/api/v1/models')
+    app.register_blueprint(training_api_bp, url_prefix='/api/v1/training')
+    app.register_blueprint(stream_bp, url_prefix='/api/v1/stream')
+    app.register_blueprint(users_api_bp, url_prefix='/api/v1/users')
 
-    # Web 页面路由豁免 CSRF (使用 Session 认证, 表单不含 CSRF token)
-    csrf.exempt(auth_bp)
-    csrf.exempt(dashboard_bp)
-    csrf.exempt(datasets_bp)
-    csrf.exempt(models_bp)
-    csrf.exempt(training_bp)
+    # 向后兼容: /api/* 内部重写为 /api/v1/* (在URL匹配前通过WSGI中间件)
+    _original_wsgi = app.wsgi_app
+    def _api_v1_compat_middleware(environ, start_response):
+        path = environ.get('PATH_INFO', '')
+        if path.startswith('/api/') and not path.startswith('/api/v1/'):
+            # 保存原始路径, 供 after_request 判断是否为旧版API调用
+            environ['HTTP_X_API_ORIGINAL_PATH'] = path
+            environ['PATH_INFO'] = path.replace('/api/', '/api/v1/', 1)
+        return _original_wsgi(environ, start_response)
+    app.wsgi_app = _api_v1_compat_middleware
 
-    # API 路由豁免 CSRF (使用 API Key 认证)
+    # 向后兼容路由上的 deprecation header
+    @app.after_request
+    def _api_deprecation_header(response):
+        from flask import request as req
+        original = req.environ.get('HTTP_X_API_ORIGINAL_PATH', '')
+        if original.startswith('/api/') and not original.startswith('/api/v1/'):
+            response.headers['X-API-Deprecated'] = 'Use /api/v1/ instead. Will be removed in v2.0'
+            response.headers['Sunset'] = 'Sat, 01 Jan 2027 00:00:00 GMT'
+        return response
+
+    # API 路由豁免 CSRF (使用 JWT/API Key 认证, 非 Session Cookie)
+    # Web 页面蓝图不豁免 — 所有 POST 表单自动注入 CSRF token (见 base.html)
     csrf.exempt(auth_api_bp)
     csrf.exempt(datasets_api_bp)
     csrf.exempt(models_api_bp)
@@ -154,24 +173,96 @@ def register_blueprints(app):
 
 def register_error_handlers(app):
     """注册错误处理"""
-    from flask import render_template, jsonify
+    from flask import render_template, jsonify, request, flash, redirect, url_for
     from werkzeug.exceptions import HTTPException
+    from flask_wtf.csrf import CSRFError
+
+    @app.errorhandler(CSRFError)
+    def handle_csrf_error(e):
+        """CSRF 验证失败 — 刷新页面并提示用户"""
+        # API 请求返回 JSON
+        if request.path.startswith('/api/'):
+            return jsonify({
+                'success': False,
+                'message': 'CSRF 验证失败，请刷新页面后重试。',
+            }), 400
+        flash('安全验证已过期，请刷新页面后重试。', 'warning')
+        return redirect(request.referrer or url_for('auth.login'))
+
+    def _is_api_request():
+        """判断当前请求是否为 API 请求"""
+        return request.path.startswith('/api/')
 
     @app.errorhandler(404)
     def not_found(e):
-        if app.config.get('DEBUG'):
-            return jsonify({'error': 'Not Found', 'message': str(e)}), 404
-        return render_template('errors/404.html'), 404
+        if _is_api_request():
+            return jsonify({
+                'success': False,
+                'message': '请求的资源不存在。',
+                'error': 'Not Found',
+            }), 404
+        return render_template('errors/error.html',
+            error_code=404, error_title='页面未找到',
+            error_message='您要查找的页面不存在或已被移动。',
+            error_color='text-muted'), 404
 
     @app.errorhandler(500)
     def internal_error(e):
         db.session.rollback()
         app.logger.error(f"Internal Server Error: {e}")
-        return render_template('errors/500.html'), 500
+        if _is_api_request():
+            return jsonify({
+                'success': False,
+                'message': '服务器内部错误，请稍后重试。',
+                'error': 'Internal Server Error',
+            }), 500
+        return render_template('errors/error.html',
+            error_code=500, error_title='服务器内部错误',
+            error_message='抱歉，服务器遇到了问题，请稍后重试。',
+            error_color='text-danger'), 500
 
     @app.errorhandler(HTTPException)
     def handle_http_exception(e):
-        return render_template('errors/error.html', error=e), e.code
+        if _is_api_request():
+            return jsonify({
+                'success': False,
+                'message': e.description or str(e),
+                'error': e.name,
+                'code': e.code,
+            }), e.code
+        return render_template('errors/error.html',
+            error_code=e.code, error_title=e.name,
+            error_message=e.description,
+            error_color='text-muted'), e.code
+
+
+def register_health_check(app):
+    """注册健康检查端点 /health"""
+    from flask import jsonify
+    from datetime import datetime, timezone
+
+    @app.route('/health')
+    def health_check():
+        db_ok = True
+        db_error = None
+        try:
+            db.session.execute(db.text('SELECT 1'))
+        except Exception as e:
+            db_ok = False
+            db_error = str(e)
+
+        status_code = 200 if db_ok else 503
+        return jsonify({
+            'status': 'healthy' if db_ok else 'unhealthy',
+            'version': '1.0.0',
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'checks': {
+                'database': {
+                    'status': 'ok' if db_ok else 'error',
+                    'error': db_error,
+                },
+            },
+        }), status_code
 
 
 def register_context_processors(app):
