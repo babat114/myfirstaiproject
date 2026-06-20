@@ -51,6 +51,9 @@ class BaseTrainer(ABC):
         # 训练参数
         self.total_epochs = job.total_epochs or self.hyperparams.get('epochs', 10)
         self.output_dir = os.path.join('experiments', job.uuid)
+        # 检查点: 每N个epoch保存一次训练快照 (0 = 禁用)
+        self.checkpoint_frequency = int(self.hyperparams.get('checkpoint_frequency', 5))
+        self._current_epoch = 0  # 当前epoch (用于断点续训)
 
     # ============ 子类必须实现 ============
 
@@ -79,6 +82,33 @@ class BaseTrainer(ABC):
         """保存模型到指定路径"""
         ...
 
+    # ============ 检查点 (子类可选重写) ============
+
+    def save_checkpoint(self):
+        """保存训练快照到磁盘。
+
+        子类可重写以保存框架特定状态 (optimizer/scheduler/epoch)。
+        默认实现不做任何事 (sklearn单epoch算法无需检查点)。
+        检查点文件写入 experiments/{uuid}/checkpoint.*
+        """
+        pass
+
+    @staticmethod
+    def load_checkpoint(output_dir: str) -> dict:
+        """从磁盘加载训练快照。返回恢复元数据字典, 无检查点时返回空字典。
+
+        子类可重写以恢复框架特定状态。返回的字典可包含:
+            - 'epoch': 已完成的epoch数 (从此epoch+1继续)
+            - 'best_val_loss': 最佳验证损失
+            - 'patience_counter': 早停计数器
+        """
+        return {}
+
+    @staticmethod
+    def has_checkpoint(output_dir: str) -> bool:
+        """检查是否存在训练快照"""
+        return False
+
     # ============ 模板方法 (子类无需重写) ============
 
     def run(self):
@@ -86,6 +116,8 @@ class BaseTrainer(ABC):
 
         子类可通过设置 self._early_stop = True 来触发早停 (在 train_epoch 中设置)
         子类可通过 self._best_val_metric 记录最佳验证指标供日志输出
+
+        v2: 支持检查点持久化 — 每N轮保存训练快照, 崩溃后可恢复
         """
         # 早停标志 (子类在 train_epoch 中设置)
         if not hasattr(self, '_early_stop'):
@@ -98,6 +130,17 @@ class BaseTrainer(ABC):
             self.callback.on_log(f'框架: {self.__class__.__name__}')
             self.callback.on_log(f'超参数: {self.hyperparams}')
 
+            # —— 检查是否有检查点可恢复 ——
+            os.makedirs(self.output_dir, exist_ok=True)
+            if self.has_checkpoint(self.output_dir):
+                ckpt_meta = self.load_checkpoint(self.output_dir)
+                self._current_epoch = ckpt_meta.get('epoch', 0)
+                self.callback.on_log(
+                    f'[检查点] 从 epoch {self._current_epoch}/{self.total_epochs} 恢复训练'
+                )
+            else:
+                self._current_epoch = 0
+
             # 加载数据
             self.callback.on_log('正在加载数据...')
             self.load_data()
@@ -109,7 +152,9 @@ class BaseTrainer(ABC):
             self.callback.on_log('模型构建完成')
 
             # 训练循环
-            for epoch in range(self.total_epochs):
+            for epoch in range(self._current_epoch, self.total_epochs):
+                self._current_epoch = epoch
+
                 # 检查取消
                 if self._cancel_event.is_set():
                     self.callback.on_cancel()
@@ -137,6 +182,13 @@ class BaseTrainer(ABC):
                         f'[早停] 验证指标连续未改善，在第 {stopped_at}/{self.total_epochs} 轮提前停止'
                     )
                     break
+
+                # —— 定期保存检查点 ——
+                if self.checkpoint_frequency > 0 and (epoch + 1) % self.checkpoint_frequency == 0:
+                    self.save_checkpoint()
+                    self.callback.on_log(
+                        f'[检查点] epoch {epoch + 1}/{self.total_epochs} 快照已保存'
+                    )
 
                 # 日志 — 突出 val metrics
                 train_items = {k: v for k, v in metrics.items()
@@ -168,16 +220,33 @@ class BaseTrainer(ABC):
             model_path = os.path.join(self.output_dir, 'model')
             self.save_model(model_path)
 
+            # —— 训练完成, 清理检查点 ——
+            self._cleanup_checkpoint()
+
             self.callback.on_complete(final_metrics)
 
         except Exception as e:
+            # —— 异常时保存检查点以便恢复 ——
+            self.callback.on_log(f'[检查点] 训练异常, 正在保存快照...')
+            try:
+                self.save_checkpoint()
+            except Exception as ckpt_err:
+                self.callback.on_log(f'[检查点] 快照保存失败: {ckpt_err}')
             self.callback.on_error(str(e))
             raise
 
     # ============ 控制接口 ============
 
     def pause(self):
-        """暂停训练"""
+        """暂停训练 — 自动保存检查点"""
+        # 先保存检查点再暂停
+        try:
+            self.save_checkpoint()
+            self.callback.on_log(
+                f'[检查点] 训练暂停, epoch {self._current_epoch + 1} 快照已保存'
+            )
+        except Exception as e:
+            self.callback.on_log(f'[检查点] 暂停快照保存失败: {e}')
         self._pause_event.clear()
 
     def resume(self):
@@ -188,6 +257,16 @@ class BaseTrainer(ABC):
         """取消训练"""
         self._cancel_event.set()
         self._pause_event.set()  # 取消时也解除暂停状态
+
+    def _cleanup_checkpoint(self):
+        """训练成功完成或取消后清理检查点文件"""
+        import glob
+        pattern = os.path.join(self.output_dir, 'checkpoint*')
+        for f in glob.glob(pattern):
+            try:
+                os.remove(f)
+            except OSError:
+                pass
 
     @property
     def is_paused(self) -> bool:

@@ -4,6 +4,7 @@
 """
 import os
 import json
+import atexit
 import threading
 from concurrent.futures import ThreadPoolExecutor, Future
 from datetime import datetime, timezone
@@ -12,6 +13,7 @@ from flask import current_app
 from app import db, logger
 from app.models.training_job import TrainingJob
 from app.models.dataset import Dataset
+from app.models.model_record import ModelRecord
 
 
 class TrainingExecutor:
@@ -61,6 +63,10 @@ class TrainingExecutor:
         self._active_trainers: dict[int, object] = {}  # {job_id: trainer_instance}
         self._futures: dict[int, Future] = {}           # {job_id: Future}
         self._app = None  # 延迟绑定 Flask app
+        self._shutdown_registered = False
+
+        # 注册进程退出时的清理钩子 — 确保线程池正常关闭, 训练状态不会卡在 running
+        atexit.register(self._graceful_shutdown)
 
         logger.info(f'TrainingExecutor 初始化完成 (max_workers={self.max_workers})')
 
@@ -163,11 +169,10 @@ class TrainingExecutor:
         return False
 
     def get_status(self, job_id: int) -> dict | None:
-        """获取训练任务的实时状态 (确保读取最新数据)"""
-        # 刷新会话以读取训练线程的最新提交
-        db.session.commit()
-        db.session.expire_all()
+        """获取训练任务的实时状态 (refresh 直接重新查询, 无 commit 副作用)"""
         job = db.session.get(TrainingJob, job_id)
+        if job:
+            db.session.refresh(job)  # 从数据库重新加载最新数据
         if not job:
             return None
 
@@ -206,7 +211,63 @@ class TrainingExecutor:
             ],
         }
 
+    def _graceful_shutdown(self):
+        """应用退出时优雅关闭线程池 — 标记运行中任务为 paused, 等待线程完成"""
+        if getattr(self, '_shutting_down', False):
+            return
+        self._shutting_down = True
+        # 将所有运行中的任务标记为 paused (重启后可手动恢复)
+        for jid in list(self._active_trainers.keys()):
+            try:
+                job = db.session.get(TrainingJob, jid)
+                if job and job.status == 'running':
+                    job.status = 'paused'
+                    job.append_log('[系统] 服务关闭，训练已暂停。重启后可恢复。')
+                    db.session.commit()
+            except Exception:
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
+        # 关闭线程池 (容忍 logger 已关闭的情况)
+        try:
+            self._pool.shutdown(wait=True, cancel_futures=False)
+        except Exception:
+            pass
+
     # ============ 私有方法 ============
+
+    def _resolve_trainer_class(self, job, hyperparams):
+        """根据框架/算法/数据集类别解析训练器类 (从 _run_wrapper 抽取)"""
+        framework = (job.framework or '').lower()
+        dataset_category = (job.dataset.category or '').lower() if job.dataset else ''
+        algorithm = hyperparams.get('algorithm', '')
+
+        # ── 纠错: KMeans 参数 algorithm=lloyd/elkan 会覆盖 ML 算法名 kmeans ──
+        from app.utils.algorithm_helpers import fix_kmeans_algorithm
+        algorithm = fix_kmeans_algorithm(algorithm, hyperparams, job.model)
+
+        # Transformer 迁移学习
+        if algorithm.startswith('transformer'):
+            from app.executor.trainers.transformers_nlp_trainer import TransformersNLPTrainer
+            return TransformersNLPTrainer
+        # mlp → PyTorch
+        if algorithm == 'mlp':
+            from app.executor.trainers.pytorch_trainer import PyTorchTrainer
+            return PyTorchTrainer
+        # 视觉数据 → PyTorch
+        if dataset_category == 'vision':
+            from app.executor.trainers.pytorch_trainer import PyTorchTrainer
+            return PyTorchTrainer
+        if 'pytorch' in framework or 'torch' in framework:
+            from app.executor.trainers.pytorch_trainer import PyTorchTrainer
+            return PyTorchTrainer
+        if 'tensorflow' in framework or 'keras' in framework or 'tf' in framework:
+            from app.executor.trainers.keras_trainer import KerasTrainer
+            return KerasTrainer
+        # 默认 sklearn
+        from app.executor.trainers.sklearn_trainer import SklearnTrainer
+        return SklearnTrainer
 
     def _run_wrapper(self, job_id: int, dataset_id: int):
         """在线程中运行训练的包装器 (推送 Flask 应用上下文)
@@ -244,54 +305,7 @@ class TrainingExecutor:
                         pass
 
                 # 决定使用哪个训练器
-                framework = (job.framework or '').lower()
-                dataset_category = (dataset.category or '').lower()
-                algorithm = hyperparams.get('algorithm', '')
-
-                # ── 纠错: KMeans 参数 algorithm=lloyd/elkan 会覆盖 ML 算法名 kmeans ──
-                # 如果 hyperparams 里的 algorithm 是 KMeans 的参数值而非算法名, 自动修正
-                _KMEANS_ALGO_PARAMS = {'lloyd', 'elkan', 'auto', 'full'}
-                _KNOWN_CLUSTERING_ALGOS = {'kmeans', 'dbscan', 'agglomerative', 'minibatch_kmeans'}
-                model_type = (getattr(job.model, 'model_type', '') or '').lower()
-                task_type = hyperparams.get('task_type', hyperparams.get('ml_task_type', ''))
-                if algorithm.lower() in _KMEANS_ALGO_PARAMS:
-                    logger.warning(
-                        f'检测到错误的algorithm值 "{algorithm}" (KMeans参数值), '
-                        f'自动修正为 "kmeans"'
-                    )
-                    algorithm = 'kmeans'
-                    # 同时修复存储的hyperparams, 防止下次再出错
-                    hyperparams['algorithm'] = 'kmeans'
-                    if job.model:
-                        try:
-                            job.model.hyperparameters_json = json.dumps(
-                                hyperparams, ensure_ascii=False
-                            )
-                        except Exception:
-                            pass
-
-                # Transformer 迁移学习 — 仅当显式指定 algorithm 时启用
-                # (NLP 数据集可能含预提取的特征向量如 TF-IDF，不适合 BERT tokenizer)
-                if algorithm.startswith('transformer'):
-                    from app.executor.trainers.transformers_nlp_trainer import TransformersNLPTrainer
-                    trainer_cls = TransformersNLPTrainer
-                # mlp 算法固定用 PyTorch (UI 标注为 "PyTorch MLP")
-                elif algorithm == 'mlp':
-                    from app.executor.trainers.pytorch_trainer import PyTorchTrainer
-                    trainer_cls = PyTorchTrainer
-                # 视觉数据 → PyTorch 深度学习
-                elif dataset_category == 'vision':
-                    from app.executor.trainers.pytorch_trainer import PyTorchTrainer
-                    trainer_cls = PyTorchTrainer
-                elif 'pytorch' in framework or 'torch' in framework:
-                    from app.executor.trainers.pytorch_trainer import PyTorchTrainer
-                    trainer_cls = PyTorchTrainer
-                elif 'tensorflow' in framework or 'keras' in framework or 'tf' in framework:
-                    from app.executor.trainers.keras_trainer import KerasTrainer
-                    trainer_cls = KerasTrainer
-                else:
-                    from app.executor.trainers.sklearn_trainer import SklearnTrainer
-                    trainer_cls = SklearnTrainer
+                trainer_cls = self._resolve_trainer_class(job, hyperparams)
 
                 # 在工作线程中创建 trainer (对象绑定到此线程的 session)
                 trainer = trainer_cls(job, dataset, hyperparams)
@@ -301,13 +315,18 @@ class TrainingExecutor:
                 trainer.run()
             except Exception as e:
                 logger.error(f'训练任务 {job_id} 异常退出: {e}', exc_info=True)
-                # 确保任务状态被标记为失败
+                # 确保任务 + 关联模型被标记为失败
                 try:
                     job = db.session.get(TrainingJob, job_id)
                     if job and job.status not in ('completed', 'failed', 'cancelled'):
                         job.status = 'failed'
                         job.error_message = str(e)
                         job.append_log(f'[严重错误] 训练线程异常: {e}')
+                        # 同步标记关联的 ModelRecord 为失败 (避免孤立 draft 记录)
+                        if job.model_id:
+                            model = db.session.get(ModelRecord, job.model_id)
+                            if model and model.status == 'draft':
+                                model.status = 'failed'
                         db.session.commit()
                 except Exception as db_err:
                     logger.error(f'无法更新任务状态: {db_err}')

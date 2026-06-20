@@ -27,6 +27,15 @@ from app.models.model_record import ModelRecord
 from app.models.user import User
 
 
+def _get_tuning_config(key: str, default):
+    """安全获取超参数调优配置 (后台线程内无 Flask app context 时返回默认值)"""
+    try:
+        from flask import current_app
+        return current_app.config.get(key, default)
+    except RuntimeError:
+        return default
+
+
 # ===================================================================
 # 实时进度追踪器 (v5 新增) — 线程安全的调优进度状态管理
 # ===================================================================
@@ -163,7 +172,7 @@ class TuningProgressTracker:
             s = self._sessions.get(tuning_id)
             if s and s['status'] in ('completed', 'failed'):
                 age = time.time() - s['started_at']
-                if age > 3600:  # 1小时后清理
+                if age > _get_tuning_config('TUNING_SESSION_CLEANUP_TTL', 3600):  # 1小时后清理
                     del self._sessions[tuning_id]
 
 
@@ -391,22 +400,25 @@ def _validate_min_samples(n_samples: int, cv: int) -> None:
         )
 
 
-def _detect_and_remove_inf(y: np.ndarray) -> tuple:
-    """检测并移除inf值, 返回 (cleaned_y, inf_count)"""
-    if isinstance(y, np.ndarray):
-        inf_mask = ~np.isfinite(y)
-    else:
-        inf_mask = ~np.isfinite(y.values if hasattr(y, 'values') else np.array(y))
+def _detect_and_remove_inf(y) -> tuple:
+    """检测并移除inf值, 返回 (cleaned_y, inf_count)
+
+    同时支持 numpy array 和 pandas Series.
+    """
+    # 统一转为 numpy array 处理 (np.isfinite 原生支持两者)
+    y_arr = np.asarray(y, dtype=np.float64)
+    inf_mask = ~np.isfinite(y_arr)
     n_inf = inf_mask.sum()
     if n_inf > 0:
         logger.warning(f'目标列包含 {n_inf} 个 inf/nan 值, 已移除对应行')
-        if isinstance(y, np.ndarray):
-            return y[~inf_mask], n_inf
-        elif hasattr(y, 'values'):
-            return y[~inf_mask], n_inf
-        else:
-            return y, n_inf
-    return y, 0
+        # 对原始数据和 numpy 数组同步过滤
+        if hasattr(y, 'iloc'):
+            return y.loc[~inf_mask], n_inf
+        return y_arr[~inf_mask], n_inf
+    # 返回原始类型以保持一致性
+    if hasattr(y, 'iloc'):
+        return y, 0
+    return y_arr, 0
 
 
 # ===================================================================
@@ -593,10 +605,14 @@ def _prepare_data_robust(df, target_column, task_type):
 # 模型工厂 — 根据 task_type + algorithm 创建模型 (v4: +聚类)
 # ===================================================================
 
-def _create_model(algorithm: str, task_type: str, is_mlp: bool = False):
+def _create_model(algorithm: str, task_type: str, is_mlp: bool = False,
+                  random_state: int = None):
     """根据算法名和任务类型创建 sklearn 模型
 
     支持: classification / regression / clustering
+
+    Args:
+        random_state: 随机种子 (None=真随机, int=可复现)
     """
     from app.executor.trainers.sklearn_trainer import (
         _CLASSIFIERS, _REGRESSORS, _CLUSTERERS, _import_model
@@ -605,16 +621,14 @@ def _create_model(algorithm: str, task_type: str, is_mlp: bool = False):
     # MLP 特殊处理
     if is_mlp:
         from sklearn.neural_network import MLPClassifier, MLPRegressor
+        kwargs = dict(activation='relu', solver='adam', early_stopping=False,
+                      max_iter=500)
+        if random_state is not None:
+            kwargs['random_state'] = random_state
         if task_type == 'classification':
-            return MLPClassifier(
-                random_state=42, activation='relu', solver='adam',
-                early_stopping=False, max_iter=500,
-            )
+            return MLPClassifier(**kwargs)
         else:
-            return MLPRegressor(
-                random_state=42, activation='relu', solver='adam',
-                early_stopping=False, max_iter=500,
-            )
+            return MLPRegressor(**kwargs)
 
     # 聚类
     if task_type == 'clustering':
@@ -626,7 +640,7 @@ def _create_model(algorithm: str, task_type: str, is_mlp: bool = False):
             )
         model_cls = _import_model(*model_info)
         try:
-            return model_cls(random_state=42)
+            return model_cls(random_state=random_state) if random_state is not None else model_cls()
         except TypeError:
             return model_cls()
 
@@ -635,7 +649,6 @@ def _create_model(algorithm: str, task_type: str, is_mlp: bool = False):
     model_info = model_map.get(algorithm)
 
     if not model_info:
-        # 检查是否在对侧映射中
         alt_map = _REGRESSORS if task_type == 'classification' else _CLASSIFIERS
         alt_info = alt_map.get(algorithm)
         if alt_info:
@@ -644,7 +657,6 @@ def _create_model(algorithm: str, task_type: str, is_mlp: bool = False):
                 f'算法 "{algorithm}" 不支持 {task_type} 任务。'
                 f'请使用 {alt_task} 任务类型, 或切换到对应算法。'
             )
-        # 检查是否是聚类算法
         if algorithm in _CLUSTERING_ALGOS:
             raise ValueError(
                 f'算法 "{algorithm}" 是聚类算法, 不支持 {task_type} 任务。'
@@ -659,7 +671,7 @@ def _create_model(algorithm: str, task_type: str, is_mlp: bool = False):
 
     model_cls = _import_model(*model_info)
     try:
-        return model_cls(random_state=42)
+        return model_cls(random_state=random_state) if random_state is not None else model_cls()
     except TypeError:
         return model_cls()
 
@@ -702,6 +714,28 @@ def _clustering_scorer(estimator, X, y_true=None):
         return float(silhouette_score(X, labels))
     except Exception:
         return -1.0
+
+
+# ===================================================================
+# error_score 安全值 (v9 — 防止回归 scoring 下非法组合得高分)
+# ===================================================================
+
+def _error_score_for_scoring(scoring) -> float:
+    """根据 scoring 方向返回安全的 error_score
+
+    防止 error_score=0 在负向指标 (neg_mean_squared_error 等) 中
+    被错误地当作"最佳分数"，导致非法参数组合排名第一。
+
+    - 正向指标 (accuracy, f1, precision, recall, silhouette, r2): 0 = 最低/中性
+    - 负向指标 (neg_*): float('-inf') — 确保失败组合不排到前面
+    """
+    if isinstance(scoring, str):
+        if scoring.startswith('neg_'):
+            return float('-inf')
+        # r2 可能是负数 (比随机还差), 但 0 通常已是最差合理值
+        return 0.0
+    # callable scorer (如 _clustering_scorer): 返回范围 [-1, 1], 0 中性
+    return 0.0
 
 
 # ===================================================================
@@ -774,7 +808,8 @@ def _make_progress_scorer(actual_scoring, total_steps: int, progress_callback: C
 
 def _manual_clustering_search(base_model, param_grid, X,
                               progress_callback: Callable = None,
-                              max_combos: int = None) -> dict:
+                              max_combos: int = None,
+                              random_state: int = None) -> dict:
     """手动遍历参数组合 — 聚类在全量数据上fit+evaluate, 无需CV
 
     为什么不用 GridSearchCV?
@@ -803,9 +838,9 @@ def _manual_clustering_search(base_model, param_grid, X,
 
     # AutoML 快速扫描: 采样限制组合数
     if max_combos and n_combinations > max_combos:
-        rng_samp = np.random.RandomState(42)
-        param_list = [param_list[i] for i in
-                      rng_samp.choice(n_combinations, max_combos, replace=False)]
+        rng = np.random.RandomState(random_state) if random_state is not None else np.random
+        indices = rng.choice(n_combinations, max_combos, replace=False)
+        param_list = [param_list[i] for i in indices]
         n_combinations = max_combos
         logger.info(
             f'聚类参数采样: {len(list(ParameterGrid(param_grid)))} → {max_combos} 组合'
@@ -824,10 +859,10 @@ def _manual_clustering_search(base_model, param_grid, X,
     # ── 性能优化: silhouette_score 是 O(n²), 大数据集时对子样本评分 ──
     # fit 用全量数据 (KMeans 是 O(n·k·d), 很快)
     # score 用子样本 (避免 O(n²) 爆炸)
-    MAX_SCORE_SAMPLES = 3000
+    MAX_SCORE_SAMPLES = _get_tuning_config('CLUSTERING_MAX_SCORE_SAMPLES', 3000)
     n_samples = len(X)
     if n_samples > MAX_SCORE_SAMPLES:
-        rng = np.random.RandomState(42)
+        rng = np.random.RandomState(random_state) if random_state is not None else np.random
         score_indices = rng.choice(n_samples, MAX_SCORE_SAMPLES, replace=False)
         X_score = X[score_indices]
         logger.info(
@@ -846,7 +881,7 @@ def _manual_clustering_search(base_model, param_grid, X,
             # 创建新模型 — 在构造时设置参数 (避免 KMeans.fit() 不接受额外 kwargs)
             model_cls = type(base_model)
             try:
-                model = model_cls(**current_params, random_state=42)
+                model = model_cls(**current_params, random_state=random_state) if random_state is not None else model_cls(**current_params)
             except TypeError:
                 model = model_cls(**current_params)
 
@@ -933,7 +968,8 @@ def _manual_clustering_search(base_model, param_grid, X,
 # ===================================================================
 
 def _safe_grid_fit(base_model, param_grid, X, y, scoring, cv, n_jobs, verbose,
-                   is_clustering=False, progress_callback: Callable = None):
+                   is_clustering=False, progress_callback: Callable = None,
+                   random_state: int = None):
     """安全执行 GridSearchCV.fit() — 内置多重回退策略 + 进度回调
 
     Args:
@@ -956,6 +992,7 @@ def _safe_grid_fit(base_model, param_grid, X, y, scoring, cv, n_jobs, verbose,
         result = _manual_clustering_search(
             base_model, param_grid, X,
             progress_callback=progress_callback,
+            random_state=random_state,
         )
         # 返回 (result_dict, effective_cv=1) — 聚类无CV
         return result, 1
@@ -965,6 +1002,27 @@ def _safe_grid_fit(base_model, param_grid, X, y, scoring, cv, n_jobs, verbose,
     if n_samples < effective_cv * 2:
         effective_cv = max(2, n_samples // 2)
     effective_cv = max(2, effective_cv)
+
+    # ── 防御: 检查每个类别是否有足够样本支持分层CV ──
+    # 如果某类别样本数 < effective_cv，StratifiedKFold 会报错:
+    # "n_splits=N cannot be greater than the number of members in each class."
+    if not is_clustering and y is not None:
+        try:
+            from collections import Counter
+            y_flat = np.asarray(y).ravel()
+            class_counts = Counter(y_flat)
+            min_class_count = min(class_counts.values()) if class_counts else n_samples
+            if effective_cv > min_class_count:
+                old_cv = effective_cv
+                effective_cv = max(2, min_class_count)
+                logger.warning(
+                    f'CV 折数自动调整: {old_cv} → {effective_cv} '
+                    f'(最小类别样本数={min_class_count}, 原CV折数超过此数会导致分层采样失败)'
+                )
+                if effective_cv < 2:
+                    effective_cv = 2
+        except Exception:
+            pass
 
     # 计算总评估步数 (= 参数组合数 * CV折数)
     param_list = list(ParameterGrid(param_grid))
@@ -1013,13 +1071,17 @@ def _safe_grid_fit(base_model, param_grid, X, y, scoring, cv, n_jobs, verbose,
         effective_n_jobs = n_jobs
         scoring_for_grid = actual_scoring
 
+    # 根据 scoring 方向确定合法的 error_score:
+    #   - 正向指标 (accuracy, f1, silhouette): 0 = 最低分
+    #   - 负向指标 (neg_*): float('-inf') 避免失败组合得最高分
+    error_score = _error_score_for_scoring(scoring)
     grid = GridSearchCV(
         base_model, param_grid,
         scoring=scoring_for_grid,
         cv=effective_cv,
         n_jobs=effective_n_jobs,
         verbose=verbose,
-        error_score='raise',
+        error_score=error_score,
     )
 
     grid.fit(X, fit_y)
@@ -1104,11 +1166,9 @@ class HyperparameterTuningService:
 
     @staticmethod
     def get_search_space(algorithm: str, framework: str = 'sklearn') -> dict:
-        """获取指定算法的搜索空间"""
+        """获取指定算法的搜索空间 (框架感知: sklearn MLP vs PyTorch MLP)"""
         if algorithm == 'mlp':
-            return MLP_SEARCH_SPACE
-        if framework == 'pytorch':
-            return PYTORCH_SEARCH_SPACE
+            return PYTORCH_SEARCH_SPACE if framework == 'pytorch' else MLP_SEARCH_SPACE
         return SEARCH_SPACES.get(algorithm, {})
 
     # ------------------------------------------------------------------
@@ -1120,7 +1180,8 @@ class HyperparameterTuningService:
                         target_column: str, scoring: str = 'accuracy',
                         cv: int = 5, n_jobs: int = 2,
                         verbose: int = 1,
-                        progress_callback: Callable = None) -> Dict:
+                        progress_callback: Callable = None,
+                        random_state: int = None) -> Dict:
         """运行 GridSearchCV 超参数搜索
 
         策略: 最多尝试 3 次 (分类 → 回归 → 聚类),
@@ -1223,7 +1284,8 @@ class HyperparameterTuningService:
                 _validate_min_samples(n_samples, cv)
 
                 # ---- 创建模型 ----
-                base_model = _create_model(try_algo, final_task, is_mlp)
+                base_model = _create_model(try_algo, final_task, is_mlp,
+                                           random_state=random_state)
 
                 # ---- 安全拟合 ----
                 start_time = time.time()
@@ -1232,6 +1294,7 @@ class HyperparameterTuningService:
                     final_scoring, cv, n_jobs, verbose,
                     is_clustering=final_is_clustering,
                     progress_callback=progress_callback,
+                    random_state=random_state,
                 )
                 search_time = round(time.time() - start_time, 2)
 
@@ -1290,7 +1353,8 @@ class HyperparameterTuningService:
                           target_column: str, n_iter: int = 30,
                           scoring: str = 'accuracy', cv: int = 5,
                           n_jobs: int = 2,
-                          progress_callback: Callable = None) -> Dict:
+                          progress_callback: Callable = None,
+                          random_state: int = None) -> Dict:
         """运行 RandomizedSearchCV — 与 GridSearchCV 相同的多层防御策略"""
         from sklearn.model_selection import RandomizedSearchCV
         from scipy.stats import randint, loguniform
@@ -1387,6 +1451,25 @@ class HyperparameterTuningService:
                 if n_samples < effective_cv * 2:
                     effective_cv = max(2, n_samples // 2)
 
+                # ── 防御: 检查每个类别是否有足够样本支持分层CV ──
+                if not final_is_clustering and y is not None:
+                    try:
+                        from collections import Counter
+                        y_flat = np.asarray(y).ravel()
+                        class_counts = Counter(y_flat)
+                        min_class_count = min(class_counts.values()) if class_counts else n_samples
+                        if effective_cv > min_class_count:
+                            old_cv = effective_cv
+                            effective_cv = max(2, min_class_count)
+                            logger.warning(
+                                f'RandomSearch CV 折数自动调整: {old_cv} → {effective_cv} '
+                                f'(最小类别样本数={min_class_count})'
+                            )
+                            if effective_cv < 2:
+                                effective_cv = 2
+                    except Exception:
+                        pass
+
                 # 最终防御: 验证 scoring 与 y type 一致
                 from sklearn.utils.multiclass import type_of_target
                 if not final_is_clustering and y is not None:
@@ -1400,7 +1483,8 @@ class HyperparameterTuningService:
                             'REFUSED: regression scorer with classification target'
                         )
 
-                base_model = _create_model(try_algo, final_task, is_mlp)
+                base_model = _create_model(try_algo, final_task, is_mlp,
+                                           random_state=random_state)
 
                 start_time = time.time()
 
@@ -1413,6 +1497,7 @@ class HyperparameterTuningService:
                         base_model, param_grid, X,
                         progress_callback=progress_callback,
                         max_combos=n_iter,
+                        random_state=random_state,
                     )
                     search_time = round(time.time() - start_time, 2)
                     result = _build_result(
@@ -1446,8 +1531,8 @@ class HyperparameterTuningService:
                         scoring=scoring_for_rnd,
                         cv=effective_cv,
                         n_jobs=effective_n_jobs_rnd,
-                        random_state=42,
-                        error_score=0,   # AutoML模式: 跳过非法参数组合, 不崩溃
+                        random_state=random_state,
+                        error_score=_error_score_for_scoring(final_scoring),
                     )
                     search.fit(X, y)
                     search_time = round(time.time() - start_time, 2)
@@ -1456,9 +1541,14 @@ class HyperparameterTuningService:
                         search, search_time, final_scoring, final_task,
                         effective_cv, is_mlp
                     )
+                best_log_score = (
+                    result.get('best_score', 0)
+                    if final_is_clustering
+                    else search.best_score_
+                )
                 logger.info(
                     f'RandomizedSearchCV 完成 (attempt {attempt_idx+1}): '
-                    f'{try_algo}/{final_task}, best={search.best_score_:.4f}'
+                    f'{try_algo}/{final_task}, best={best_log_score:.4f}'
                 )
                 return result
 
@@ -1496,15 +1586,162 @@ class HyperparameterTuningService:
                               task_type: str, target_column: str,
                               tuning_method: str = 'grid',
                               n_iter: int = 30, cv: int = 5,
-                              epochs: int = 0) -> Tuple[Optional[TrainingJob], Optional[Dict], Optional[str]]:
-        """运行超参数搜索并创建使用最佳参数的训练任务"""
+                              epochs: int = 0,
+                              random_state: int = None) -> Tuple[Optional[TrainingJob], Optional[Dict], Optional[str]]:
+        """运行超参数搜索并创建使用最佳参数的训练任务
+
+        当 algorithm='auto' 时, 自动遍历该任务类型的所有适用算法,
+        对每种算法执行快速 RandomSearch, 选出全局最优。
+        """
+        from app.services.training_service import TrainingService
+
+        # ── AutoML 模式: 遍历所有适用算法 ──
+        if algorithm == 'auto':
+            algo_list = AUTO_ALGORITHMS.get(task_type, [])
+            if not algo_list:
+                return None, None, f'AutoML 不支持任务类型 "{task_type}"。可选: classification, regression, clustering'
+
+            best_overall_score = None
+            best_overall_algo = None
+            best_overall_params = None
+            best_overall_framework = 'sklearn'
+            best_overall_task_type = task_type
+            algo_results = []
+
+            QUICK_N_ITER = min(n_iter, _get_tuning_config('AUTO_ML_QUICK_N_ITER', 15))
+
+            for algo_info in algo_list:
+                algo_name = algo_info['algo']
+                algo_label = algo_info['label']
+                algo_fw = algo_info['framework']
+
+                logger.info(f'AutoML: 正在搜索 {algo_label} ({algo_name})...')
+                try:
+                    result = HyperparameterTuningService.run_random_search(
+                        dataset=dataset,
+                        algorithm=algo_name,
+                        task_type=task_type,
+                        target_column=target_column,
+                        n_iter=QUICK_N_ITER,
+                        scoring='accuracy' if task_type == 'classification' else
+                                'neg_mean_squared_error' if task_type == 'regression' else
+                                'silhouette',
+                        cv=cv,
+                        n_jobs=2,
+                        random_state=random_state,
+                    )
+                except Exception as e:
+                    logger.warning(f'AutoML: {algo_label} ({algo_name}) 搜索异常: {e}', exc_info=True)
+                    continue
+
+                if not result.get('success'):
+                    logger.warning(
+                        f'AutoML: {algo_label} ({algo_name}) 搜索返回失败: '
+                        f'{result.get("error", "未知错误")}'
+                    )
+
+                if result.get('success'):
+                    score = result['best_score']
+                    algo_results.append({
+                        'algo': algo_name, 'label': algo_label,
+                        'framework': algo_fw, 'best_score': score,
+                        'best_params': result['best_params'],
+                    })
+                    if best_overall_score is None or score > best_overall_score:
+                        best_overall_score = score
+                        best_overall_algo = algo_name
+                        best_overall_params = result['best_params']
+                        best_overall_framework = algo_fw
+                        best_overall_task_type = result.get('task_type', task_type)
+
+            if best_overall_algo is None:
+                return None, None, 'AutoML: 所有算法均搜索失败，无法找到有效模型。'
+
+            # 排序算法排名
+            algo_results.sort(key=lambda x: x['best_score'], reverse=True)
+
+            # 使用最优算法创建训练任务
+            algorithm = best_overall_algo
+            best_params = best_overall_params
+            effective_task_type = best_overall_task_type
+            framework = best_overall_framework
+            is_mlp = (algorithm == 'mlp')
+
+            # 构建 tuning_result
+            tuning_result = {
+                'success': True,
+                'best_params': best_params,
+                'best_score': best_overall_score,
+                'task_type': effective_task_type,
+                'auto_mode': True,
+                'algo_results': algo_results,
+                'total_algos_tried': len(algo_results),
+                'cv_results': algo_results[:5],
+            }
+
+            actual_epochs = epochs if epochs > 0 else (20 if is_mlp else 1)
+
+            hyperparams = {
+                'task_type': effective_task_type,
+                'algorithm': algorithm,
+                'target_column': target_column,
+                'test_size': 0.2,
+                'algorithm_params': best_params,
+                'tuned': True,
+                'tuning_method': 'auto',
+                'best_cv_score': best_overall_score,
+                'tuning_cv_folds': cv,
+            }
+            if is_mlp:
+                for k in ('hidden_layers', 'learning_rate', 'batch_size', 'weight_decay', 'val_size'):
+                    if k in best_params:
+                        hyperparams[k] = best_params[k]
+
+            job_name = f'AutoML-{algorithm}-Tuned-{localnow().strftime("%H%M")}'
+
+            job, error = TrainingService.create_job(
+                user=user,
+                name=job_name,
+                dataset_id=dataset.id,
+                description=f'AutoML 自动调优训练 — 从 {len(algo_results)} 种算法中选出最优: '
+                           f'{algorithm} (CV分数: {best_overall_score:.4f})',
+                framework=framework,
+                total_epochs=actual_epochs,
+                hyperparameters=hyperparams,
+                ml_task_type=effective_task_type,
+                algorithm=algorithm,
+                target_column=target_column,
+            )
+
+            if error:
+                return None, tuning_result, error
+
+            if job.model:
+                hp = job.model.hyperparameters_dict
+                hp['tuning_result'] = {
+                    'best_params': best_params,
+                    'best_cv_score': best_overall_score,
+                    'cv_results_top5': algo_results[:5],
+                    'auto_mode': True,
+                    'all_algo_results': algo_results,
+                }
+                job.model.set_hyperparameters(hp)
+                db.session.commit()
+
+            logger.info(f'AutoML 调优完成: 最优算法={algorithm}, '
+                        f'分数={best_overall_score:.4f}, 共尝试{len(algo_results)}种算法')
+            return job, tuning_result, None
+
+        # ── 单算法调优 (原有逻辑) ──
         if tuning_method == 'grid':
             tuning_result = HyperparameterTuningService.run_grid_search(
-                dataset, algorithm, task_type, target_column, cv=cv
+                dataset, algorithm, task_type, target_column, cv=cv,
+                random_state=random_state,
             )
         else:
             tuning_result = HyperparameterTuningService.run_random_search(
-                dataset, algorithm, task_type, target_column, n_iter=n_iter, cv=cv
+                dataset, algorithm, task_type, target_column, n_iter=n_iter, cv=cv,
+                random_state=random_state,
             )
 
         if not tuning_result.get('success'):
@@ -1512,8 +1749,6 @@ class HyperparameterTuningService:
 
         best_params = tuning_result['best_params']
         effective_task_type = tuning_result.get('task_type', task_type)
-
-        from app.services.training_service import TrainingService
 
         is_mlp = (algorithm == 'mlp')
         framework = 'pytorch' if is_mlp else 'sklearn'
@@ -1575,7 +1810,8 @@ class HyperparameterTuningService:
     @staticmethod
     def run_grid_search_async(dataset: Dataset, algorithm: str, task_type: str,
                               target_column: str, scoring: str = 'accuracy',
-                              cv: int = 5, n_jobs: int = 2) -> str:
+                              cv: int = 5, n_jobs: int = 2,
+                              random_state: int = None) -> str:
         """在后台线程启动 GridSearchCV, 立即返回 tuning_id
 
         Returns:
@@ -1615,6 +1851,7 @@ class HyperparameterTuningService:
                     dataset, algorithm, task_type, target_column,
                     scoring=scoring, cv=cv, n_jobs=n_jobs,
                     progress_callback=progress_cb,
+                    random_state=random_state,
                 )
                 if result.get('success'):
                     tracker.add_log(tuning_id,
@@ -1637,7 +1874,8 @@ class HyperparameterTuningService:
     def run_random_search_async(dataset: Dataset, algorithm: str, task_type: str,
                                 target_column: str, n_iter: int = 30,
                                 scoring: str = 'accuracy', cv: int = 5,
-                                n_jobs: int = 2) -> str:
+                                n_jobs: int = 2,
+                                random_state: int = None) -> str:
         """在后台线程启动 RandomizedSearchCV, 立即返回 tuning_id"""
         tuning_id = str(uuid.uuid4())[:8]
         tracker = get_tuning_tracker()
@@ -1662,9 +1900,14 @@ class HyperparameterTuningService:
 
         def _bg_run():
             try:
+                def progress_cb(step, total, params, score):
+                    tracker.update(tuning_id, step, params, score, total=total)
+
                 result = HyperparameterTuningService.run_random_search(
                     dataset, algorithm, task_type, target_column,
                     n_iter=n_iter, scoring=scoring, cv=cv, n_jobs=n_jobs,
+                    random_state=random_state,
+                    progress_callback=progress_cb,
                 )
                 if result.get('success'):
                     tracker.add_log(tuning_id,
@@ -1687,7 +1930,8 @@ class HyperparameterTuningService:
     @staticmethod
     def run_auto_tuning_async(dataset: Dataset, task_type: str,
                               target_column: str = None,
-                              cv: int = 3, n_jobs: int = 2) -> str:
+                              cv: int = 3, n_jobs: int = 2,
+                              random_state: int = None) -> str:
         """AutoML 模式: 自动遍历任务类型的所有适用算法, 找到最优组合
 
         对每种算法执行快速 RandomSearch, 实时展示:
@@ -1712,7 +1956,7 @@ class HyperparameterTuningService:
             return tuning_id
 
         # 计算总步数: 每种算法的快速搜索迭代数
-        QUICK_N_ITER = 15   # 每算法采样15组参数
+        QUICK_N_ITER = _get_tuning_config('AUTO_ML_QUICK_N_ITER', 15)
         total_steps = len(algo_list) * QUICK_N_ITER
         tracker.init(tuning_id, total_steps, 'auto', task_type, 'auto')
         tracker.add_log(tuning_id,
@@ -1777,6 +2021,7 @@ class HyperparameterTuningService:
                                 cv=cv,
                                 n_jobs=n_jobs,
                                 progress_callback=algo_progress_cb,
+                                random_state=random_state,
                             )
                         else:
                             result = {'success': False, 'error': '无搜索空间'}
@@ -1804,11 +2049,26 @@ class HyperparameterTuningService:
                             overall_best_params = params
                             overall_best_framework = framework
                     else:
-                        tracker.add_log(tuning_id,
-                                       f'  ✗ {label}: {result.get("error", "失败")}')
+                        err_detail = f'{label}: {result.get("error", "未知错误")}'
+                        tracker.add_log(tuning_id, f'  ✗ {err_detail}')
+                        # 收集错误详情，供最终汇总使用
+                        with tracker._lock:
+                            if tuning_id in tracker._sessions:
+                                errs = tracker._sessions[tuning_id].setdefault('_algo_errors', [])
+                                errs.append(err_detail)
 
                 # ── 全部算法搜索完毕, 汇总结果 ──
                 algo_results.sort(key=lambda x: x['best_score'], reverse=True)
+
+                if overall_best_algo is None:
+                    # 所有算法均失败 — 报告详细错误
+                    error_details = tracker._sessions[tuning_id].get('_algo_errors', [])
+                    error_msg = '所有 ' + str(len(algo_list)) + ' 种算法均搜索失败。'
+                    if error_details:
+                        error_msg += ' 错误详情: ' + '; '.join(error_details[:3])
+                    tracker.add_log(tuning_id, f'✗ {error_msg}')
+                    tracker.fail(tuning_id, error_msg)
+                    return
 
                 final_result = {
                     'success': True,

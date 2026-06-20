@@ -42,6 +42,9 @@ class User(UserMixin, db.Model):
     # API 密钥
     api_key = db.Column(db.String(128), unique=True, nullable=True)
 
+    # JWT Refresh Token 版本 — 改密码时递增, 使所有已签发 Refresh Token 失效
+    token_version = db.Column(db.Integer, default=1, nullable=False)
+
     # 时间戳
     created_at = db.Column(db.DateTime, default=lambda: localnow(), nullable=False)
     updated_at = db.Column(

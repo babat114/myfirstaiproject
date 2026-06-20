@@ -83,15 +83,16 @@ class Dataset(db.Model):
     status = db.Column(
         db.Enum('uploading', 'ready', 'processing', 'error', name='dataset_status'),
         default='uploading',
-        nullable=False
+        nullable=False,
+        index=True
     )
-    is_public = db.Column(db.Boolean, default=False, nullable=False)
+    is_public = db.Column(db.Boolean, default=False, nullable=False, index=True)
 
     # 唯一标识符 (用于 API)
     uuid = db.Column(db.String(36), unique=True, nullable=False, default=lambda: str(uuid.uuid4()))
 
     # 外键
-    owner_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    owner_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
 
     # 时间戳
     created_at = db.Column(db.DateTime, default=lambda: localnow(), nullable=False)

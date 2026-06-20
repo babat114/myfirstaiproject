@@ -539,3 +539,42 @@ class PyTorchTrainer(BaseTrainer):
             pickle.dump(config, f)
 
         self.callback.on_log(f'模型已保存到: {path}.pt + _config.pkl')
+
+    # ============ 检查点 ============
+
+    def save_checkpoint(self):
+        """保存 PyTorch 训练快照: 模型权重 + 优化器 + 调度器 + epoch + 早停状态"""
+        if self._model is None:
+            return
+        torch, _, _, _, _ = _ensure_torch()
+        os.makedirs(self.output_dir, exist_ok=True)
+
+        ckpt = {
+            'model_state': self._model.state_dict(),
+            'optimizer_state': self._optimizer.state_dict(),
+            'scheduler_state': self._lr_scheduler.state_dict(),
+            'epoch': self._current_epoch + 1,
+            'best_val_loss': self._best_val_loss,
+            'patience_counter': self._patience_counter,
+            'best_model_state': self._best_model_state,
+            'input_dim': self._input_dim,
+            'output_dim': self._output_dim,
+            'hidden_layers': self.hidden_layers,
+            'dropout': self.dropout,
+            'task_type': self.task_type,
+        }
+        ckpt_path = os.path.join(self.output_dir, 'checkpoint.pt')
+        torch.save(ckpt, ckpt_path)
+
+    @staticmethod
+    def load_checkpoint(output_dir: str) -> dict:
+        ckpt_path = os.path.join(output_dir, 'checkpoint.pt')
+        if not os.path.exists(ckpt_path):
+            return {}
+        torch, _, _, _, _ = _ensure_torch()
+        ckpt = torch.load(ckpt_path, map_location='cpu', weights_only=True)
+        return {'epoch': ckpt.get('epoch', 0)}
+
+    @staticmethod
+    def has_checkpoint(output_dir: str) -> bool:
+        return os.path.exists(os.path.join(output_dir, 'checkpoint.pt'))

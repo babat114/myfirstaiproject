@@ -14,6 +14,8 @@ from app.models.dataset import Dataset
 from app.models.model_record import ModelRecord
 from app.models.user import User
 from app.utils.cache import dashboard_cache
+from app.utils.helpers import sanitize_service_error
+from sqlalchemy.orm import joinedload
 
 
 class TrainingService:
@@ -113,8 +115,7 @@ class TrainingService:
 
         except Exception as e:
             db.session.rollback()
-            logger.error(f"创建训练任务失败: {e}")
-            return None, str(e)
+            return None, sanitize_service_error(e, '创建训练任务失败')
 
     @staticmethod
     def start_job(job: TrainingJob) -> Tuple[bool, Optional[str]]:
@@ -213,11 +214,33 @@ class TrainingService:
         return True, None
 
     @staticmethod
-    def retrain_job(job: TrainingJob) -> Tuple[bool, Optional[str]]:
-        """重新训练 — 重置任务状态为 queued 并提交到执行引擎
+    def _reset_job_to_queued(job: TrainingJob):
+        """重置训练任务为 queued 状态 (清空进度/日志/指标) — 减轻 retrain 重复代码"""
+        job.status = 'queued'
+        job.progress_percent = 0.0
+        job.current_epoch = 0
+        job.current_step = 0
+        job.total_steps = 0
+        job.log_text = None
+        job.metrics_history_json = None
+        job.final_metrics_json = None
+        job.error_message = None
+        job.started_at = None
+        job.completed_at = None
+        job.created_at = localnow()  # 更新创建时间为重训练时间
+        if job.model:
+            job.model.created_at = localnow()  # 同步更新关联模型的创建时间
+
+    @staticmethod
+    def retrain_job(job: TrainingJob, new_params: dict = None) -> Tuple[bool, Optional[str]]:
+        """重新训练 — 可选使用新参数, 重置任务状态为 queued 并提交到执行引擎
 
         适用状态: failed, cancelled, completed, paused
         操作: 清空进度/日志/指标, 重置状态为 queued, 清空错误信息
+
+        Args:
+            job: 原 TrainingJob
+            new_params: 新超参数字典 (None = 使用原参数重训)
         """
         if job.status in ('running', 'queued'):
             return False, f'任务已在 {job.status} 状态，无需重新训练。'
@@ -225,8 +248,26 @@ class TrainingService:
         try:
             from app.executor.engine import get_executor
 
-            # 同步 model_type → task_type + algorithm: 确保重训练使用正确的任务类型和算法
-            # (修复历史遗留: 旧聚类模型的 hyperparams 可能为 classification + decision_tree)
+            # ── 新参数模式: 更新模型超参数 ──
+            if new_params and job.model:
+                from app.utils.algorithm_helpers import fix_kmeans_algorithm
+                try:
+                    existing = job.model.hyperparameters_dict
+                    existing.update(new_params)
+                    curr_algo = existing.get('algorithm', '')
+                    fix_kmeans_algorithm(curr_algo, existing, job.model)
+                    job.model.hyperparameters_json = json.dumps(existing, ensure_ascii=False)
+                    if 'ml_task_type' in new_params:
+                        job.model.model_type = new_params['ml_task_type']
+                    # 应用新参数到训练任务字段
+                    if 'epochs' in new_params or 'total_epochs' in new_params:
+                        job.total_epochs = new_params.get('total_epochs', new_params.get('epochs', 10))
+                    if 'framework' in new_params:
+                        job.framework = new_params['framework']
+                except Exception as e:
+                    logger.warning(f'更新模型超参数失败: {e}')
+
+            # ── 同步 model_type → task_type + algorithm (两种模式共用) ──
             if job.model:
                 try:
                     hp = job.model.hyperparameters_dict
@@ -234,7 +275,7 @@ class TrainingService:
                     updated = False
                     if model_type == 'clustering' and hp.get('task_type') != 'clustering':
                         hp['task_type'] = 'clustering'
-                        hp['algorithm'] = 'kmeans'  # 聚类默认算法
+                        hp['algorithm'] = 'kmeans'
                         updated = True
                     elif model_type == 'regression' and hp.get('task_type') != 'regression':
                         hp['task_type'] = 'regression'
@@ -245,113 +286,11 @@ class TrainingService:
                 except Exception:
                     pass
 
-            # 清理旧数据
-            job.status = 'queued'
-            job.progress_percent = 0.0
-            job.current_epoch = 0
-            job.total_epochs = job.total_epochs or 10
-            job.current_step = 0
-            job.total_steps = 0
-            job.log_text = None
-            job.metrics_history_json = None
-            job.final_metrics_json = None
-            job.error_message = None
-            job.started_at = None
-            job.completed_at = None
-            job.created_at = localnow()  # 更新创建时间为重训练时间
-            if job.model:
-                job.model.created_at = localnow()  # 同步更新关联模型的创建时间
-            job.append_log(f'[重训] 任务重置，准备重新训练...')
-            db.session.commit()
-
-            # 提交到执行引擎
-            executor = get_executor()
-            success = executor.submit(job)
-            if not success:
-                return False, '重新训练提交失败，请稍后重试。'
-
-            logger.info(f"训练任务已重置并提交: {job.name} (id={job.id})")
-            return True, None
-        except Exception as e:
-            db.session.rollback()
-            return False, str(e)
-
-    @staticmethod
-    def retrain_job_with_params(job: TrainingJob,
-                                 new_params: dict) -> Tuple[bool, Optional[str]]:
-        """使用新参数重新训练 — 更新超参数后重置并启动
-
-        Args:
-            job: 原 TrainingJob
-            new_params: 新超参数字典, 可包含:
-                - learning_rate, batch_size, epochs, hidden_layers,
-                  dropout, test_size, weight_decay, algorithm,
-                  ml_task_type, target_column, framework
-
-        自动更新关联 ModelRecord 的 hyperparameters_json
-        """
-        if job.status in ('running', 'queued'):
-            return False, f'任务正在 {job.status} 状态，请先等待完成或取消后再重试。'
-
-        try:
-            from app.executor.engine import get_executor
-
-            # 更新关联模型的超参数
-            if job.model:
-                try:
-                    existing = job.model.hyperparameters_dict
-                    existing.update(new_params)
-                    # ── 纠错: KMeans参数 algorithm=lloyd/elkan 会覆盖 ML算法名 kmeans ──
-                    _KMEANS_ALGO_PARAMS = {'lloyd', 'elkan', 'auto', 'full'}
-                    curr_algo = existing.get('algorithm', '')
-                    if curr_algo.lower() in _KMEANS_ALGO_PARAMS:
-                        existing['algorithm'] = 'kmeans'
-                        logger.warning(
-                            f'检测到错误的algorithm值 "{curr_algo}" (KMeans参数), '
-                            f'已自动修正为 "kmeans"'
-                        )
-                    job.model.hyperparameters_json = json.dumps(
-                        existing, ensure_ascii=False
-                    )
-                    # 同步更新关键字段
-                    if 'ml_task_type' in new_params:
-                        job.model.model_type = new_params['ml_task_type']
-                    if 'algorithm' in new_params:
-                        pass  # algorithm 在 model 中没有独立字段
-                    # 同步 model_type → task_type + algorithm
-                    model_type = job.model.model_type
-                    if model_type == 'clustering' and existing.get('task_type') != 'clustering':
-                        existing['task_type'] = 'clustering'
-                        existing['algorithm'] = 'kmeans'
-                        job.model.hyperparameters_json = json.dumps(existing, ensure_ascii=False)
-                    elif model_type == 'regression' and existing.get('task_type') != 'regression':
-                        existing['task_type'] = 'regression'
-                        job.model.hyperparameters_json = json.dumps(existing, ensure_ascii=False)
-                except Exception as e:
-                    logger.warning(f'更新模型超参数失败: {e}')
-
-            # 应用新参数到训练任务
-            if 'epochs' in new_params or 'total_epochs' in new_params:
-                job.total_epochs = new_params.get('total_epochs', new_params.get('epochs', 10))
-            if 'framework' in new_params:
-                job.framework = new_params['framework']
-
-            # 清理并重置
-            job.status = 'queued'
-            job.progress_percent = 0.0
-            job.current_epoch = 0
-            job.current_step = 0
-            job.total_steps = 0
-            job.log_text = None
-            job.metrics_history_json = None
-            job.final_metrics_json = None
-            job.error_message = None
-            job.started_at = None
-            job.completed_at = None
-            job.created_at = localnow()  # 更新创建时间为重训练时间
-            if job.model:
-                job.model.created_at = localnow()  # 同步更新关联模型的创建时间
-            job.append_log(f'[重训] 使用新参数重置: {json.dumps(new_params, ensure_ascii=False)}')
+            # ── 清理并重置 (共用) ──
+            TrainingService._reset_job_to_queued(job)
+            log_msg = f'[重训] 使用新参数重置: {json.dumps(new_params, ensure_ascii=False)}' if new_params \
+                      else '[重训] 任务重置，准备重新训练...'
+            job.append_log(log_msg)
             db.session.commit()
 
             executor = get_executor()
@@ -359,11 +298,11 @@ class TrainingService:
             if not success:
                 return False, '重新训练提交失败，请稍后重试。'
 
-            logger.info(f"训练任务已使用新参数重置: {job.name}, 参数: {new_params}")
+            logger.info(f"训练任务已重置并提交: {job.name} (id={job.id}), 新参数: {bool(new_params)}")
             return True, None
         except Exception as e:
             db.session.rollback()
-            return False, str(e)
+            return False, sanitize_service_error(e, '重新训练失败')
 
     @staticmethod
     def get_job_status(job_id: int) -> dict | None:
@@ -390,8 +329,17 @@ class TrainingService:
 
     @staticmethod
     def get_job_by_uuid(job_uuid: str) -> Optional[TrainingJob]:
-        """根据 UUID 获取任务"""
-        return TrainingJob.query.filter_by(uuid=job_uuid).first()
+        """根据 UUID 获取任务 (预加载关联对象, 避免 N+1)"""
+        from sqlalchemy.orm import joinedload
+        return db.session.execute(
+            db.select(TrainingJob)
+            .filter_by(uuid=job_uuid)
+            .options(
+                joinedload(TrainingJob.owner),
+                joinedload(TrainingJob.dataset),
+                joinedload(TrainingJob.model)
+            )
+        ).scalar_one_or_none()
 
     @staticmethod
     def delete_job(job: TrainingJob) -> Tuple[bool, Optional[str]]:
@@ -405,7 +353,7 @@ class TrainingService:
             return True, None
         except Exception as e:
             db.session.rollback()
-            return False, str(e)
+            return False, sanitize_service_error(e, '删除训练任务失败')
 
     @staticmethod
     def list_jobs(page: int = 1, per_page: int = 15,
@@ -418,7 +366,10 @@ class TrainingService:
         Returns:
             分页结果字典
         """
-        query = TrainingJob.query
+        query = TrainingJob.query.options(
+            joinedload(TrainingJob.owner),
+            joinedload(TrainingJob.dataset),
+        )
 
         if status:
             query = query.filter_by(status=status)
@@ -451,6 +402,60 @@ class TrainingService:
             'has_next': pagination.has_next,
             'has_prev': pagination.has_prev,
         }
+
+    # 超参数键名冲突集合 — 合并 best_params 时必须跳过 (如 KMeans 的 algorithm=lloyd 覆盖 algorithm=kmeans)
+    _TUNING_CONFLICT_KEYS = {'algorithm', 'ml_task_type', 'task_type', 'framework'}
+
+    @staticmethod
+    def parse_extra_hyperparams(form_data: dict) -> dict:
+        """从表单数据提取防过拟合超参数 (PyTorch/TensorFlow 可选参数)
+
+        集中处理路由层重复的数值类型转换 + hidden_layers 逗号分隔解析。
+        """
+        extra = {}
+        numeric_fields = {
+            'val_size': float, 'dropout': float, 'learning_rate': float,
+            'weight_decay': float, 'batch_size': int,
+            'early_stopping_patience': int,
+        }
+        for field, cast in numeric_fields.items():
+            raw = (form_data.get(field) or '').strip()
+            if raw:
+                try:
+                    extra[field] = cast(raw)
+                except (ValueError, TypeError):
+                    pass
+
+        hl_raw = (form_data.get('hidden_layers_str') or '').strip()
+        if hl_raw:
+            try:
+                layers = [int(x.strip()) for x in hl_raw.split(',') if x.strip()]
+                if layers:
+                    extra['hidden_layers'] = layers
+            except (ValueError, TypeError):
+                pass
+        return extra
+
+    @staticmethod
+    def build_retrain_params(best_params: dict, existing_hparams: dict,
+                             algorithm: str, ml_task_type: str,
+                             is_mlp: bool = False) -> dict:
+        """从调优结果构建重训练参数 — 跳过冲突键, 保留既有参数
+
+        解决 gridsearch_retrain / apply_tuning_result 中的重复合并逻辑。
+        """
+        retrain = {
+            'algorithm': algorithm,
+            'ml_task_type': ml_task_type,
+            'framework': 'pytorch' if is_mlp else existing_hparams.get('framework', 'sklearn'),
+        }
+        for k, v in best_params.items():
+            if k not in TrainingService._TUNING_CONFLICT_KEYS:
+                retrain[k] = v
+        for k in ('hidden_layers', 'dropout', 'test_size'):
+            if k in existing_hparams and k not in retrain:
+                retrain[k] = existing_hparams[k]
+        return retrain
 
     @staticmethod
     def get_job_statistics(user_id: int = None) -> dict:

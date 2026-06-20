@@ -57,6 +57,36 @@ def _auto_hidden_layers_tf(n_samples: int, n_features: int, n_classes: int = 2) 
         return [512, 256, 128, 64]
 
 
+class PersistentEarlyStopping:
+    """Keras EarlyStopping 包装器 — patience 在逐 epoch fit() 调用间持久化
+
+    标准 EarlyStopping.on_train_begin() 在每次 fit() 被调用时重置 wait=0,
+    导致单 epoch fit 循环中的早停永不触发。此包装器维护持久状态。
+    """
+    def __init__(self, monitor='val_loss', patience=10, restore_best_weights=True):
+        import tensorflow as tf
+        self._es = tf.keras.callbacks.EarlyStopping(
+            monitor=monitor, patience=patience,
+            restore_best_weights=restore_best_weights, verbose=0)
+        self._initialized = False
+
+    def __getattr__(self, name):
+        # 委托所有未知属性访问到底层 EarlyStopping 实例
+        return getattr(self._es, name)
+
+    def on_train_begin(self, logs=None):
+        if not self._initialized:
+            self._es.on_train_begin(logs)
+            self._initialized = True
+        # 后续 epoch: 不重置 wait/best/best_weights
+
+    def on_epoch_end(self, epoch, logs=None):
+        self._es.on_epoch_end(epoch, logs)
+
+    def on_train_end(self, logs=None):
+        self._es.on_train_end(logs)
+
+
 class KerasTrainer(BaseTrainer):
     """TensorFlow/Keras 深度学习训练器 v2 — MLP 全连接神经网络
 
@@ -216,13 +246,12 @@ class KerasTrainer(BaseTrainer):
 
         self._model = model
 
-        # —— Keras 回调: 早停 + LR 调度 ——
+        # —— Keras 回调: 持久化早停 + LR 调度 ——
         self._callbacks = [
-            tf.keras.callbacks.EarlyStopping(
+            PersistentEarlyStopping(
                 monitor='val_loss',
                 patience=self.early_stopping_patience,
-                restore_best_weights=True,
-                verbose=0
+                restore_best_weights=True
             ),
             tf.keras.callbacks.ReduceLROnPlateau(
                 monitor='val_loss',
@@ -332,3 +361,42 @@ class KerasTrainer(BaseTrainer):
             pickle.dump(config, f)
 
         self.callback.on_log(f'模型已保存到: {path}.keras + _config.pkl')
+
+    # ============ 检查点 ============
+
+    def save_checkpoint(self):
+        """保存 Keras 训练快照: 模型权重 + 优化器权重 + epoch"""
+        if self._model is None:
+            return
+        tf = _ensure_tf()
+        os.makedirs(self.output_dir, exist_ok=True)
+
+        ckpt_dir = os.path.join(self.output_dir, 'checkpoint.keras')
+        self._model.save(ckpt_dir)
+
+        # 保存元数据
+        meta = {
+            'epoch': self._current_epoch + 1,
+            'input_dim': self._input_dim,
+            'output_dim': self._output_dim,
+            'hidden_layers': self.hidden_layers,
+            'dropout': self.dropout,
+            'task_type': self.task_type,
+            'val_size': self.val_size,
+            'early_stopping_patience': self.early_stopping_patience,
+        }
+        with open(os.path.join(self.output_dir, 'checkpoint_meta.json'), 'w') as f:
+            json.dump(meta, f)
+
+    @staticmethod
+    def load_checkpoint(output_dir: str) -> dict:
+        meta_path = os.path.join(output_dir, 'checkpoint_meta.json')
+        if not os.path.exists(meta_path):
+            return {}
+        with open(meta_path, 'r') as f:
+            meta = json.load(f)
+        return {'epoch': meta.get('epoch', 0)}
+
+    @staticmethod
+    def has_checkpoint(output_dir: str) -> bool:
+        return os.path.exists(os.path.join(output_dir, 'checkpoint.keras'))

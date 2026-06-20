@@ -17,6 +17,33 @@ class AuthService:
     """用户认证服务类"""
 
     @staticmethod
+    def _validate_password_strength(password: str, username: str = None,
+                                     email: str = None) -> Optional[str]:
+        """验证密码强度，返回错误消息或 None
+
+        要求: 10+ 字符, 含大小写+数字+特殊字符, 不包含用户名/邮箱
+        """
+        if len(password) < 10:
+            return '密码长度至少为 10 个字符。'
+        if not any(c.isupper() for c in password):
+            return '密码必须包含至少一个大写字母。'
+        if not any(c.islower() for c in password):
+            return '密码必须包含至少一个小写字母。'
+        if not any(c.isdigit() for c in password):
+            return '密码必须包含至少一个数字。'
+        if not any(c in '!@#$%^&*()_+-=[]{}|;:,.<>?/~`' for c in password):
+            return '密码必须包含至少一个特殊字符 (!@#$%^&*...)。'
+        # 密码不应包含用户名或邮箱 (大小写不敏感)
+        password_lower = password.lower()
+        if username and username.lower() in password_lower:
+            return '密码不能包含用户名。'
+        if email:
+            email_prefix = email.split('@')[0].lower()
+            if len(email_prefix) >= 4 and email_prefix in password_lower:
+                return '密码不能包含邮箱前缀。'
+        return None
+
+    @staticmethod
     def register(username: str, email: str, password: str,
                  full_name: str = None) -> Tuple[Optional[User], Optional[str]]:
         """
@@ -39,21 +66,10 @@ class AuthService:
         if db.session.execute(db.select(User).filter_by(email=email)).scalar_one_or_none():
             return None, '邮箱已被注册。'
 
-        # 验证密码强度 (建议: 12+ 字符, 含大小写+数字+特殊字符)
-        if len(password) < 10:
-            return None, '密码长度至少为 10 个字符。'
-
-        if not any(c.isupper() for c in password):
-            return None, '密码必须包含至少一个大写字母。'
-
-        if not any(c.islower() for c in password):
-            return None, '密码必须包含至少一个小写字母。'
-
-        if not any(c.isdigit() for c in password):
-            return None, '密码必须包含至少一个数字。'
-
-        if not any(c in '!@#$%^&*()_+-=[]{}|;:,.<>?/~`' for c in password):
-            return None, '密码必须包含至少一个特殊字符 (!@#$%^&*...)。'
+        # 验证密码强度
+        pw_error = AuthService._validate_password_strength(password, username, email)
+        if pw_error:
+            return None, pw_error
 
         # 创建用户
         try:
@@ -73,8 +89,8 @@ class AuthService:
 
         except Exception as e:
             db.session.rollback()
-            logger.error(f"注册用户失败: {e}")
-            return None, '注册失败，请稍后重试。'
+            from app.utils.helpers import sanitize_service_error
+            return None, sanitize_service_error(e, '注册用户失败')
 
     @staticmethod
     def login(login_id: str, password: str) -> Tuple[Optional[User], Optional[str]]:
@@ -136,8 +152,8 @@ class AuthService:
 
         except Exception as e:
             db.session.rollback()
-            logger.error(f"更新用户资料失败: {e}")
-            return False, '更新失败，请稍后重试。'
+            from app.utils.helpers import sanitize_service_error
+            return False, sanitize_service_error(e, '更新用户资料失败')
 
     @staticmethod
     def change_password(user: User, old_password: str,
@@ -151,22 +167,15 @@ class AuthService:
         if not user.check_password(old_password):
             return False, '当前密码错误。'
 
-        if len(new_password) < 10:
-            return False, '新密码长度至少为 10 个字符。'
-
-        if not any(c.isupper() for c in new_password):
-            return False, '新密码必须包含至少一个大写字母。'
-
-        if not any(c.islower() for c in new_password):
-            return False, '新密码必须包含至少一个小写字母。'
-
-        if not any(c.isdigit() for c in new_password):
-            return False, '新密码必须包含至少一个数字。'
+        pw_error = AuthService._validate_password_strength(new_password, user.username)
+        if pw_error:
+            return False, pw_error
 
         user.set_password(new_password)
+        user.token_version = (user.token_version or 0) + 1  # 使所有旧 Refresh Token 失效
         db.session.commit()
 
-        logger.info(f"用户 {user.username} 修改了密码")
+        logger.info(f"用户 {user.username} 修改了密码 (token_version={user.token_version})")
         return True, None
 
     @staticmethod
@@ -247,7 +256,7 @@ class AuthService:
         if error:
             return None, error, 401
 
-        tokens = generate_token_pair(user.id, user.username, user.role)
+        tokens = generate_token_pair(user.id, user.username, user.role, user.token_version)
         return tokens, None, 200
 
     @staticmethod
@@ -276,7 +285,7 @@ class AuthService:
         if not user.is_active:
             return None, '账户已被禁用。', 401
 
-        tokens = generate_token_pair(user.id, user.username, user.role)
+        tokens = generate_token_pair(user.id, user.username, user.role, user.token_version)
         return tokens, None, 200
 
     @staticmethod
@@ -294,5 +303,5 @@ class AuthService:
             return True
         except Exception as e:
             db.session.rollback()
-            logger.error(f"删除用户失败: {e}")
+            logger.error(f'删除用户失败: {e}')
             return False

@@ -3,6 +3,7 @@ scikit-learn 训练器
 支持分类、回归和聚类任务，涵盖常用算法
 """
 import os
+import logging
 import pickle
 import numpy as np
 import pandas as pd
@@ -11,8 +12,17 @@ from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.impute import SimpleImputer
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+from sklearn.utils.multiclass import type_of_target
 
 from app.executor.trainers.base import BaseTrainer
+
+_nlp_logger = logging.getLogger(__name__)
+
+
+def _jieba_cut(text: str):
+    """jieba 中文分词 — 模块级函数 (必须可 pickle)"""
+    import jieba
+    return list(jieba.cut(text))
 
 # ===================================================================
 # sklearn 算法注册表
@@ -44,6 +54,17 @@ _CLUSTERERS = {
     'dbscan':              ('sklearn.cluster', 'DBSCAN'),                       # DBSCAN — 基于密度的空间聚类
     'agglomerative':  ('sklearn.cluster', 'AgglomerativeClustering'),     # 层次聚类 — 自底向上合并
     'minibatch_kmeans':    ('sklearn.cluster', 'MiniBatchKMeans'),              # MiniBatch K-Means — 小批量增量聚类
+}
+
+
+# 分类器 → 回归器算法映射 (当目标列为连续值时自动切换)
+_CLS_TO_REG = {
+    'random_forest': 'random_forest_regressor',
+    'gradient_boosting': 'gradient_boosting_regressor',
+    'knn': 'knn_regressor',
+    'svm': 'svr',
+    'logistic_regression': 'ridge',
+    'decision_tree': 'random_forest_regressor',
 }
 
 
@@ -81,7 +102,9 @@ class SklearnTrainer(BaseTrainer):
     _REGULARIZE_DEFAULTS = {
         'decision_tree': {'max_depth': 10, 'min_samples_split': 10, 'min_samples_leaf': 5},
         'random_forest': {'max_depth': 15, 'min_samples_leaf': 5},
+        'random_forest_regressor': {'max_depth': 15, 'min_samples_leaf': 5},
         'gradient_boosting': {'max_depth': 5, 'min_samples_leaf': 10},
+        'gradient_boosting_regressor': {'max_depth': 5, 'min_samples_leaf': 10},
     }
 
     def __init__(self, job, dataset, hyperparams: dict = None):
@@ -108,88 +131,32 @@ class SklearnTrainer(BaseTrainer):
         self._y_train = self._y_test = None
         self._scaler = None
         self._label_encoders = {}
+        self._vectorizer = None  # NLP: TfidfVectorizer
+        self._class_labels = []  # 类别标签 (人类可读)
+
+    # ═══════════════════════════════════════════════════════════════
+    # 数据加载 (v2: 上帝方法拆分为 1 个主方法 + 8 个私有方法)
+    # ═══════════════════════════════════════════════════════════════
 
     def load_data(self):
-        """从 Dataset 文件加载数据并预处理"""
-        file_path = self.dataset.file_path
+        """从 Dataset 文件加载数据并预处理。
 
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f'数据集文件不存在: {file_path}')
+        原始 397 行上帝方法已拆分为以下步骤 (M1 refactor):
+        1. _read_data_file → 2. _prepare_clustering_data (无监督)
+        → 3. _detect_nlp_features → 4. _impute_encode_features
+        → 5. _encode_target_variable → 6. _split_train_test
+        → 7. _apply_tfidf_to_splits → 8. _apply_scaler_and_balance
+        """
+        df = self._read_data_file()
 
-        fmt = self.dataset.file_format.lower()
-
-        if fmt == 'csv':
-            df = pd.read_csv(file_path)
-        elif fmt in ('xlsx', 'xls'):
-            df = pd.read_excel(file_path)
-        elif fmt == 'json':
-            df = pd.read_json(file_path)
-        elif fmt == 'parquet':
-            df = pd.read_parquet(file_path)
-        elif fmt == 'txt':
-            df = pd.read_csv(file_path, sep='\t')
-        else:
-            raise ValueError(f'不支持的文件格式: {fmt}')
-
-        # ================================================================
-        # 聚类: 无监督学习, 不需要目标列
-        # ================================================================
+        # ── 聚类: 无监督学习, 不需要目标列 ──
         if self.task_type == 'clustering':
-            target_col = self.hyperparams.get('target_column')
-            if target_col and target_col in df.columns:
-                # 保留 y 用于 ARI/NMI 外部验证 (不参与训练)
-                self._y_full = df[target_col].copy()
-                X = df.drop(columns=[target_col])
-                self.callback.on_log(f'目标列 (仅用于外部验证): {target_col}, 特征数: {len(X.columns)}')
-            else:
-                self._y_full = None
-                X = df.copy()
-                self.callback.on_log(f'无监督聚类, 特征数: {len(X.columns)}')
-
-            self.callback.on_log(f'数据形状: {df.shape}, 测试比例: {self.test_size}')
-
-            # 预处理: 缺失值填充 + 分类特征编码 + 标准化 (同监督学习)
-            num_cols = X.select_dtypes(include=[np.number]).columns
-            if len(num_cols) > 0:
-                num_imputer = SimpleImputer(strategy='mean')
-                X[num_cols] = num_imputer.fit_transform(X[num_cols])
-
-            cat_cols = X.select_dtypes(include=['object']).columns
-            if len(cat_cols) > 0:
-                cat_imputer = SimpleImputer(strategy='most_frequent')
-                X[cat_cols] = cat_imputer.fit_transform(X[cat_cols])
-            for col in cat_cols:
-                le = LabelEncoder()
-                X[col] = le.fit_transform(X[col].astype(str))
-                self._label_encoders[col] = le
-
-            num_cols_after = X.select_dtypes(include=[np.number]).columns
-            if len(num_cols_after) > 0:
-                self._scaler = StandardScaler()
-                X[num_cols_after] = self._scaler.fit_transform(X[num_cols_after])
-
-            # 划分训练/测试集 (无 y, 无分层)
-            self._X_train, self._X_test = train_test_split(
-                X, test_size=self.test_size, random_state=self.random_state
-            )
-            # 如果保留了 y, 对齐划分用于 ARI/NMI
-            if self._y_full is not None:
-                _, self._y_test = train_test_split(
-                    self._y_full, test_size=self.test_size, random_state=self.random_state
-                )
-                self._y_train = None  # 训练时不使用标签
-            else:
-                self._y_train = self._y_test = None
-
-            self.callback.on_log(f'训练集: {len(self._X_train)} 样本, 测试集: {len(self._X_test)} 样本')
+            self._prepare_clustering_data(df)
             return
 
-        # ================================================================
-        # 分类 / 回归: 监督学习, 需要目标列
-        # ================================================================
+        # ── 分类 / 回归: 监督学习, 需要目标列 ──
         target_col = self.hyperparams.get('target_column')
         if not target_col:
-            # 自动推断：优先用最后一列
             target_col = df.columns[-1]
 
         if target_col not in df.columns:
@@ -201,7 +168,224 @@ class SklearnTrainer(BaseTrainer):
         X = df.drop(columns=[target_col])
         y = df[target_col]
 
-        # 处理缺失值
+        # ── NLP 文本检测 + TF-IDF 预处理 ──
+        nlp_texts, nlp_vectorizer_config, X = self._detect_nlp_features(X)
+
+        # ── 保存类别标签 ──
+        if self.task_type == 'classification':
+            self._save_class_labels(y)
+
+        # ── 缺失值填充 + 分类特征编码 ──
+        X = self._impute_encode_features(X)
+
+        # ── 目标变量编码 (含分类→回归自动纠错) ──
+        y = self._encode_target_variable(y)
+
+        # ── 划分训练/测试集 (在 TF-IDF 和 StandardScaler 之前, 防止数据泄漏) ──
+        self._split_train_test(X, y)
+
+        # ── NLP: TF-IDF 仅在训练集上拟合, 然后变换训练集和测试集 ──
+        if nlp_texts is not None and nlp_vectorizer_config is not None:
+            self._apply_tfidf_to_splits(nlp_texts, nlp_vectorizer_config)
+
+        # ── StandardScaler + 类别平衡 ──
+        self._apply_scaler_and_balance()
+
+        self.callback.on_log(
+            f'训练集: {len(self._X_train)} 样本, 测试集: {len(self._X_test)} 样本'
+        )
+
+    # ── 数据加载步骤 1: 读取文件 ──
+
+    def _read_data_file(self) -> pd.DataFrame:
+        """根据文件格式读取数据文件。"""
+        file_path = self.dataset.file_path
+
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f'数据集文件不存在: {file_path}')
+
+        fmt = self.dataset.file_format.lower()
+
+        if fmt == 'csv':
+            return pd.read_csv(file_path)
+        elif fmt in ('xlsx', 'xls'):
+            return pd.read_excel(file_path)
+        elif fmt == 'json':
+            return pd.read_json(file_path)
+        elif fmt == 'parquet':
+            return pd.read_parquet(file_path)
+        elif fmt == 'txt':
+            return pd.read_csv(file_path, sep='\t')
+        else:
+            raise ValueError(f'不支持的文件格式: {fmt}')
+
+    # ── 数据加载步骤 2: 聚类数据预处理 ──
+
+    def _prepare_clustering_data(self, df: pd.DataFrame):
+        """无监督聚类数据预处理 (无目标列, 不参与训练)。"""
+        target_col = self.hyperparams.get('target_column')
+        if target_col and target_col in df.columns:
+            self._y_full = df[target_col].copy()
+            X = df.drop(columns=[target_col])
+            self.callback.on_log(f'目标列 (仅用于外部验证): {target_col}, 特征数: {len(X.columns)}')
+        else:
+            self._y_full = None
+            X = df.copy()
+            self.callback.on_log(f'无监督聚类, 特征数: {len(X.columns)}')
+
+        self.callback.on_log(f'数据形状: {df.shape}, 测试比例: {self.test_size}')
+
+        # 预处理: 缺失值填充
+        num_cols = X.select_dtypes(include=[np.number]).columns
+        if len(num_cols) > 0:
+            num_imputer = SimpleImputer(strategy='mean')
+            X[num_cols] = num_imputer.fit_transform(X[num_cols])
+
+        cat_cols = X.select_dtypes(include=['object']).columns
+        if len(cat_cols) > 0:
+            cat_imputer = SimpleImputer(strategy='most_frequent')
+            X[cat_cols] = cat_imputer.fit_transform(X[cat_cols])
+        for col in cat_cols:
+            le = LabelEncoder()
+            X[col] = le.fit_transform(X[col].astype(str))
+            self._label_encoders[col] = le
+
+        # 标准化
+        num_cols_after = X.select_dtypes(include=[np.number]).columns
+        if len(num_cols_after) > 0:
+            self._scaler = StandardScaler()
+            X[num_cols_after] = self._scaler.fit_transform(X[num_cols_after])
+
+        # 划分训练/测试集 (无 y, 无分层)
+        self._X_train, self._X_test = train_test_split(
+            X, test_size=self.test_size, random_state=self.random_state
+        )
+        # 如果保留了 y, 对齐划分用于 ARI/NMI
+        if self._y_full is not None:
+            _, self._y_test = train_test_split(
+                self._y_full, test_size=self.test_size, random_state=self.random_state
+            )
+            self._y_train = None
+        else:
+            self._y_train = self._y_test = None
+
+        self.callback.on_log(
+            f'训练集: {len(self._X_train)} 样本, 测试集: {len(self._X_test)} 样本'
+        )
+
+    # ── 数据加载步骤 3: NLP 文本检测 ──
+
+    def _detect_nlp_features(self, X: pd.DataFrame) -> tuple:
+        """检测 NLP 文本列并准备 TF-IDF vectorizer 配置。
+
+        Returns:
+            (nlp_texts, vectorizer_config, X_clean) — 如果没有文本列, 前两个为 None
+        """
+        nlp_text_col = None
+        ds_category = getattr(self.dataset, 'category', None)
+        _nlp_logger.info(
+            '[DEBUG] NLP check: dataset.category=%r, dataset.id=%s, '
+            'X.columns=%s, task_type=%s',
+            ds_category, getattr(self.dataset, 'id', '?'),
+            list(X.columns)[:8], self.task_type,
+        )
+
+        if ds_category == 'nlp':
+            for candidate in ['text', 'review', 'comment', 'content', 'sentence']:
+                if candidate in X.columns:
+                    nlp_text_col = candidate
+                    _nlp_logger.info('[DEBUG] NLP text column found: %s', candidate)
+                    break
+            # 如果前几列是 tfidf_* 说明数据已被预处理, 不再做 NLP 处理
+            if nlp_text_col is None and X.columns[0].startswith('tfidf_'):
+                _nlp_logger.info('[DEBUG] NLP: features already TF-IDF, skipping')
+            elif nlp_text_col is None:
+                _nlp_logger.info(
+                    '[DEBUG] NLP: no text column found in %s', list(X.columns)
+                )
+
+        if nlp_text_col is None:
+            return None, None, X
+
+        # ── 读取 NLP 参数 (Batch B 优化) ──
+        _nlp_mf = int(self.hyperparams.get('nlp_max_features', 2000))
+        _nlp_min_df = int(self.hyperparams.get('nlp_min_df', 2))
+        _nlp_max_df = float(self.hyperparams.get('nlp_max_df', 0.9))
+
+        _nlp_logger.info(
+            '[NLP] Detected text col "%s", will apply TfidfVectorizer '
+            'AFTER split (jieba tokenizer, max_features=%d)', nlp_text_col, _nlp_mf
+        )
+        self.callback.on_log(
+            f'[NLP] 检测到文本列 "{nlp_text_col}", TfidfVectorizer '
+            f'(jieba 分词, max_features={_nlp_mf}, min_df={_nlp_min_df}, '
+            f'max_df={_nlp_max_df}, 仅在训练集上拟合)'
+        )
+
+        # 保存原始文本 (在 drop 之前)
+        nlp_texts = X[nlp_text_col].fillna('').astype(str).tolist()
+
+        # ── 自适应 max_features: 不超过训练样本数的一半 (防小数据集过拟合) ──
+        _n_train_est = int(len(nlp_texts) * (1 - self.test_size))
+        _adaptive_mf = max(100, min(_nlp_mf, _n_train_est // 2))
+        if _adaptive_mf != _nlp_mf:
+            self.callback.on_log(
+                f'[NLP] 自适应 max_features: {_nlp_mf} → {_adaptive_mf} '
+                f'(训练集约 {_n_train_est} 样本)'
+            )
+            _nlp_mf = _adaptive_mf
+
+        # ── 配置 vectorizer (暂不拟合) ──
+        from sklearn.feature_extraction.text import TfidfVectorizer
+
+        try:
+            import jieba  # noqa: F401
+            tokenizer_fn = _jieba_cut
+            _nlp_logger.info('[NLP] Using jieba word tokenizer')
+            nlp_vectorizer_config = {
+                'tokenizer': tokenizer_fn,
+                'max_features': _nlp_mf,
+                'min_df': _nlp_min_df,
+                'max_df': _nlp_max_df,
+                'sublinear_tf': True,
+                'dtype': np.float32,
+            }
+        except ImportError:
+            tokenizer_fn = None
+            _nlp_logger.info('[NLP] jieba not available, falling back to char ngram')
+            nlp_vectorizer_config = {
+                'max_features': _nlp_mf,
+                'min_df': _nlp_min_df,
+                'max_df': _nlp_max_df,
+                'analyzer': 'char',
+                'ngram_range': (1, 3),
+                'sublinear_tf': True,
+                'dtype': np.float32,
+            }
+
+        # 从特征矩阵中移除文本列 (稍后添加 TF-IDF 特征)
+        X = X.drop(columns=[nlp_text_col])
+
+        return nlp_texts, nlp_vectorizer_config, X
+
+    # ── 数据加载步骤 4: 缺失值填充 + 分类特征编码 ──
+
+    def _save_class_labels(self, y: pd.Series):
+        """保存类别标签 (人类可读)。"""
+        try:
+            unique_labels = y.dropna().unique()
+            self._class_labels = [str(l) for l in sorted(unique_labels, key=str)]
+            self.callback.on_log(f'[类别标签] {self._class_labels}')
+        except Exception:
+            self._class_labels = []
+
+    def _impute_encode_features(self, X: pd.DataFrame) -> pd.DataFrame:
+        """处理缺失值并编码分类特征列。
+
+        Numeric columns: mean imputation
+        Categorical columns: most_frequent imputation + LabelEncoder
+        """
+        # 处理缺失值 (非文本列)
         num_cols = X.select_dtypes(include=[np.number]).columns
         if len(num_cols) > 0:
             num_imputer = SimpleImputer(strategy='mean')
@@ -218,20 +402,65 @@ class SklearnTrainer(BaseTrainer):
             X[col] = le.fit_transform(X[col].astype(str))
             self._label_encoders[col] = le
 
-        # 编码目标变量 (分类任务)
-        if self.task_type == 'classification' and y.dtype == 'object':
+        return X
+
+    # ── 数据加载步骤 5: 目标变量编码 ──
+
+    def _encode_target_variable(self, y: pd.Series) -> pd.Series:
+        """编码目标变量, 含分类→回归自动纠错逻辑。
+
+        当 target 为连续值但 task_type='classification' 时,
+        自动切换到对应的回归算法。
+        """
+        if self.task_type != 'classification':
+            return y
+
+        try:
+            yt = type_of_target(y)
+        except Exception:
+            yt = 'unknown'
+
+        if yt == 'continuous':
+            reg_algo = _CLS_TO_REG.get(self.algorithm)
+            if reg_algo:
+                self.callback.on_log(
+                    f'[自动纠错] 目标列是连续值(float), '
+                    f'但任务类型是 classification。'
+                )
+                self.callback.on_log(
+                    f'[自动纠错] 已自动切换: task_type → regression, '
+                    f'algorithm → {reg_algo}'
+                )
+                self.task_type = 'regression'
+                self.algorithm = reg_algo
+                if self.algorithm in self._CLOSED_FORM_ALGOS and self.total_epochs > 1:
+                    self.total_epochs = 1
+                    self.callback.on_log(
+                        f'[自动纠错] {reg_algo} 是闭环模型，epochs 固定为 1'
+                    )
+            else:
+                self.callback.on_log(
+                    f'[警告] 目标列是连续值，'
+                    f'但算法 "{self.algorithm}" 无对应回归器。'
+                    f'将强制编码为分类标签 (可能导致无意义结果)。'
+                )
+                le = LabelEncoder()
+                y = le.fit_transform(y.astype(str))
+                self._label_encoders['__target__'] = le
+        elif y.dtype == 'object':
             le = LabelEncoder()
             y = le.fit_transform(y.astype(str))
             self._label_encoders['__target__'] = le
 
-        # 标准化数值特征
-        num_cols_after = X.select_dtypes(include=[np.number]).columns
-        if len(num_cols_after) > 0:
-            self._scaler = StandardScaler()
-            X[num_cols_after] = self._scaler.fit_transform(X[num_cols_after])
+        return y
 
-        # 划分训练/测试集
-        # 分类任务尝试分层采样，若某类别样本过少则退化为随机划分
+    # ── 数据加载步骤 6: 训练/测试集划分 ──
+
+    def _split_train_test(self, X: pd.DataFrame, y: pd.Series):
+        """划分训练/测试集, 带分类分层采样。
+
+        在 TF-IDF 和 StandardScaler 之前调用, 防止数据泄漏。
+        """
         stratify_y = None
         if self.task_type == 'classification':
             try:
@@ -241,7 +470,9 @@ class SklearnTrainer(BaseTrainer):
                 if min_count >= 2:
                     stratify_y = y
                 else:
-                    self.callback.on_log(f'警告: 最少类别样本数={min_count}, 无法分层采样, 使用随机划分')
+                    self.callback.on_log(
+                        f'警告: 最少类别样本数={min_count}, 无法分层采样, 使用随机划分'
+                    )
             except Exception:
                 pass
 
@@ -250,7 +481,144 @@ class SklearnTrainer(BaseTrainer):
             stratify=stratify_y
         )
 
-        self.callback.on_log(f'训练集: {len(self._X_train)} 样本, 测试集: {len(self._X_test)} 样本')
+    # ── 数据加载步骤 7: TF-IDF 变换 (仅在训练集上拟合) ──
+
+    def _apply_tfidf_to_splits(self, nlp_texts: list,
+                               nlp_vectorizer_config: dict):
+        """在训练集上拟合 TfidfVectorizer, 然后变换训练集和测试集。
+
+        包含数据增强 (augment_factor > 1 时) 和自适应 max_features。
+        """
+        from sklearn.feature_extraction.text import TfidfVectorizer
+
+        # 对齐文本索引到 train/test split
+        _train_indices = self._X_train.index.tolist()
+        _test_indices = self._X_test.index.tolist()
+        _train_texts = [nlp_texts[i] for i in _train_indices]
+        _test_texts = [nlp_texts[i] for i in _test_indices]
+
+        # ── 数据增强 (仅增强训练集, 不碰测试集) ──
+        _augment_factor = int(self.hyperparams.get('augment_factor', 0))
+        if _augment_factor > 1 and len(_train_texts) < 5000:
+            try:
+                from app.utils.text_augment import augment_texts
+                _n_train_orig = len(_train_texts)
+                _y_train_list = list(self._y_train)
+                _train_texts, _y_train_aug = augment_texts(
+                    _train_texts, _y_train_list, factor=_augment_factor,
+                    seed=self.random_state
+                )
+                _n_aug = len(_train_texts) - _n_train_orig
+                if _n_aug > 0:
+                    # 扩展 X_train (空行, 因为文本列即将被 TF-IDF 替换)
+                    _aug_indices = list(range(
+                        self._X_train.index.max() + 1,
+                        self._X_train.index.max() + 1 + _n_aug
+                    ))
+                    _aug_X = pd.DataFrame(
+                        np.zeros((_n_aug, self._X_train.shape[1])),
+                        index=_aug_indices, columns=self._X_train.columns
+                    )
+                    self._X_train = pd.concat([self._X_train, _aug_X], axis=0)
+                    self._y_train = np.concatenate([
+                        self._y_train, _y_train_aug[_n_train_orig:]
+                    ])
+                    # 更新 _train_indices 以包含新增的增强行索引
+                    _train_indices = self._X_train.index.tolist()
+                self.callback.on_log(
+                    f'[增强] 文本增强完成: {_n_train_orig} -> {len(_train_texts)} '
+                    f'(factor={_augment_factor}, +{_n_aug} samples)'
+                )
+            except ImportError:
+                self.callback.on_log('[增强] text_augment 模块未找到, 跳过增强')
+            except Exception as e:
+                self.callback.on_log(f'[增强] 文本增强失败: {e}')
+
+        self._vectorizer = TfidfVectorizer(**nlp_vectorizer_config)
+        _tfidf_train = self._vectorizer.fit_transform(_train_texts)
+        _tfidf_test = self._vectorizer.transform(_test_texts)
+
+        _tfidf_train_df = pd.DataFrame(
+            _tfidf_train.toarray(),
+            columns=[f'tfidf_{i}' for i in range(_tfidf_train.shape[1])],
+            index=_train_indices,
+        )
+        _tfidf_test_df = pd.DataFrame(
+            _tfidf_test.toarray(),
+            columns=[f'tfidf_{i}' for i in range(_tfidf_test.shape[1])],
+            index=_test_indices,
+        )
+
+        self._X_train = pd.concat([self._X_train, _tfidf_train_df], axis=1)
+        self._X_test = pd.concat([self._X_test, _tfidf_test_df], axis=1)
+
+        self.callback.on_log(
+            f'[NLP] TF-IDF 完成: {len(_train_texts)}+{len(_test_texts)} 文本 '
+            f'→ {_tfidf_train.shape[1]} 维特征 (仅在训练集上拟合)'
+        )
+        _nlp_logger.info('[NLP] TF-IDF done: %d+%d texts -> %d features (fit on train only)',
+                         len(_train_texts), len(_test_texts), _tfidf_train.shape[1])
+
+    # ── 数据加载步骤 8: StandardScaler + 类别平衡 ──
+
+    def _apply_scaler_and_balance(self):
+        """StandardScaler (仅在训练集上拟合) + 类别平衡 (SMOTE/undersample)。"""
+        # ═══════════════════════════════════════════════════════════════
+        # StandardScaler: 仅在训练集上拟合, 然后变换两个集合
+        # ═══════════════════════════════════════════════════════════════
+        num_cols_train = self._X_train.select_dtypes(include=[np.number]).columns
+        if len(num_cols_train) > 0:
+            self._scaler = StandardScaler()
+            self._X_train[num_cols_train] = self._scaler.fit_transform(
+                self._X_train[num_cols_train]
+            )
+            # 测试集用训练集的 scaler 变换
+            num_cols_test = [c for c in num_cols_train if c in self._X_test.columns]
+            if num_cols_test:
+                self._X_test[num_cols_test] = self._scaler.transform(
+                    self._X_test[num_cols_test]
+                )
+
+        # ── NLP 类别不平衡 → 重采样 (SMOTE / undersample) ──
+        _balance = self.hyperparams.get('balance', None)
+        if _balance and _balance != 'none' and self.task_type == 'classification':
+            try:
+                from imblearn.over_sampling import SMOTE
+                from imblearn.under_sampling import RandomUnderSampler
+                from collections import Counter
+
+                before = Counter(self._y_train)
+
+                if _balance == 'smote':
+                    sampler = SMOTE(random_state=self.random_state or 42)
+                    self._X_train, self._y_train = sampler.fit_resample(
+                        self._X_train, self._y_train
+                    )
+                elif _balance == 'undersample':
+                    sampler = RandomUnderSampler(random_state=self.random_state or 42)
+                    self._X_train, self._y_train = sampler.fit_resample(
+                        self._X_train, self._y_train
+                    )
+
+                after = Counter(self._y_train)
+                # 转为 DataFrame (SMOTE 返回 numpy array)
+                self._X_train = pd.DataFrame(
+                    self._X_train,
+                    columns=self._X_train.columns if hasattr(self._X_train, 'columns')
+                    else [f'f_{i}' for i in range(self._X_train.shape[1])]
+                )
+                self._y_train = pd.Series(self._y_train)
+                self.callback.on_log(
+                    f'[平衡] {_balance}: {dict(before)} → {dict(after)}'
+                )
+            except ImportError:
+                self.callback.on_log('[平衡] imbalanced-learn 未安装, 跳过重采样')
+            except Exception as e:
+                self.callback.on_log(f'[平衡] 重采样失败: {e}')
+
+    # ═══════════════════════════════════════════════════════════════
+    # 模型构建 + 训练 + 评估
+    # ═══════════════════════════════════════════════════════════════
 
     def build_model(self):
         """构建 sklearn 模型"""
@@ -405,19 +773,121 @@ class SklearnTrainer(BaseTrainer):
             y_pred = self._model.predict(self._X_test)
             return self._compute_metrics(self._y_test, y_pred, prefix='test_')
 
+    def run_cross_validation(self, return_train_score: bool = False) -> dict:
+        """使用 StratifiedKFold 交叉验证评估模型泛化能力。
+
+        这是一个额外的评估层，不影响现有的单次 train/test split 训练流程。
+        仅在训练完成后调用，用于获得更可靠的性能估计。
+
+        Returns:
+            dict with keys: cv_mean, cv_std, cv_scores, cv_folds, n_samples, error
+            如果 CV 不可用 (样本太少/类别太少) 返回 error 说明原因
+        """
+        from sklearn.model_selection import cross_val_score, StratifiedKFold
+        import numpy as np
+
+        cv_folds = int(self.hyperparams.get('cv_folds', 0))
+        if cv_folds < 2:
+            return {'error': 'CV disabled (cv_folds < 2)', 'cv_mean': 0, 'cv_std': 0,
+                    'cv_scores': [], 'cv_folds': 0, 'n_samples': 0}
+
+        try:
+            # 使用全量 X, y (train+test) 做 CV, 获得更稳定的泛化估计
+            X_full = np.vstack([self._X_train, self._X_test]) if hasattr(self, '_X_train') else self._X_train
+            y_full = np.concatenate([self._y_train, self._y_test]) if hasattr(self, '_y_test') else self._y_train
+
+            n_samples = len(y_full)
+            if n_samples < 3 * cv_folds:
+                return {'error': f'样本量不足 ({n_samples} < {3*cv_folds})', 'cv_mean': 0,
+                        'cv_std': 0, 'cv_scores': [], 'cv_folds': cv_folds, 'n_samples': n_samples}
+
+            # 检查类别最少样本数
+            from collections import Counter
+            class_counts = Counter(y_full)
+            min_count = min(class_counts.values())
+            actual_folds = min(cv_folds, min_count, n_samples // 3)
+            if actual_folds < 2:
+                return {'error': f'最少类别样本数={min_count}, 无法进行CV',
+                        'cv_mean': 0, 'cv_std': 0, 'cv_scores': [], 'cv_folds': cv_folds,
+                        'n_samples': n_samples}
+
+            skf = StratifiedKFold(n_splits=actual_folds, shuffle=True,
+                                 random_state=self.random_state)
+            scores = cross_val_score(
+                self._model, X_full, y_full, cv=skf,
+                scoring='accuracy', n_jobs=1
+            )
+
+            return {
+                'cv_mean': float(np.mean(scores)),
+                'cv_std': float(np.std(scores)),
+                'cv_scores': [float(s) for s in scores],
+                'cv_folds': actual_folds,
+                'n_samples': n_samples,
+                'error': None,
+            }
+        except Exception as e:
+            return {'error': str(e), 'cv_mean': 0, 'cv_std': 0,
+                    'cv_scores': [], 'cv_folds': cv_folds, 'n_samples': 0}
+
     def save_model(self, path: str):
-        """使用 pickle 保存模型"""
+        """使用 pickle 保存模型 (含 NLP vectorizer + class_labels)"""
         full_path = path + '.pkl'
+        bundle = {
+            'model': self._model,
+            'scaler': self._scaler,
+            'label_encoders': self._label_encoders,
+            'feature_names': list(self._X_train.columns),
+            'task_type': self.task_type,
+            'algorithm': self.algorithm,
+        }
+        # NLP: 保存 vectorizer 以便预测时复现特征转换
+        if self._vectorizer is not None:
+            bundle['vectorizer'] = self._vectorizer
+        # 保存人类可读的类别标签
+        if self._class_labels:
+            bundle['class_labels'] = self._class_labels
+
         with open(full_path, 'wb') as f:
-            pickle.dump({
-                'model': self._model,
-                'scaler': self._scaler,
-                'label_encoders': self._label_encoders,
-                'feature_names': list(self._X_train.columns),
-                'task_type': self.task_type,
-                'algorithm': self.algorithm,
-            }, f)
+            pickle.dump(bundle, f)
         self.callback.on_log(f'模型已保存到: {full_path}')
+
+    # ============ 检查点 ============
+
+    def save_checkpoint(self):
+        """保存 sklearn 训练快照 (仅 warm_start / partial_fit 模型)"""
+        if self._model is None:
+            return
+        # closed-form 算法 (total_epochs=1) 不需要检查点
+        if self.total_epochs <= 1:
+            return
+        os.makedirs(self.output_dir, exist_ok=True)
+        ckpt_path = os.path.join(self.output_dir, 'checkpoint.pkl')
+        bundle = {
+            'model': self._model,
+            'epoch': self._current_epoch + 1,
+            'algorithm': self.algorithm,
+            'task_type': self.task_type,
+            'scaler': self._scaler,
+        }
+        if self._vectorizer is not None:
+            bundle['vectorizer'] = self._vectorizer
+        with open(ckpt_path, 'wb') as f:
+            pickle.dump(bundle, f)
+
+    @staticmethod
+    def load_checkpoint(output_dir: str) -> dict:
+        import pickle
+        ckpt_path = os.path.join(output_dir, 'checkpoint.pkl')
+        if not os.path.exists(ckpt_path):
+            return {}
+        with open(ckpt_path, 'rb') as f:
+            ckpt = pickle.load(f)
+        return {'epoch': ckpt.get('epoch', 0)}
+
+    @staticmethod
+    def has_checkpoint(output_dir: str) -> bool:
+        return os.path.exists(os.path.join(output_dir, 'checkpoint.pkl'))
 
     # ============ 私有方法 ============
 

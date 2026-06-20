@@ -16,6 +16,8 @@ from app import db, logger
 from app.models.dataset import Dataset
 from app.models.user import User
 from app.utils.cache import dashboard_cache
+from app.utils.helpers import sanitize_service_error
+from sqlalchemy.orm import joinedload
 
 
 # ========== 智能分类推断 ==========
@@ -185,8 +187,7 @@ class DatasetService:
             if os.path.exists(file_path):
                 os.remove(file_path)
             db.session.rollback()
-            logger.error(f"数据集创建失败: {e}")
-            return None, f'创建失败: {str(e)}'
+            return None, sanitize_service_error(e, '数据集创建失败')
 
     @staticmethod
     def get_dataset_by_id(dataset_id: int) -> Optional[Dataset]:
@@ -196,7 +197,9 @@ class DatasetService:
     @staticmethod
     def get_dataset_by_uuid(dataset_uuid: str) -> Optional[Dataset]:
         """根据 UUID 获取数据集"""
-        return Dataset.query.filter_by(uuid=dataset_uuid).first()
+        return db.session.execute(
+            db.select(Dataset).filter_by(uuid=dataset_uuid)
+        ).scalar_one_or_none()
 
     @staticmethod
     def update_dataset(dataset: Dataset, data: dict) -> Tuple[bool, Optional[str]]:
@@ -227,8 +230,7 @@ class DatasetService:
 
         except Exception as e:
             db.session.rollback()
-            logger.error(f"更新数据集失败: {e}")
-            return False, f'更新失败: {str(e)}'
+            return False, sanitize_service_error(e, '更新数据集失败')
 
     @staticmethod
     def delete_dataset(dataset: Dataset) -> Tuple[bool, Optional[str]]:
@@ -253,8 +255,7 @@ class DatasetService:
 
         except Exception as e:
             db.session.rollback()
-            logger.error(f"删除数据集失败: {e}")
-            return False, f'删除失败: {str(e)}'
+            return False, sanitize_service_error(e, '删除数据集失败')
 
     @staticmethod
     def copy_dataset_to_user(dataset: Dataset, user: User) -> Tuple[Optional[Dataset], Optional[str]]:
@@ -270,9 +271,9 @@ class DatasetService:
         import shutil
 
         # 检查是否已经复制过 (同名 + 同 owner)
-        existing = Dataset.query.filter_by(
-            name=dataset.name, owner_id=user.id
-        ).first()
+        existing = db.session.execute(
+            db.select(Dataset).filter_by(name=dataset.name, owner_id=user.id)
+        ).scalar_one_or_none()
         if existing:
             return existing, None  # 已存在，直接返回
 
@@ -293,12 +294,9 @@ class DatasetService:
         new_file_path = os.path.join(dataset_dir, unique_filename)
 
         try:
-            # 复制物理文件 (硬链接优先，回退到拷贝)
+            # 复制物理文件 (始终独立副本, 避免硬链接数据完整性风险)
             if os.path.exists(dataset.file_path):
-                try:
-                    os.link(dataset.file_path, new_file_path)  # 硬链接 (节省空间)
-                except (OSError, NotImplementedError):
-                    shutil.copy2(dataset.file_path, new_file_path)  # 跨盘回退
+                shutil.copy2(dataset.file_path, new_file_path)
 
             # 创建新数据集记录
             new_dataset = Dataset(
@@ -331,8 +329,7 @@ class DatasetService:
             if os.path.exists(new_file_path):
                 os.remove(new_file_path)
             db.session.rollback()
-            logger.error(f"复制数据集失败: {e}")
-            return None, f'复制失败: {str(e)}'
+            return None, sanitize_service_error(e, '复制数据集失败')
 
     @staticmethod
     def list_datasets(page: int = 1, per_page: int = 15,
@@ -349,7 +346,7 @@ class DatasetService:
         Returns:
             分页结果字典
         """
-        query = Dataset.query
+        query = Dataset.query.options(joinedload(Dataset.owner))
 
         # 筛选条件
         if public_only:
@@ -395,35 +392,52 @@ class DatasetService:
         """
         获取数据集统计信息 (带缓存, TTL=60s)
 
-        Returns:
-            统计数据字典
+        使用 SQL GROUP BY 聚合, O(k) 内存 (k=类别数), 而非 O(n) 全量加载。
         """
+        from sqlalchemy import func, or_
+
         cache_key = f'dataset_stats:{user_id or "all"}'
         cached = dashboard_cache.get(cache_key)
         if cached is not None:
             return cached
 
-        query = Dataset.query
-        if user_id:
-            query = query.filter_by(owner_id=user_id)
+        def _filtered_query(*cols):
+            q = db.select(*cols)
+            if user_id:
+                q = q.filter_by(owner_id=user_id)
+            return q
 
-        datasets = query.all()
+        # 按类别聚合
+        category_rows = db.session.execute(
+            _filtered_query(Dataset.category, func.count(Dataset.id))
+            .group_by(Dataset.category)
+        ).all()
+        category_counts = {row[0]: row[1] for row in category_rows}
 
-        total_size = sum(d.file_size for d in datasets)
-        category_counts = {}
-        format_counts = {}
+        # 按格式聚合
+        format_rows = db.session.execute(
+            _filtered_query(Dataset.file_format, func.count(Dataset.id))
+            .group_by(Dataset.file_format)
+        ).all()
+        format_counts = {row[0]: row[1] for row in format_rows}
 
-        for d in datasets:
-            category_counts[d.category] = category_counts.get(d.category, 0) + 1
-            format_counts[d.file_format] = format_counts.get(d.file_format, 0) + 1
+        # 总计/总大小/公开数 — 单次查询
+        agg_row = db.session.execute(
+            _filtered_query(
+                func.count(Dataset.id),
+                func.coalesce(func.sum(Dataset.file_size), 0),
+                func.sum(db.case((Dataset.is_public == True, 1), else_=0)),
+            )
+        ).one()
+        total_count, total_size, public_count = agg_row[0], agg_row[1], agg_row[2]
 
         result = {
-            'total_count': len(datasets),
+            'total_count': total_count,
             'total_size_bytes': total_size,
             'total_size_gb': round(total_size / (1024 ** 3), 2),
             'categories': category_counts,
             'formats': format_counts,
-            'public_count': sum(1 for d in datasets if d.is_public),
+            'public_count': public_count or 0,
         }
         dashboard_cache.set(cache_key, result)
         return result

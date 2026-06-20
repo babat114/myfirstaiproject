@@ -1,11 +1,18 @@
 """
 ============================================
-HuggingFace Transformers NLP 训练器
+HuggingFace Transformers NLP 训练器 v2
 基于预训练模型 (BERT/DistilBERT) 的迁移学习微调
+
+v2 改进 (2026-06-20):
+  - 3-way 分割: train/val/test，val 用于早停
+  - Early Stopping: 监控 val_loss，patience 轮无改善自动停止
+  - Best model 持久化: 早停时保存最佳权重，最终评估恢复最佳模型
+  - 每个 epoch 后报告 train + val 双指标
 ============================================
 """
 import os
 import json
+import copy
 import numpy as np
 import pandas as pd
 
@@ -70,10 +77,6 @@ def _download_model(model_name: str):
             f'错误: {e}\n'
             f'或运行: export HF_ENDPOINT=https://hf-mirror.com'
         )
-EPOCHS = 3              # 微调通常3-5轮即可
-WARMUP_STEPS = 100
-
-
 class TransformersNLPTrainer(BaseTrainer):
     """NLP Transformer 微调训练器
 
@@ -100,10 +103,13 @@ class TransformersNLPTrainer(BaseTrainer):
         self.warmup_steps = int(hyperparams.get('warmup_steps', WARMUP_STEPS))
         self.model_name = hyperparams.get('model_name', DEFAULT_MODEL)
         self.test_size = float(hyperparams.get('test_size', 0.2))
+        # v2: 验证集 + 早停
+        self.val_size = float(hyperparams.get('val_size', 0.15))
+        self.early_stopping_patience = int(hyperparams.get('early_stopping_patience', 10))
 
         self._model = None
         self._tokenizer = None
-        self._train_loader = self._test_loader = None
+        self._train_loader = self._val_loader = self._test_loader = None
         self._optimizer = self._scheduler = None
         self._device = None
         self._id2label = {}
@@ -111,6 +117,13 @@ class TransformersNLPTrainer(BaseTrainer):
         self._text_column = None
         self._target_column = None
         self._X_test_texts = self._y_test_labels = None
+        # v2: 早停追踪
+        self._best_val_loss = float('inf')
+        self._best_model_state = None
+        self._patience_counter = 0
+        self._stopped_early = False
+        self._early_stop = False
+        self._best_val_metric = None
 
     # ============ 数据加载 ============
 
@@ -150,20 +163,33 @@ class TransformersNLPTrainer(BaseTrainer):
         self.callback.on_log(f'类别数: {num_classes}, 标签: {list(le.classes_)}')
         self.callback.on_log(f'样本数: {len(texts)}, 平均长度: {np.mean([len(t) for t in texts]):.0f} 字符')
 
-        # 划分
-        X_train, X_test, y_train, y_test = train_test_split(
+        # —— 3-way 分割: train / val / test ——
+        # Step 1: 分出 test 集
+        X_train_val, X_test, y_train_val, y_test = train_test_split(
             texts, y, test_size=self.test_size, random_state=42,
             stratify=y if num_classes > 1 and min(np.bincount(y)) >= 2 else None
         )
         self._X_test_texts = X_test
         self._y_test_labels = y_test
 
-        self.callback.on_log(f'训练集: {len(X_train)}, 测试集: {len(X_test)}')
+        # Step 2: 从 train_val 中分出 val 集
+        val_ratio = self.val_size / (1.0 - self.test_size)
+        stratify_tv = y_train_val if num_classes > 1 and min(np.bincount(y_train_val)) >= 2 else None
+        X_train, X_val, y_train, y_val = train_test_split(
+            X_train_val, y_train_val, test_size=val_ratio, random_state=42,
+            stratify=stratify_tv
+        )
+
+        self.callback.on_log(f'训练集: {len(X_train)}, 验证集: {len(X_val)}, 测试集: {len(X_test)}')
 
         # Tokenize
         self._tokenizer = AutoTokenizer.from_pretrained(self.model_name)
         train_enc = self._tokenizer(
             X_train, truncation=True, padding='max_length',
+            max_length=self.max_length, return_tensors='pt'
+        )
+        val_enc = self._tokenizer(
+            X_val, truncation=True, padding='max_length',
             max_length=self.max_length, return_tensors='pt'
         )
         test_enc = self._tokenizer(
@@ -177,12 +203,17 @@ class TransformersNLPTrainer(BaseTrainer):
             train_enc['input_ids'], train_enc['attention_mask'],
             torch.tensor(y_train, dtype=torch.long)
         )
+        val_ds = TensorDataset(
+            val_enc['input_ids'], val_enc['attention_mask'],
+            torch.tensor(y_val, dtype=torch.long)
+        )
         test_ds = TensorDataset(
             test_enc['input_ids'], test_enc['attention_mask'],
             torch.tensor(y_test, dtype=torch.long)
         )
         self._train_loader = DataLoader(train_ds, batch_size=self.batch_size, shuffle=True)
-        self._test_loader = DataLoader(test_ds, batch_size=self.batch_size)
+        self._val_loader = DataLoader(val_ds, batch_size=self.batch_size, shuffle=False)
+        self._test_loader = DataLoader(test_ds, batch_size=self.batch_size, shuffle=False)
 
     # ============ 模型构建 ============
 
@@ -233,6 +264,7 @@ class TransformersNLPTrainer(BaseTrainer):
     # ============ 训练 ============
 
     def train_epoch(self, epoch: int) -> dict:
+        """训练一个 epoch + 验证，返回 train + val 指标"""
         import torch
         self._model.train()
         total_loss = 0.0
@@ -261,17 +293,62 @@ class TransformersNLPTrainer(BaseTrainer):
         avg_loss = total_loss / total if total > 0 else 0
         acc = correct / total if total > 0 else 0
         lr = self._scheduler.get_last_lr()[0]
+
+        # —— 验证集评估 ——
+        self._model.eval()
+        val_loss = 0.0
+        val_correct = val_total = 0
+        with torch.no_grad():
+            for batch in self._val_loader:
+                input_ids, attention_mask, labels = [b.to(self._device) for b in batch]
+                outputs = self._model(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    labels=labels,
+                )
+                val_loss += outputs.loss.item() * len(input_ids)
+                preds = torch.argmax(outputs.logits, dim=1)
+                val_correct += (preds == labels).sum().item()
+                val_total += len(labels)
+
+        val_avg_loss = val_loss / val_total if val_total > 0 else 0
+        val_acc = val_correct / val_total if val_total > 0 else 0
+
+        # —— 早停 (基于 val_loss) ——
+        if val_avg_loss < self._best_val_loss - 1e-4:
+            self._best_val_loss = val_avg_loss
+            self._patience_counter = 0
+            self._best_model_state = copy.deepcopy(self._model.state_dict())
+        else:
+            self._patience_counter += 1
+            if self._patience_counter >= self.early_stopping_patience:
+                self._early_stop = True
+                self._stopped_early = True
+                self._best_val_metric = round(self._best_val_loss, 4)
+
         self.callback.on_log(
             f'Epoch {epoch+1}/{self.total_epochs} - loss={avg_loss:.4f}, '
-            f'acc={acc:.4f}, lr={lr:.2e}'
+            f'acc={acc:.4f}, val_loss={val_avg_loss:.4f}, val_acc={val_acc:.4f}, '
+            f'lr={lr:.2e}'
         )
-        return {'loss': round(avg_loss, 4), 'accuracy': round(acc, 4)}
+        return {
+            'train_loss': round(avg_loss, 4),
+            'train_accuracy': round(acc, 4),
+            'val_loss': round(val_avg_loss, 4),
+            'val_accuracy': round(val_acc, 4),
+        }
 
     # ============ 评估 ============
 
     def evaluate(self) -> dict:
+        """最终评估: 恢复最佳模型 → 在测试集上计算最终指标"""
         import torch
         from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+
+        # —— 恢复早停最佳模型 ——
+        if self._best_model_state is not None:
+            self._model.load_state_dict(self._best_model_state)
+            self.callback.on_log(f'已恢复最佳模型 (val_loss={self._best_val_loss:.4f})')
 
         self._model.eval()
         all_preds = []
@@ -286,22 +363,30 @@ class TransformersNLPTrainer(BaseTrainer):
                 all_labels.extend(labels.cpu().tolist())
 
         result = {
-            'accuracy': round(float(accuracy_score(all_labels, all_preds)), 4),
+            'test_accuracy': round(float(accuracy_score(all_labels, all_preds)), 4),
         }
         try:
-            result['precision_weighted'] = round(float(precision_score(all_labels, all_preds, average='weighted', zero_division=0)), 4)
-            result['recall_weighted'] = round(float(recall_score(all_labels, all_preds, average='weighted', zero_division=0)), 4)
-            result['f1_weighted'] = round(float(f1_score(all_labels, all_preds, average='weighted', zero_division=0)), 4)
-            result['precision_macro'] = round(float(precision_score(all_labels, all_preds, average='macro', zero_division=0)), 4)
-            result['recall_macro'] = round(float(recall_score(all_labels, all_preds, average='macro', zero_division=0)), 4)
-            result['f1_macro'] = round(float(f1_score(all_labels, all_preds, average='macro', zero_division=0)), 4)
+            result['test_precision_weighted'] = round(float(precision_score(all_labels, all_preds, average='weighted', zero_division=0)), 4)
+            result['test_recall_weighted'] = round(float(recall_score(all_labels, all_preds, average='weighted', zero_division=0)), 4)
+            result['test_f1_weighted'] = round(float(f1_score(all_labels, all_preds, average='weighted', zero_division=0)), 4)
+            result['test_precision_macro'] = round(float(precision_score(all_labels, all_preds, average='macro', zero_division=0)), 4)
+            result['test_recall_macro'] = round(float(recall_score(all_labels, all_preds, average='macro', zero_division=0)), 4)
+            result['test_f1_macro'] = round(float(f1_score(all_labels, all_preds, average='macro', zero_division=0)), 4)
         except Exception:
             pass
+
+        if self._stopped_early:
+            result['early_stopped'] = True
+            result['best_val_loss'] = round(self._best_val_loss, 4)
         return result
 
     # ============ 保存 ============
 
     def save_model(self, path: str):
+        # —— 恢复最佳模型后再保存 ——
+        if self._best_model_state is not None:
+            self._model.load_state_dict(self._best_model_state)
+
         os.makedirs(os.path.dirname(path), exist_ok=True)
         save_dir = path + '_nlp_model'
         self._model.save_pretrained(save_dir)
@@ -321,6 +406,40 @@ class TransformersNLPTrainer(BaseTrainer):
             json.dump(meta, f, ensure_ascii=False, indent=2)
 
         self.callback.on_log(f'模型已保存到: {save_dir}/')
+
+    # ============ 检查点 ============
+
+    def save_checkpoint(self):
+        """保存 Transformers 训练快照: 模型权重 + 优化器 + 调度器 + epoch + 早停状态"""
+        if self._model is None:
+            return
+        import torch
+        os.makedirs(self.output_dir, exist_ok=True)
+
+        ckpt = {
+            'model_state': self._model.state_dict(),
+            'optimizer_state': self._optimizer.state_dict(),
+            'scheduler_state': self._scheduler.state_dict(),
+            'epoch': self._current_epoch + 1,
+            'best_val_loss': self._best_val_loss,
+            'patience_counter': self._patience_counter,
+            'best_model_state': self._best_model_state,
+        }
+        ckpt_path = os.path.join(self.output_dir, 'checkpoint.pt')
+        torch.save(ckpt, ckpt_path)
+
+    @staticmethod
+    def load_checkpoint(output_dir: str) -> dict:
+        import torch
+        ckpt_path = os.path.join(output_dir, 'checkpoint.pt')
+        if not os.path.exists(ckpt_path):
+            return {}
+        ckpt = torch.load(ckpt_path, map_location='cpu', weights_only=True)
+        return {'epoch': ckpt.get('epoch', 0)}
+
+    @staticmethod
+    def has_checkpoint(output_dir: str) -> bool:
+        return os.path.exists(os.path.join(output_dir, 'checkpoint.pt'))
 
     # ============ 工具方法 ============
 

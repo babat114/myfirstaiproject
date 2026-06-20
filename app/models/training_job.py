@@ -59,7 +59,8 @@ class TrainingJob(db.Model):
             name='job_status'
         ),
         default='queued',
-        nullable=False
+        nullable=False,
+        index=True
     )
 
     # 进度信息
@@ -92,8 +93,8 @@ class TrainingJob(db.Model):
     uuid = db.Column(db.String(36), unique=True, nullable=False, default=lambda: str(uuid.uuid4()))
 
     # 外键
-    owner_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
-    dataset_id = db.Column(db.Integer, db.ForeignKey('datasets.id'), nullable=True)
+    owner_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    dataset_id = db.Column(db.Integer, db.ForeignKey('datasets.id'), nullable=True, index=True)
     model_id = db.Column(db.Integer, db.ForeignKey('model_records.id', use_alter=True, name='fk_training_jobs_model_id'), nullable=True)
 
     # 时间戳
@@ -150,9 +151,12 @@ class TrainingJob(db.Model):
 
     @property
     def metrics_history(self) -> list:
-        """获取指标历史"""
+        """获取指标历史 (安全反序列化, 损坏的 JSON 返回空列表)"""
         if self.metrics_history_json:
-            return json.loads(self.metrics_history_json)
+            try:
+                return json.loads(self.metrics_history_json)
+            except (json.JSONDecodeError, TypeError):
+                return []
         return []
 
     # ============ 方法 ============

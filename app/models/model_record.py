@@ -84,7 +84,7 @@ class ModelRecord(db.Model):
     mae = db.Column(db.Float, nullable=True, comment='平均绝对误差')
 
     # 训练信息
-    training_dataset_id = db.Column(db.Integer, db.ForeignKey('datasets.id'), nullable=True)
+    training_dataset_id = db.Column(db.Integer, db.ForeignKey('datasets.id'), nullable=True, index=True)
     training_job_id = db.Column(db.Integer, db.ForeignKey('training_jobs.id'), nullable=True)
     training_duration_seconds = db.Column(db.Integer, nullable=True)
 
@@ -93,16 +93,17 @@ class ModelRecord(db.Model):
         db.Enum('draft', 'trained', 'deployed', 'archived', 'failed',
                 name='model_status'),
         default='draft',
-        nullable=False
+        nullable=False,
+        index=True
     )
-    is_public = db.Column(db.Boolean, default=False)
+    is_public = db.Column(db.Boolean, default=False, index=True)
     deployment_url = db.Column(db.String(512), nullable=True)
 
     # 唯一标识符
     uuid = db.Column(db.String(36), unique=True, nullable=False, default=lambda: str(uuid.uuid4()))
 
     # 外键
-    owner_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    owner_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
 
     # 时间戳
     created_at = db.Column(db.DateTime, default=lambda: localnow(), nullable=False)
@@ -122,16 +123,22 @@ class ModelRecord(db.Model):
 
     @property
     def metrics_dict(self) -> dict:
-        """获取指标字典"""
+        """获取指标字典 (安全反序列化, 损坏的 JSON 返回空字典)"""
         if self.metrics_json:
-            return json.loads(self.metrics_json)
+            try:
+                return json.loads(self.metrics_json)
+            except (json.JSONDecodeError, TypeError):
+                return {}
         return {}
 
     @property
     def hyperparameters_dict(self) -> dict:
-        """获取超参数字典"""
+        """获取超参数字典 (安全反序列化, 损坏的 JSON 返回空字典)"""
         if self.hyperparameters_json:
-            return json.loads(self.hyperparameters_json)
+            try:
+                return json.loads(self.hyperparameters_json)
+            except (json.JSONDecodeError, TypeError):
+                return {}
         return {}
 
     @property
@@ -174,12 +181,32 @@ class ModelRecord(db.Model):
         if has_cls or has_reg or has_cluster:
             self.metrics_json = json.dumps(metrics, ensure_ascii=False)
 
-        # 分类指标
-        self.accuracy = metrics.get('accuracy')
-        self.precision = metrics.get('precision_macro', metrics.get('precision'))
-        self.recall = metrics.get('recall_macro', metrics.get('recall'))
-        self.f1_score = metrics.get('f1_macro', metrics.get('f1_score'))
-        self.loss = metrics.get('loss')
+        # 分类指标 — 优先取 test_ 前缀 (测试集指标), 回退到裸键
+        self.accuracy = None
+        self.precision = None
+        self.recall = None
+        self.f1_score = None
+        self.loss = None
+        for primary, fallback, attr in [
+            ('accuracy', None, 'accuracy'),
+            ('precision_macro', 'precision', 'precision'),
+            ('recall_macro', 'recall', 'recall'),
+            ('f1_macro', 'f1_score', 'f1_score'),
+            ('loss', None, 'loss'),
+        ]:
+            for prefix in ('test_', ''):
+                full = f'{prefix}{primary}'
+                if full in metrics:
+                    setattr(self, attr, float(metrics[full]))
+                    break
+                if fallback:
+                    full_fb = f'{prefix}{fallback}'
+                    if full_fb in metrics:
+                        setattr(self, attr, float(metrics[full_fb]))
+                        break
+            # If still None after trying both prefixes, try unprefixed fallback
+            if getattr(self, attr) is None and fallback and fallback in metrics:
+                setattr(self, attr, float(metrics[fallback]))
 
         # 回归指标 — 优先取 test_ 前缀 (测试集指标), 回退到裸键
         self.r2 = None
