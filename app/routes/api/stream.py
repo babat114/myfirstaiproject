@@ -5,14 +5,45 @@ TrainingCallback → EventBus → SSE 客户端
 """
 import json
 import queue
+import threading
 
-from flask import Blueprint, request, Response, jsonify
+from flask import Blueprint, request, Response, jsonify, current_app
 from flask_login import login_required, current_user
 from app import db, logger
 from app.models.training_job import TrainingJob
 from app.services.training_service import TrainingService
 
 stream_bp = Blueprint('stream', __name__)
+
+# SSE 连接限制 — 防止连接耗尽
+_MAX_SSE_CONNECTIONS = 50
+_sse_connections = 0
+_sse_lock = threading.Lock()
+
+
+def _get_max_sse_connections() -> int:
+    """从配置读取 SSE 最大连接数, 默认 50"""
+    try:
+        return int(current_app.config.get('SSE_MAX_CONNECTIONS', _MAX_SSE_CONNECTIONS))
+    except RuntimeError:
+        return _MAX_SSE_CONNECTIONS
+
+
+def _acquire_sse_slot() -> bool:
+    """尝试获取 SSE 连接槽位, 成功返回 True"""
+    global _sse_connections
+    with _sse_lock:
+        if _sse_connections >= _get_max_sse_connections():
+            return False
+        _sse_connections += 1
+        return True
+
+
+def _release_sse_slot():
+    """释放 SSE 连接槽位"""
+    global _sse_connections
+    with _sse_lock:
+        _sse_connections = max(0, _sse_connections - 1)
 
 
 @stream_bp.route('/tuning/<tuning_id>/stream')
@@ -25,6 +56,13 @@ def tuning_stream(tuning_id):
         const source = new EventSource('/api/v1/stream/tuning/' + tuningId + '/stream');
         source.onmessage = (e) => updateProgress(JSON.parse(e.data));
     """
+    if not _acquire_sse_slot():
+        return Response(
+            f"data: {json.dumps({'error': 'SSE 连接数已达上限，请稍后重试'}, ensure_ascii=False)}\n\n",
+            mimetype='text/event-stream',
+            status=503,
+        )
+
     from app.services.hyperparameter_tuning import get_tuning_tracker
     tracker = get_tuning_tracker()
 
@@ -57,6 +95,8 @@ def tuning_stream(tuning_id):
                 _time.sleep(0.5)  # 500ms 间隔
         except GeneratorExit:
             pass
+        finally:
+            _release_sse_slot()
 
     return Response(generate(), mimetype='text/event-stream')
 
@@ -71,12 +111,21 @@ def training_stream(job_id):
         const source = new EventSource('/api/v1/stream/training/123/stream');
         source.onmessage = (e) => updateUI(JSON.parse(e.data));
     """
+    if not _acquire_sse_slot():
+        return Response(
+            'data: {"error": "SSE 连接数已达上限，请稍后重试"}\n\n',
+            mimetype='text/event-stream',
+            status=503,
+        )
+
     job = TrainingService.get_job_by_id(job_id)
     if not job:
+        _release_sse_slot()
         return Response('data: {"error": "任务不存在"}\n\n',
                         mimetype='text/event-stream')
 
     if not job.is_viewable_by(current_user):
+        _release_sse_slot()
         return Response('data: {"error": "权限不足"}\n\n',
                         mimetype='text/event-stream')
 
@@ -118,6 +167,7 @@ def training_stream(job_id):
             pass  # 客户端断开连接
         finally:
             event_bus.unsubscribe(job_id, event_queue)
+            _release_sse_slot()
 
     return Response(generate(), mimetype='text/event-stream')
 

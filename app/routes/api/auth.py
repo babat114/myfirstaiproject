@@ -57,6 +57,7 @@ def login():
 
 
 @auth_api_bp.route('/refresh', methods=['POST'])
+@rate_limit(max_calls=30, period=60)  # 每IP每分钟最多30次刷新
 def refresh():
     """
     刷新 Access Token

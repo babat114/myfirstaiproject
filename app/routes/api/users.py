@@ -5,7 +5,7 @@ RESTful 用户管理接口 (仅管理员)
 ============================================
 """
 from flask import Blueprint, request, jsonify
-from app import db
+from app import db, logger
 from app.services.auth_service import AuthService
 from app.utils.decorators import api_login_required, api_admin_required
 from app.utils.auth_helpers import get_current_user
@@ -75,7 +75,8 @@ def update_user(user_id):
         })
     except Exception as e:
         db.session.rollback()
-        return jsonify({'success': False, 'message': f'更新失败: {str(e)}'}), 500
+        logger.error(f'更新用户 {user_id} 失败: {e}', exc_info=True)
+        return jsonify({'success': False, 'message': '更新失败，请稍后重试。'}), 500
 
 
 @users_api_bp.route('/<int:user_id>/role', methods=['PUT'])
@@ -102,7 +103,8 @@ def update_user_role(user_id):
         })
     except Exception as e:
         db.session.rollback()
-        return jsonify({'success': False, 'message': f'更新失败: {str(e)}'}), 500
+        logger.error(f'更新用户 {user_id} 失败: {e}', exc_info=True)
+        return jsonify({'success': False, 'message': '更新失败，请稍后重试。'}), 500
 
 
 @users_api_bp.route('/<int:user_id>', methods=['DELETE'])
@@ -121,7 +123,7 @@ def delete_user(user_id):
     if success:
         return jsonify({'success': True, 'message': f'用户 {user.username} 已删除。'})
     else:
-        return jsonify({'success': False, 'message': '删除失败。'}), 500
+        return jsonify({'success': False, 'message': '删除失败，请稍后重试。'}), 500
 
 
 @users_api_bp.route('/<int:user_id>/api-key', methods=['POST'])

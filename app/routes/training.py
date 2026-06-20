@@ -5,11 +5,13 @@
 ============================================
 """
 import json
-from flask import Blueprint, render_template, request, redirect, url_for, flash
+from flask import Blueprint, render_template, request, redirect, url_for, flash, session
 from flask_login import login_required, current_user
 from app import db
 from app.services.training_service import TrainingService
 from app.services.dataset_service import DatasetService
+from app.utils.decorators import rate_limit
+from app.utils.helpers import parse_form_params
 
 training_bp = Blueprint('training', __name__)
 
@@ -84,52 +86,8 @@ def create_job():
         test_size = request.form.get('test_size', 0.2, type=float)
         start_immediately = request.form.get('start_immediately') == 'on'
 
-        # 防过拟合超参数 (PyTorch/TensorFlow，可选)
-        extra_hparams = {}
-        val_size_str = request.form.get('val_size', '').strip()
-        if val_size_str:
-            try:
-                extra_hparams['val_size'] = float(val_size_str)
-            except ValueError:
-                pass
-        dropout_str = request.form.get('dropout', '').strip()
-        if dropout_str:
-            try:
-                extra_hparams['dropout'] = float(dropout_str)
-            except ValueError:
-                pass
-        lr_str = request.form.get('learning_rate', '').strip()
-        if lr_str:
-            try:
-                extra_hparams['learning_rate'] = float(lr_str)
-            except ValueError:
-                pass
-        es_str = request.form.get('early_stopping_patience', '').strip()
-        if es_str:
-            try:
-                extra_hparams['early_stopping_patience'] = int(es_str)
-            except ValueError:
-                pass
-        wd_str = request.form.get('weight_decay', '').strip()
-        if wd_str:
-            try:
-                extra_hparams['weight_decay'] = float(wd_str)
-            except ValueError:
-                pass
-        bs_str = request.form.get('batch_size', '').strip()
-        if bs_str:
-            try:
-                extra_hparams['batch_size'] = int(bs_str)
-            except ValueError:
-                pass
-        hl_str = request.form.get('hidden_layers_str', '').strip()
-        if hl_str:
-            try:
-                layers = [int(x.strip()) for x in hl_str.split(',') if x.strip()]
-                if layers:
-                    extra_hparams['hidden_layers'] = layers
-            except ValueError:
-                pass
+        # 防过拟合超参数 (PyTorch/TensorFlow，可选) — 委托给 Service 层统一解析
+        extra_hparams = TrainingService.parse_extra_hyperparams(request.form.to_dict())
 
         if not name:
             flash('请输入任务名称。', 'danger')
@@ -139,55 +97,52 @@ def create_job():
             flash('请选择数据集。', 'danger')
             return render_template('training/create.html', datasets=datasets_with_cols)
 
-        # === GridSearchCV 自动调优 ===
+        # === 超参数自动调优 ===
+        # AutoML 模式: algorithm='auto' 时自动启用调优
         auto_tune = (request.form.get('auto_tune') == 'on'
-                     or request.form.get('auto_tune_hidden') == 'true')
+                     or request.form.get('auto_tune_hidden') == 'true'
+                     or algorithm == 'auto')
         if auto_tune:
-            from app.services.hyperparameter_tuning import HyperparameterTuningService
 
-            dataset = DatasetService.get_dataset_by_id(dataset_id)
-            if not dataset:
-                flash('数据集不存在。', 'danger')
-                return render_template('training/create.html', datasets=datasets_with_cols)
+            # AutoML (algorithm='auto') 需要遍历多种算法, 耗时较长,
+            # 重定向到专用调优页面以使用异步 SSE 进度推送
+            if algorithm == 'auto':
+                session['_tuning_presets'] = {
+                    'dataset_id': dataset_id,
+                    'task_type': ml_task_type,
+                    'target_column': target_column,
+                    'tuning_method': request.form.get('tuning_method', 'random'),
+                    'n_iter': request.form.get('n_iter', 30, type=int) if request.form.get('n_iter') else 30,
+                    'cv': request.form.get('tuning_cv', 5, type=int) if request.form.get('tuning_cv') else 5,
+                    'algorithm': 'auto',
+                    'start_training': request.form.get('start_immediately') == 'on',
+                    'job_name': name,
+                }
+                flash('已切换到 AutoML 智能调优模式 — 正在遍历所有适用算法, 请耐心等待实时进度...', 'info')
+                return redirect(url_for('training.hyperparameter_tuning', auto_start='1'))
 
-            tuning_method = request.form.get('tuning_method', 'random')
-            tuning_cv = request.form.get('tuning_cv', 5, type=int)
+            # 单算法调优: 也重定向到调优页面使用异步 SSE 进度推送
+            # (不再同步执行 GridSearchCV — 会阻塞 Flask worker 数分钟)
+            session['_tuning_presets'] = {
+                'dataset_id': dataset_id,
+                'task_type': ml_task_type,
+                'target_column': target_column,
+                'tuning_method': request.form.get('tuning_method', 'random'),
+                'n_iter': request.form.get('n_iter', 30, type=int) if request.form.get('n_iter') else 30,
+                'cv': request.form.get('tuning_cv', 5, type=int) if request.form.get('tuning_cv') else 5,
+                'algorithm': algorithm,
+                'start_training': request.form.get('start_immediately') == 'on',
+                'job_name': name,
+            }
+            flash(f'已切换到 {algorithm} 自动调优模式 — 正在使用异步实时进度搜索最佳参数...', 'info')
+            return redirect(url_for('training.hyperparameter_tuning', auto_start='1'))
 
-            flash(f'正在运行 GridSearchCV 自动调优 ({tuning_method})，请耐心等待...', 'info')
-
-            job, tuning_result, tuning_error = HyperparameterTuningService.create_tuned_training(
-                user=current_user,
-                dataset=dataset,
-                algorithm=algorithm,
-                task_type=ml_task_type,
-                target_column=target_column,
-                tuning_method=tuning_method,
-                n_iter=30,
-                cv=tuning_cv,
-                epochs=total_epochs,
-            )
-
-            if tuning_error:
-                flash(f'GridSearchCV 调优失败: {tuning_error}', 'danger')
-                return render_template('training/create.html', datasets=datasets_with_cols)
-
-            best_score = tuning_result.get('best_score', '?')
-            best_params = tuning_result.get('best_params', {})
-
-            if start_immediately:
-                TrainingService.start_job(job)
-                flash(f'GridSearchCV 调优完成! 最佳CV分数: {best_score:.4f}, '
-                      f'参数: {best_params}. 训练已启动!', 'success')
-            else:
-                flash(f'GridSearchCV 调优完成! 最佳CV分数: {best_score:.4f}, '
-                      f'参数: {best_params}. 训练任务已创建。', 'success')
-
-            return redirect(url_for('training.job_detail', job_id=job.id))
-
-        # === 正常创建流程 (无GridSearchCV) ===
+        # === 正常创建流程 (无自动调优) ===
         if algorithm in ('random_forest', 'gradient_boosting', 'random_forest_regressor',
                          'gradient_boosting_regressor', 'svm', 'svr',
-                         'logistic_regression', 'linear_regression', 'ridge', 'knn'):
+                         'logistic_regression', 'linear_regression', 'ridge', 'knn',
+                         'knn_regressor', 'decision_tree',
+                         'kmeans', 'dbscan', 'agglomerative', 'minibatch_kmeans'):
             total_epochs = 1  # sklearn 的 fit 一次性
         elif total_epochs <= 0:
             total_epochs = 10
@@ -231,6 +186,7 @@ def create_job():
 
 @training_bp.route('/<int:job_id>')
 @login_required
+@rate_limit(max_calls=60, period=60)  # 防 ID 枚举: 限制详情页访问频率
 def job_detail(job_id):
     """训练任务详情"""
     job = TrainingService.get_job_by_id(job_id)
@@ -374,30 +330,22 @@ def retrain_job_with_params(job_id):
         flash('您没有权限操作此任务。', 'danger')
         return redirect(url_for('training.list_jobs'))
 
-    # 解析用户提交的新参数
-    new_params = {}
-    for key in ('learning_rate', 'batch_size', 'epochs', 'total_epochs',
-                'test_size', 'dropout', 'weight_decay', 'algorithm',
-                'ml_task_type', 'framework', 'hidden_layers_str'):
-        val = request.form.get(key)
-        if val is not None and val != '':
-            new_params[key] = val
+    # 白名单字段类型 — 复用 parse_form_params 减少重复代码
+    _STR_FIELDS = {'algorithm', 'ml_task_type', 'framework', 'hidden_layers_str',
+                   'class_weight', 'max_features', 'criterion', 'kernel', 'penalty',
+                   'solver', 'weights', 'metric'}
+    _FLOAT_FIELDS = {'learning_rate', 'test_size', 'dropout', 'weight_decay',
+                     'C', 'alpha', 'gamma', 'epsilon', 'subsample', 'learning_rate_init'}
+    _INT_FIELDS = {'batch_size', 'epochs', 'total_epochs', 'n_estimators', 'max_depth',
+                   'min_samples_split', 'min_samples_leaf', 'n_neighbors', 'max_iter',
+                   'n_clusters', 'val_size', 'early_stopping_patience'}
 
-    # 转换数值类型
-    for num_key in ('learning_rate', 'test_size', 'dropout', 'weight_decay'):
-        if num_key in new_params:
-            try:
-                new_params[num_key] = float(new_params[num_key])
-            except (ValueError, TypeError):
-                flash(f'参数 {num_key} 格式无效。', 'danger')
-                return redirect(url_for('training.job_detail', job_id=job.id))
-    for int_key in ('batch_size', 'epochs', 'total_epochs'):
-        if int_key in new_params:
-            try:
-                new_params[int_key] = int(new_params[int_key])
-            except (ValueError, TypeError):
-                flash(f'参数 {int_key} 格式无效。', 'danger')
-                return redirect(url_for('training.job_detail', job_id=job.id))
+    new_params = parse_form_params(
+        dict(request.form),
+        int_fields=_INT_FIELDS,
+        float_fields=_FLOAT_FIELDS,
+        str_fields=_STR_FIELDS,
+    )
 
     # 处理 hidden_layers (逗号分隔字符串 → 列表)
     if 'hidden_layers_str' in new_params:
@@ -418,7 +366,7 @@ def retrain_job_with_params(job_id):
         success, error = TrainingService.retrain_job(job)
         msg = '已使用原参数重新训练！'
     else:
-        success, error = TrainingService.retrain_job_with_params(job, new_params)
+        success, error = TrainingService.retrain_job(job, new_params=new_params)
         msg = f'已使用新参数重新训练！'
 
     if success:
@@ -477,6 +425,7 @@ def gridsearch_retrain(job_id):
             target_column=target_column,
             cv=3,
             n_jobs=2,
+            random_state=None,
         )
         return jsonify({
             'success': True,
@@ -522,21 +471,10 @@ def gridsearch_retrain(job_id):
     best_score = tuning_result['best_score']
 
     is_mlp = (algorithm == 'mlp')
-    retrain_params = {
-        'algorithm': algorithm,
-        'ml_task_type': ml_task_type,
-        'framework': 'pytorch' if is_mlp else hparams.get('framework', 'sklearn'),
-    }
-    # 跳过与ML配置键冲突的参数 (如 KMeans 的 algorithm=lloyd 会覆盖 algorithm=kmeans)
-    _CONFLICT_KEYS = {'algorithm', 'ml_task_type', 'task_type', 'framework'}
-    for k, v in best_params.items():
-        if k not in _CONFLICT_KEYS:
-            retrain_params[k] = v
-    for k in ('hidden_layers', 'dropout', 'test_size'):
-        if k in hparams and k not in retrain_params:
-            retrain_params[k] = hparams[k]
+    retrain_params = TrainingService.build_retrain_params(
+        best_params, hparams, algorithm, ml_task_type, is_mlp=is_mlp)
 
-    success, error = TrainingService.retrain_job_with_params(job, retrain_params)
+    success, error = TrainingService.retrain_job(job, new_params=retrain_params)
 
     if success:
         if job.model:
@@ -590,21 +528,10 @@ def apply_tuning_result(job_id):
     ml_task_type = session.get('task_type', 'classification')
     is_mlp = (algorithm == 'mlp')
 
-    retrain_params = {
-        'algorithm': algorithm,
-        'ml_task_type': ml_task_type,
-        'framework': 'pytorch' if is_mlp else hparams.get('framework', 'sklearn'),
-    }
-    # 跳过与ML配置键冲突的参数 (如 KMeans 的 algorithm=lloyd 会覆盖 algorithm=kmeans)
-    _CONFLICT_KEYS = {'algorithm', 'ml_task_type', 'task_type', 'framework'}
-    for k, v in best_params.items():
-        if k not in _CONFLICT_KEYS:
-            retrain_params[k] = v
-    for k in ('hidden_layers', 'dropout', 'test_size'):
-        if k in hparams and k not in retrain_params:
-            retrain_params[k] = hparams[k]
+    retrain_params = TrainingService.build_retrain_params(
+        best_params, hparams, algorithm, ml_task_type, is_mlp=is_mlp)
 
-    success, error = TrainingService.retrain_job_with_params(job, retrain_params)
+    success, error = TrainingService.retrain_job(job, new_params=retrain_params)
 
     if success and job.model:
         hp = job.model.hyperparameters_dict
@@ -655,6 +582,21 @@ def hyperparameter_tuning():
     tuning_result = None
     error = None
 
+    # ── 随机种子: 支持可复现调优 (form参数 random_seed) ──
+    random_state = None
+    try:
+        random_state = request.form.get('random_seed', type=int)
+        if random_state is not None and random_state < 0:
+            random_state = None
+    except (ValueError, TypeError):
+        random_state = None
+
+    # ── AutoML 自动启动: 从创建页面重定向过来, 预填参数并自动提交 ──
+    auto_start = request.args.get('auto_start') == '1'
+    presets = session.pop('_tuning_presets', None) if auto_start else None
+    # 非AJAX回退产生的 tuning_id: 页面加载后自动连接 SSE 进度
+    live_tuning_id = request.args.get('tuning_id')
+
     if request.method == 'POST':
         dataset_id = request.form.get('dataset_id', type=int)
         algorithm = request.form.get('algorithm', 'random_forest')
@@ -677,27 +619,29 @@ def hyperparameter_tuning():
                 if not target_column:
                     target_column = None
 
-                # ---- 异步模式: 后台调优 + SSE 进度 ----
+                # ---- 异步模式: 后台调优 + SSE 进度 (推荐) ----
                 if is_ajax:
                     if algorithm == 'auto':
-                        # AutoML: 自动遍历所有适用算法
                         tuning_id = HyperparameterTuningService.run_auto_tuning_async(
                             dataset=dataset,
                             task_type=task_type,
                             target_column=target_column,
                             cv=cv, n_jobs=2,
+                            random_state=random_state,
                         )
                     elif tuning_method == 'grid':
                         tuning_id = HyperparameterTuningService.run_grid_search_async(
                             dataset=dataset, algorithm=algorithm,
                             task_type=task_type, target_column=target_column,
                             cv=cv, n_jobs=2,
+                            random_state=random_state,
                         )
                     else:
                         tuning_id = HyperparameterTuningService.run_random_search_async(
                             dataset=dataset, algorithm=algorithm,
                             task_type=task_type, target_column=target_column,
                             n_iter=n_iter, cv=cv, n_jobs=2,
+                            random_state=random_state,
                         )
                     return jsonify({
                         'success': True,
@@ -705,28 +649,30 @@ def hyperparameter_tuning():
                         'stream_url': f'/api/v1/stream/tuning/{tuning_id}/stream',
                     })
 
-                # ---- 同步模式 (传统表单提交) ----
-                job, tuning_result, err = HyperparameterTuningService.create_tuned_training(
-                    user=current_user,
-                    dataset=dataset,
-                    algorithm=algorithm,
-                    task_type=task_type,
-                    target_column=target_column,
-                    tuning_method=tuning_method,
-                    n_iter=n_iter,
-                    cv=cv,
-                    epochs=0 if algorithm not in ('pytorch', 'mlp') else 10,
-                )
-
-                if err:
-                    error = err
-                elif job and start_training:
-                    TrainingService.start_job(job)
-                    flash(f'调优完成！最佳CV分数: {tuning_result["best_score"]:.4f}，训练任务已启动。', 'success')
-                    return redirect(url_for('training.job_detail', job_id=job.id))
-                elif job:
-                    flash(f'调优完成！最佳CV分数: {tuning_result["best_score"]:.4f}，训练任务已创建。', 'success')
-                    return redirect(url_for('training.job_detail', job_id=job.id))
+                # ---- 非 AJAX 回退: 也走异步, 重定向到当前页并连接 SSE ----
+                if algorithm == 'auto':
+                    tuning_id = HyperparameterTuningService.run_auto_tuning_async(
+                        dataset=dataset, task_type=task_type,
+                        target_column=target_column, cv=cv, n_jobs=2,
+                        random_state=random_state,
+                    )
+                elif tuning_method == 'grid':
+                    tuning_id = HyperparameterTuningService.run_grid_search_async(
+                        dataset=dataset, algorithm=algorithm,
+                        task_type=task_type, target_column=target_column,
+                        cv=cv, n_jobs=2,
+                        random_state=random_state,
+                    )
+                else:
+                    tuning_id = HyperparameterTuningService.run_random_search_async(
+                        dataset=dataset, algorithm=algorithm,
+                        task_type=task_type, target_column=target_column,
+                        n_iter=n_iter, cv=cv, n_jobs=2,
+                        random_state=random_state,
+                    )
+                flash('调优已在后台启动，下方将展示实时进度。', 'info')
+                return redirect(url_for('training.hyperparameter_tuning',
+                                        tuning_id=tuning_id))
 
     # 获取搜索空间供前端展示
     search_spaces = {k: list(v.keys()) for k, v in SEARCH_SPACES.items()}
@@ -737,4 +683,7 @@ def hyperparameter_tuning():
         tuning_result=tuning_result,
         error=error,
         search_spaces=search_spaces,
+        auto_start=auto_start,
+        presets=presets,
+        live_tuning_id=live_tuning_id,
     )

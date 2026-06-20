@@ -6,6 +6,7 @@ RESTful JSON 接口
 """
 import json
 from flask import Blueprint, request, jsonify
+from app import logger
 from app.services.training_service import TrainingService
 from app.utils.decorators import api_login_required, rate_limit
 from app.utils.auth_helpers import get_current_user
@@ -201,18 +202,26 @@ def complete_job(job_uuid):
 @training_api_bp.route('/<string:job_uuid>/fail', methods=['POST'])
 @api_login_required
 def fail_job(job_uuid):
-    """POST /api/training/<uuid>/fail - 标记训练失败"""
+    """POST /api/training/<uuid>/fail - 标记训练失败 (仅限 running/paused 状态)"""
     job = TrainingService.get_job_by_uuid(job_uuid)
     if not job:
         return jsonify({'success': False, 'message': '任务不存在。'}), 404
 
     user = get_current_user()
-    if job.owner_id != user.id:
+    if job.owner_id != user.id and not user.is_admin:
         return jsonify({'success': False, 'message': '权限不足。'}), 403
+
+    # 仅允许对 running/paused 状态的任务标记失败, 防止滥用
+    if job.status not in ('running', 'paused', 'queued', 'preparing'):
+        return jsonify({
+            'success': False,
+            'message': f'无法将 {job.status} 状态的任务标记为失败。仅运行中的任务可标记。',
+        }), 400
 
     data = request.get_json(silent=True) or {}
     error_msg = data.get('error', '未知错误')
     TrainingService.fail_job(job, error_msg)
+    logger.warning(f'用户 {user.username} 手动标记任务 {job.id} 为失败: {error_msg}')
 
     return jsonify({'success': True, 'message': '训练失败已记录。'})
 
@@ -269,11 +278,25 @@ def retrain_with_params(job_uuid):
 
     data = request.get_json(silent=True) or {}
 
-    # 数值转换
+    # 数值转换 — expanded to accept all sklearn hyperparameter keys
     new_params = {}
-    str_fields = ('algorithm', 'ml_task_type', 'framework')
-    float_fields = ('learning_rate', 'test_size', 'dropout', 'weight_decay')
-    int_fields = ('batch_size', 'epochs', 'total_epochs')
+    # 已知安全参数白名单
+    str_fields = ('algorithm', 'ml_task_type', 'framework', 'class_weight',
+                  'max_features', 'criterion', 'kernel', 'penalty', 'solver',
+                  'weights', 'metric', 'hidden_layers_str')
+    float_fields = ('learning_rate', 'test_size', 'dropout', 'weight_decay',
+                    'C', 'alpha', 'gamma', 'epsilon', 'subsample', 'learning_rate_init')
+    int_fields = ('batch_size', 'epochs', 'total_epochs', 'n_estimators', 'max_depth',
+                  'min_samples_split', 'min_samples_leaf', 'n_neighbors', 'max_iter',
+                  'n_clusters', 'val_size', 'early_stopping_patience')
+
+    # 已知安全的额外参数 (白名单, 防止参数注入)
+    ALLOWED_EXTRA_PARAMS = {
+        'fit_intercept', 'positive', 'n_init', 'init', 'degree', 'p',
+        'linkage', 'eps', 'min_samples', 'batch_size_tune',
+        'validation_fraction', 'early_stopping', 'hidden_layer_sizes',
+        'tol', 'verbose', 'n_jobs', 'warm_start',
+    }
 
     for k in str_fields:
         if data.get(k):
@@ -290,6 +313,10 @@ def retrain_with_params(job_uuid):
                 new_params[k] = int(data[k])
             except (ValueError, TypeError):
                 return jsonify({'success': False, 'message': f'参数 {k} 格式无效'}), 400
+    # 白名单内的额外参数 (保持原始类型)
+    for k, v in data.items():
+        if k in ALLOWED_EXTRA_PARAMS:
+            new_params[k] = v
     if data.get('hidden_layers'):
         try:
             if isinstance(data['hidden_layers'], str):
@@ -301,10 +328,7 @@ def retrain_with_params(job_uuid):
     if 'epochs' in new_params and 'total_epochs' not in new_params:
         new_params['total_epochs'] = new_params.pop('epochs')
 
-    if not new_params:
-        success, error = TrainingService.retrain_job(job)
-    else:
-        success, error = TrainingService.retrain_job_with_params(job, new_params)
+    success, error = TrainingService.retrain_job(job, new_params=new_params or None)
 
     if not success:
         return jsonify({'success': False, 'message': error}), 400

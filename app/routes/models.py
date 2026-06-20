@@ -157,7 +157,20 @@ def model_detail(model_id):
         flash('您没有权限查看此模型。', 'danger')
         return redirect(url_for('models.list_models'))
 
-    return render_template('models/detail.html', model=model)
+    # 加载评论区数据 (仅公开模型)
+    comments_data = None
+    if model.is_public:
+        from app.services.comment_service import CommentService
+        page = request.args.get('comment_page', 1, type=int)
+        comments_data = CommentService.get_comments_for_model(
+            model_id=model.id,
+            user=current_user,
+            page=page,
+            per_page=10,
+            include_hidden=current_user.is_admin,
+        )
+
+    return render_template('models/detail.html', model=model, comments_data=comments_data)
 
 
 @models_bp.route('/<int:model_id>/edit', methods=['GET', 'POST'])
@@ -355,6 +368,7 @@ def test_model(model_id):
     error = None
     preview_data = None
     preview_columns = None
+    image_preview = None  # base64 缩略图 (CV 模型上传预览)
 
     if request.method == 'POST':
         action = request.form.get('action', 'predict')
@@ -388,7 +402,6 @@ def test_model(model_id):
             # 手动输入特征值 — 使用模型真实特征名
             try:
                 import pandas as pd
-                # 获取特征名
                 fnames_json = request.form.get('feature_names_json', '[]')
                 try:
                     fnames = json.loads(fnames_json)
@@ -399,14 +412,73 @@ def test_model(model_id):
                 for i in range(feature_count):
                     val = request.form.get(f'feature_{i}', '')
                     if val:
-                        # 用真实特征名作为 DataFrame 列名
                         real_name = fnames[i] if i < len(fnames) else f'feature_{i}'
                         manual_data[real_name] = [float(val)]
                 if manual_data:
                     df = pd.DataFrame(manual_data)
                     result = ModelInferenceService.predict(model, df)
+                else:
+                    error = '请至少输入一个特征值后再点击预测。'
             except Exception as e:
                 error = f'输入解析失败: {str(e)}'
+
+        elif action == 'predict_text':
+            # NLP 模型: 原始文本 → TF-IDF 特征 → 预测
+            text_input = request.form.get('text_input', '').strip()
+            if not text_input:
+                error = '请输入文本内容后再点击预测。'
+            else:
+                try:
+                    from app.services.feature_extractor import FeatureExtractor
+                    n_features = len(feature_names) if feature_names else 100
+                    features, feat_error = FeatureExtractor.extract_text_features(
+                        text_input, max(n_features, 10)
+                    )
+                    if feat_error:
+                        error = feat_error
+                    else:
+                        import pandas as pd
+                        df = pd.DataFrame(
+                            features,
+                            columns=[feature_names[i] if i < len(feature_names)
+                                     else f'feature_{i}'
+                                     for i in range(features.shape[1])]
+                        )
+                        result = ModelInferenceService.predict(model, df)
+                except Exception as e:
+                    error = f'文本预测失败: {str(e)}'
+
+        elif action == 'predict_image':
+            # CV 模型: 上传图像 → CNN特征提取 → 预测
+            img_file = request.files.get('image_file')
+            if not img_file or not img_file.filename:
+                error = '请选择图像文件后再点击预测。'
+            else:
+                try:
+                    from app.services.feature_extractor import FeatureExtractor
+                    image_data = img_file.read()
+                    n_features = len(feature_names) if feature_names else 100
+                    features, feat_error = FeatureExtractor.extract_image_features(
+                        image_data, max(n_features, 10)
+                    )
+                    if feat_error:
+                        error = feat_error
+                    else:
+                        import pandas as pd
+                        df = pd.DataFrame(
+                            features,
+                            columns=[feature_names[i] if i < len(feature_names)
+                                     else f'feature_{i}'
+                                     for i in range(features.shape[1])]
+                        )
+                        result = ModelInferenceService.predict(model, df)
+                        # 生成缩略图用于前端回显
+                        thumb = FeatureExtractor.load_image_thumbnail(image_data)
+                        if thumb:
+                            import base64
+                            image_preview = base64.b64encode(thumb).decode('utf-8')
+                except Exception as e:
+                    error = f'图像预测失败: {str(e)}'
 
         elif action == 'run_test':
             # 使用原始数据集进行完整测试评估
@@ -421,13 +493,16 @@ def test_model(model_id):
             if not feature_importance.get('success'):
                 error = feature_importance.get('error')
 
-    # 获取特征名 (优先从模型元数据，其次从数据集)
+    # 获取特征名 + 模型文件状态 (优先从模型元数据，其次从数据集)
     feature_names = []
+    model_file_error = None
     hyperparams = model.hyperparameters_dict
-    # 尝试从模型文件元数据中获取 (PyTorch/sklearn saved config)
+    # 尝试从模型文件元数据中获取 (PyTorch/sklearn/Transformers saved config)
     try:
         from app.services.inference_service import ModelInferenceService
-        _, metadata, _ = ModelInferenceService.load_model(model)
+        _, metadata, _, load_error = ModelInferenceService.load_model(model)
+        if load_error:
+            model_file_error = load_error
         if metadata and metadata.get('feature_names'):
             feature_names = list(metadata['feature_names'])
     except Exception:
@@ -452,4 +527,6 @@ def test_model(model_id):
         feature_names=feature_names,
         preview_data=preview_data,
         preview_columns=preview_columns,
+        model_file_error=model_file_error,
+        image_preview=image_preview,
     )
