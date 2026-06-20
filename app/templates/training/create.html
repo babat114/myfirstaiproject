@@ -278,21 +278,28 @@
 <script>
 const ALGORITHMS = {
     classification: [
+        {value: 'auto', label: '🤖 AutoML 智能选择 (自动遍历所有算法)'},
         {value: 'transformer_bert', label: 'BERT Transformer (NLP迁移学习)'},
         {value: 'random_forest', label: '随机森林 (Random Forest)'},
         {value: 'gradient_boosting', label: '梯度提升 (Gradient Boosting)'},
         {value: 'logistic_regression', label: '逻辑回归 (Logistic Regression)'},
         {value: 'svm', label: '支持向量机 (SVM)'},
         {value: 'knn', label: 'K近邻 (KNN)'},
+        {value: 'decision_tree', label: '决策树 (Decision Tree)'},
+        {value: 'mlp', label: 'PyTorch MLP (深度学习)'},
     ],
     regression: [
+        {value: 'auto', label: '🤖 AutoML 智能选择 (自动遍历所有算法)'},
         {value: 'random_forest_regressor', label: '随机森林回归 (Random Forest)'},
         {value: 'gradient_boosting_regressor', label: '梯度提升回归 (Gradient Boosting)'},
         {value: 'ridge', label: '岭回归 (Ridge, L2正则)'},
+        {value: 'knn_regressor', label: 'K近邻回归 (KNN Regressor)'},
         {value: 'linear_regression', label: '线性回归 (Linear Regression)'},
         {value: 'svr', label: '支持向量回归 (SVR)'},
+        {value: 'mlp', label: 'PyTorch MLP (深度学习)'},
     ],
     clustering: [
+        {value: 'auto', label: '🤖 AutoML 智能选择 (自动遍历所有算法)'},
         {value: 'kmeans', label: 'K-Means 聚类'},
         {value: 'dbscan', label: 'DBSCAN 密度聚类'},
         {value: 'agglomerative', label: '层次聚类 (Agglomerative)'},
@@ -302,6 +309,7 @@ const ALGORITHMS = {
 
 const sklearnAlgos = ['random_forest', 'gradient_boosting', 'random_forest_regressor',
     'gradient_boosting_regressor', 'svm', 'svr', 'logistic_regression', 'linear_regression', 'ridge', 'knn',
+    'knn_regressor', 'decision_tree',
     'kmeans', 'dbscan', 'agglomerative', 'minibatch_kmeans'];
 // transformer/mlp are deep learning frameworks — not single-epoch sklearn models
 const dlAlgos = ['transformer_bert', 'mlp'];
@@ -323,15 +331,35 @@ function updateEpoch() {
     const algo = document.getElementById('algorithmSelect').value;
     const epochInput = document.getElementById('epochInput');
     const epochHelp = epochInput.nextElementSibling;
-    if (closedFormAlgos.includes(algo)) {
+    const autoTuneCheck = document.getElementById('autoTuneCheck');
+    const autoTuneHidden = document.getElementById('autoTuneHidden');
+    const tuneOptionsBox = document.getElementById('tuneOptionsBox');
+
+    if (algo === 'auto') {
+        // AutoML 模式: 自动启用调优, epoch 由 AutoML 决定
+        if (autoTuneCheck) { autoTuneCheck.checked = true; autoTuneCheck.disabled = true; }
+        if (autoTuneHidden) autoTuneHidden.value = 'true';
+        if (tuneOptionsBox) tuneOptionsBox.classList.remove('d-none');
+        epochInput.value = '';
+        epochInput.disabled = true;
+        if (epochHelp) epochHelp.textContent = 'AutoML 将自动选择最佳算法和参数';
+    } else if (sklearnAlgos.includes(algo)) {
+        // 修复: 从 auto 切换到 sklearn 时必须重置复选框状态,
+        // 否则 transient auto 状态遗留的 checked=true 会导致无论是否勾选都跳转调优页
+        if (autoTuneCheck) { autoTuneCheck.disabled = false; autoTuneCheck.checked = false; }
+        if (tuneOptionsBox) tuneOptionsBox.classList.add('d-none');
         epochInput.value = 1;
         epochInput.disabled = true;
         if (epochHelp) epochHelp.textContent = 'sklearn 模型固定为 1';
     } else if (algo === 'transformer_bert') {
+        if (autoTuneCheck) { autoTuneCheck.disabled = false; autoTuneCheck.checked = false; }
+        if (tuneOptionsBox) tuneOptionsBox.classList.add('d-none');
         epochInput.value = 3;
         epochInput.disabled = false;
         if (epochHelp) epochHelp.textContent = 'BERT 微调推荐 3-5 轮';
     } else {
+        if (autoTuneCheck) { autoTuneCheck.disabled = false; autoTuneCheck.checked = false; }
+        if (tuneOptionsBox) tuneOptionsBox.classList.add('d-none');
         epochInput.disabled = false;
         if (epochHelp) epochHelp.textContent = '';
         if (epochInput.value == 1 && algo === 'mlp') epochInput.value = 20;
@@ -344,6 +372,8 @@ function updateEpoch() {
         if (fwSelect) fwSelect.value = 'transformers';
     } else if (algo === 'mlp') {
         if (fwSelect) fwSelect.value = 'pytorch';
+    } else if (algo === 'auto') {
+        if (fwSelect) fwSelect.value = 'sklearn';
     }
 }
 
@@ -589,12 +619,19 @@ document.getElementById('createJobForm').addEventListener('submit', function() {
 });
 
 document.getElementById('createAndStartBtn').addEventListener('click', function() {
-    const input = document.createElement('input');
-    input.type = 'hidden';
-    input.name = 'start_immediately';
-    input.value = 'on';
-    document.getElementById('createJobForm').appendChild(input);
-    document.getElementById('createJobForm').submit();
+    const form = document.getElementById('createJobForm');
+    // 确保 start_immediately 字段存在 (避免 submit handler 重复添加)
+    let si = form.querySelector('input[name="start_immediately"]');
+    if (!si) {
+        si = document.createElement('input');
+        si.type = 'hidden';
+        si.name = 'start_immediately';
+        si.value = 'on';
+        form.appendChild(si);
+    }
+    // requestSubmit() 会触发 submit 事件处理器 (auto_tune/epoch等)
+    // 而 form.submit() 不会 — 这是关键区别
+    form.requestSubmit();
 });
 
 updateAlgorithms();
@@ -927,14 +964,19 @@ function applyGridSearchSuggestion(data) {
     const gsInfo = document.getElementById('gridsearchInfo');
 
     autoTuneCheck.disabled = false;
+    // 关键修复: 不再自动勾选 GridSearchCV 复选框!
+    // AI 仅提供建议信息, 由用户主动决定是否启用自动调优。
+    // 之前 autoTuneCheck.checked = true 导致用户无论是否勾选都会被重定向到调优页面,
+    // 且训练任务无法正常创建。
 
     if (data.gridsearch_suggestion) {
-        autoTuneCheck.checked = true;
-        tuneOptionsBox.classList.remove('d-none');
-        gsReason.textContent = data.gridsearch_reason;
+        // 仅展示推荐信息, 不自动勾选
+        autoTuneCheck.checked = false;
+        tuneOptionsBox.classList.add('d-none');
+        gsReason.textContent = 'AI推荐: ' + data.gridsearch_reason;
         gsReason.classList.remove('text-muted');
         gsReason.classList.add('text-success');
-        gsInfo.innerHTML = '<small><i class="bi bi-lightbulb-fill text-warning me-1"></i><strong>AI建议:</strong> 使用GridSearchCV自动调优可获得更好的模型</small>';
+        gsInfo.innerHTML = '<small><i class="bi bi-lightbulb-fill text-warning me-1"></i><strong>AI建议:</strong> 推荐使用GridSearchCV自动调优。请手动开启上方开关以启用。</small>';
     } else {
         autoTuneCheck.checked = false;
         tuneOptionsBox.classList.add('d-none');
@@ -956,12 +998,14 @@ document.getElementById('autoTuneCheck').addEventListener('change', function() {
 });
 
 // 表单提交前处理 auto_tune
+// 注意: GridSearchCV 勾选与 start_immediately 是两个独立的选择,
+// 不应自动绑定。start_immediately 仅由 "创建并开始训练" 按钮设置。
 const origFormSubmit = document.getElementById('createJobForm').onsubmit;
 document.getElementById('createJobForm').addEventListener('submit', function(e) {
     const autoTuneCheck = document.getElementById('autoTuneCheck');
     if (autoTuneCheck.checked) {
-        // 确保 auto_tune 值被提交 (如果checkbox在form内且checked, 应该已经被提交)
-        // 额外添加 hidden input 确保
+        // 确保 auto_tune_hidden 值被提交 (checkbox checked 时浏览器自动提交 auto_tune=on,
+        // 但额外添加 hidden input 作为双重保障)
         let hidden = document.querySelector('input[name="auto_tune_hidden"]');
         if (!hidden) {
             hidden = document.createElement('input');
@@ -969,14 +1013,6 @@ document.getElementById('createJobForm').addEventListener('submit', function(e) 
             hidden.name = 'auto_tune_hidden';
             hidden.value = 'true';
             this.appendChild(hidden);
-        }
-        // 如果 GridSearchCV 选中，设置 start_immediately
-        if (!document.querySelector('input[name="start_immediately"]')) {
-            const si = document.createElement('input');
-            si.type = 'hidden';
-            si.name = 'start_immediately';
-            si.value = 'on';
-            this.appendChild(si);
         }
     }
 });

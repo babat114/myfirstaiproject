@@ -192,6 +192,20 @@
                             {% if m.status in ('trained', 'deployed') %}
                             <a href="{{ url_for('models.test_model', model_id=m.id) }}" class="btn btn-outline-success" title="测试"><i class="bi bi-clipboard-check"></i></a>
                             {% endif %}
+                            <!-- 导出下拉菜单 -->
+                            <div class="btn-group btn-group-sm">
+                                <button class="btn btn-outline-info dropdown-toggle" data-bs-toggle="dropdown" title="导出">
+                                    <i class="bi bi-box-arrow-down"></i>
+                                </button>
+                                <ul class="dropdown-menu dropdown-menu-end">
+                                    <li><a class="dropdown-item" href="/api/v1/models/{{ m.uuid }}/download">
+                                        <i class="bi bi-download"></i> 下载模型文件</a></li>
+                                    <li><a class="dropdown-item export-onnx-link" href="#" data-uuid="{{ m.uuid }}">
+                                        <i class="bi bi-box-arrow-up-right"></i> 导出 ONNX</a></li>
+                                    <li><a class="dropdown-item export-deploy-link" href="#" data-uuid="{{ m.uuid }}">
+                                        <i class="bi bi-box-seam"></i> Docker 部署包</a></li>
+                                </ul>
+                            </div>
                             <a href="{{ url_for('models.edit_model', model_id=m.id) }}" class="btn btn-outline-secondary" title="编辑"><i class="bi bi-pencil"></i></a>
                             <form method="POST" action="{{ url_for('models.delete_model', model_id=m.id) }}" class="d-inline" data-confirm="确定删除此模型？此操作不可撤销。">
                                 <button class="btn btn-outline-danger" title="删除"><i class="bi bi-trash"></i></button>
@@ -224,4 +238,72 @@
     </a>
 </div>
 {% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// ============ 列表页导出按钮 ============
+(function() {
+    function csrfHeaders() {
+        var token = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+        return { 'X-CSRFToken': token, 'X-Requested-With': 'XMLHttpRequest', 'Content-Type': 'application/json' };
+    }
+
+    function setLoading(el, loading) {
+        if (loading) {
+            el._origText = el.innerHTML;
+            el.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+            el.classList.add('disabled');
+        } else if (el._origText) {
+            el.innerHTML = el._origText;
+            el.classList.remove('disabled');
+        }
+    }
+
+    // ONNX 导出
+    document.querySelectorAll('.export-onnx-link').forEach(function(link) {
+        link.addEventListener('click', async function(e) {
+            e.preventDefault();
+            var uuid = this.dataset.uuid;
+            setLoading(this, true);
+            try {
+                var resp = await fetch('/api/v1/models/' + uuid + '/export/onnx', {
+                    method: 'POST', headers: csrfHeaders(), body: '{}'
+                });
+                var data = await resp.json();
+                showCenteredMessage(data.message || data.success ? 'ONNX 导出成功' : (data.message || '导出失败'),
+                    data.success ? 'success' : 'error');
+            } catch (err) {
+                showCenteredMessage('网络错误: ' + (err.message || '请检查连接'), 'error');
+            } finally {
+                setLoading(this, false);
+            }
+        });
+    });
+
+    // Docker 部署包
+    document.querySelectorAll('.export-deploy-link').forEach(function(link) {
+        link.addEventListener('click', async function(e) {
+            e.preventDefault();
+            var uuid = this.dataset.uuid;
+            setLoading(this, true);
+            try {
+                var resp = await fetch('/api/v1/models/' + uuid + '/export/deploy', {
+                    method: 'POST', headers: csrfHeaders(), body: '{}'
+                });
+                var data = await resp.json();
+                showCenteredMessage(data.message || (data.success ? '部署包已生成' : '操作失败'),
+                    data.success ? 'success' : 'error');
+                if (data.success && data.data && data.data.download_url) {
+                    window.location.href = data.data.download_url;
+                }
+            } catch (err) {
+                showCenteredMessage('网络错误: ' + (err.message || '请检查连接'), 'error');
+            } finally {
+                setLoading(this, false);
+            }
+        });
+    });
+})();
+</script>
 {% endblock %}

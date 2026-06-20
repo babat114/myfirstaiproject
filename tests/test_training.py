@@ -1,40 +1,34 @@
 """
 ============================================
-训练任务模块测试
+训练任务模块测试 (参数化优化 v1.0)
 ============================================
 """
+import pytest
 from app.services.training_service import TrainingService
 
 
 class TestTrainingService:
     """训练服务测试"""
 
-    def test_create_job(self, test_user):
-        """测试创建训练任务"""
+    @pytest.mark.parametrize("name,expect_job_not_none", [
+        ("Test Training Job", True),
+        ("",                  True),   # 当前行为: 允许空名称
+    ])
+    def test_create_job(self, test_user, name, expect_job_not_none):
+        """参数化: 有效名称 / 空名称"""
         job, error = TrainingService.create_job(
             user=test_user,
-            name='Test Training Job',
+            name=name,
             task_type='training',
             framework='scikit-learn',
             algorithm='randomforest',
         )
-        assert job is not None
-        assert error is None
-        assert job.name == 'Test Training Job'
-        assert job.status in ('queued', 'draft', 'created')
-
-    def test_create_job_no_name(self, test_user):
-        """测试空名称创建 — 记录当前行为"""
-        job, error = TrainingService.create_job(
-            user=test_user,
-            name='',
-            task_type='training',
-        )
-        # 当前实现: 允许空名称创建, 返回成功
-        assert job is not None
-        assert error is None
-        # 验证 job 已持久化
-        assert job.id is not None
+        assert (job is not None) == expect_job_not_none
+        if expect_job_not_none:
+            assert error is None
+            assert job.name == name
+            assert job.status in ('queued', 'draft', 'created')
+            assert job.id is not None
 
     def test_list_jobs(self, test_user):
         """测试获取任务列表"""
@@ -74,16 +68,14 @@ class TestTrainingService:
 class TestTrainingPages:
     """训练页面测试"""
 
-    def test_list_page(self, logged_in_client):
-        response = logged_in_client.get('/training/')
-        assert response.status_code == 200
-
-    def test_create_page(self, logged_in_client):
-        response = logged_in_client.get('/training/create')
-        assert response.status_code == 200
-
-    def test_tuning_page(self, logged_in_client):
-        response = logged_in_client.get('/training/tuning')
+    @pytest.mark.parametrize("endpoint", [
+        "/training/",
+        "/training/create",
+        "/training/tuning",
+    ])
+    def test_training_page(self, logged_in_client, endpoint):
+        """参数化: 列表页 / 创建页 / 调优页"""
+        response = logged_in_client.get(endpoint)
         assert response.status_code == 200
 
 
@@ -102,10 +94,11 @@ class TestComparePage:
 class TestSSEStream:
     """SSE 流测试"""
 
-    def test_stream_endpoint_requires_auth(self, client):
-        response = client.get('/api/stream/training/1/stream')
-        assert response.status_code in (302, 401)
-
-    def test_status_endpoint_requires_auth(self, client):
-        response = client.get('/api/stream/training/1/status')
+    @pytest.mark.parametrize("endpoint", [
+        "/api/stream/training/1/stream",
+        "/api/stream/training/1/status",
+    ])
+    def test_stream_requires_auth(self, client, endpoint):
+        """参数化: stream / status 端点均需认证"""
+        response = client.get(endpoint)
         assert response.status_code in (302, 401)

@@ -3,54 +3,52 @@
 
 {% block content %}
 <div class="row justify-content-center mt-5">
-    <div class="col-md-5 col-lg-4">
-        <div class="card shadow">
-            <div class="card-body p-4">
-                <div class="text-center mb-4">
-                    <h2 class="fw-bold"><i class="bi bi-cpu-fill text-primary"></i> AI Platform</h2>
-                    <p class="text-muted">登录您的账户</p>
+    <div class="col-md-5 col-lg-4 reveal reveal-scale">
+        <div class="card p-4">
+            <div class="text-center mb-4">
+                <svg width="40" height="40" viewBox="0 0 16 16" fill="#1f2328" style="margin-bottom:8px;">
+                    <path d="M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0ZM4.5 7.5a.5.5 0 0 0 0 1h7a.5.5 0 0 0 0-1h-7Z"/>
+                </svg>
+                <h4 class="fw-bold">登录 AI Platform</h4>
+            </div>
+
+            <form method="POST" action="{{ url_for('auth.login') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="mb-3">
+                    <label for="login_id" class="form-label">用户名或邮箱</label>
+                    <input type="text" class="form-control" id="login_id" name="login_id"
+                           placeholder="请输入用户名或邮箱" required autofocus>
                 </div>
 
-                <form method="POST" action="{{ url_for('auth.login') }}">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <div class="mb-3">
-                        <label for="login_id" class="form-label">用户名或邮箱</label>
-                        <input type="text" class="form-control" id="login_id" name="login_id"
-                               placeholder="请输入用户名或邮箱" required autofocus>
+                <div class="mb-3">
+                    <label for="password" class="form-label">密码</label>
+                    <div class="input-group">
+                        <input type="password" class="form-control" id="password" name="password"
+                               placeholder="请输入密码" required>
+                        <button class="btn btn-outline-secondary" type="button"
+                                onclick="togglePassword('password')" tabindex="-1">
+                            <i class="bi bi-eye"></i>
+                        </button>
                     </div>
-
-                    <div class="mb-3">
-                        <label for="password" class="form-label">密码</label>
-                        <div class="input-group">
-                            <input type="password" class="form-control" id="password" name="password"
-                                   placeholder="请输入密码" required>
-                            <button class="btn btn-outline-secondary" type="button"
-                                    onclick="togglePassword('password')" tabindex="-1">
-                                <i class="bi bi-eye"></i>
-                            </button>
-                        </div>
-                    </div>
-
-                    <div class="mb-3 form-check">
-                        <input type="checkbox" class="form-check-input" id="remember" name="remember">
-                        <label class="form-check-label" for="remember">保持登录状态</label>
-                    </div>
-
-                    <button type="submit" class="btn btn-primary w-100 btn-lg">
-                        <i class="bi bi-box-arrow-in-right"></i> 登录
-                    </button>
-                </form>
-
-                <div class="text-center mt-3">
-                    <p class="text-muted">
-                        还没有账户？
-                        <a href="{{ url_for('auth.register') }}">立即注册</a>
-                    </p>
                 </div>
+
+                <div class="mb-3 form-check">
+                    <input type="checkbox" class="form-check-input" id="remember" name="remember">
+                    <label class="form-check-label" for="remember">保持登录状态</label>
+                </div>
+
+                <button type="submit" class="btn btn-success w-100 btn-lg">
+                    登录
+                </button>
+            </form>
+
+            <div class="text-center mt-3">
+                <p class="text-muted mb-0">
+                    还没有账户？
+                    <a href="{{ url_for('auth.register') }}" class="underline-hover fw-semibold">立即注册</a>
+                </p>
             </div>
         </div>
     </div>
 </div>
 {% endblock %}
-
-{% block extra_js %}{% endblock %}

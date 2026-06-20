@@ -1,0 +1,114 @@
+{# ============================================
+   评论卡片组件 — 用于模型详情页评论区
+   参数: comment (dict from Comment.to_dict())
+   ============================================ #}
+
+{% set is_hidden = not comment.is_visible %}
+{% set is_admin = current_user.is_admin %}
+{% set is_owner = current_user.id == comment.user.id %}
+
+<div class="comment-card border-bottom p-3 {% if is_hidden %}comment-hidden{% endif %}"
+     data-comment-id="{{ comment.id }}">
+    <div class="d-flex">
+        <!-- 用户头像 -->
+        <div class="me-3 flex-shrink-0">
+            <div class="comment-avatar rounded-circle d-flex align-items-center justify-content-center
+                        {% if comment.user.is_admin %}bg-warning text-dark{% else %}bg-primary text-white{% endif %}"
+                 style="width:36px;height:36px;font-size:14px;font-weight:600;">
+                {{ comment.user.username[0].upper() }}
+            </div>
+        </div>
+
+        <div class="flex-grow-1 min-width-0">
+            <!-- 评论头部 -->
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <strong class="me-2">{{ comment.user.full_name or comment.user.username }}</strong>
+                    <small class="text-muted">@{{ comment.user.username }}</small>
+                    {% if comment.user.is_admin %}
+                    <span class="badge bg-warning text-dark ms-1" style="font-size:10px;">管理员</span>
+                    {% endif %}
+                    {% if is_hidden %}
+                    <span class="badge bg-danger ms-1" style="font-size:10px;">
+                        <i class="bi bi-shield-x"></i>
+                        {% if comment.moderation_reason == 'owner_deleted' %}
+                            已删除
+                        {% elif comment.moderation_reason == 'admin_removed' %}
+                            管理员删除
+                        {% elif 'auto_filtered' in (comment.moderation_reason or '') %}
+                            系统屏蔽
+                        {% else %}
+                            已隐藏
+                        {% endif %}
+                    </span>
+                    {% endif %}
+                    <span class="text-muted mx-1">·</span>
+                    <small class="text-muted" title="{{ comment.created_at }}">
+                        {{ comment.created_at[:16].replace('T', ' ') }}
+                    </small>
+                </div>
+
+                <!-- 操作按钮 -->
+                <div class="comment-actions d-flex gap-1">
+                    {% if not is_hidden %}
+                    <button class="btn btn-sm btn-link text-muted reply-btn"
+                            data-comment-id="{{ comment.id }}"
+                            data-username="{{ comment.user.username }}"
+                            title="回复">
+                        <i class="bi bi-reply"></i>
+                    </button>
+                    {% endif %}
+
+                    {% if is_owner or is_admin %}
+                        {% if is_hidden and is_admin and comment.moderation_reason != 'owner_deleted' %}
+                        <form method="POST" action="{{ url_for('comments.restore_comment', comment_id=comment.id) }}" class="d-inline">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-sm btn-link text-success" title="恢复评论">
+                                <i class="bi bi-arrow-counterclockwise"></i>
+                            </button>
+                        </form>
+                        {% endif %}
+                        {% if not is_hidden or is_admin %}
+                        <button class="btn btn-sm btn-link text-danger delete-comment-btn"
+                                data-comment-id="{{ comment.id }}"
+                                data-csrf="{{ csrf_token() }}"
+                                title="{% if is_admin %}删除评论{% else %}删除我的评论{% endif %}">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                        {% endif %}
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- 评论内容 -->
+            <div class="comment-content mt-1 {% if is_hidden %}text-muted fst-italic{% endif %}">
+                {% if is_hidden and not is_admin %}
+                    <em>[此评论已被屏蔽或删除]</em>
+                {% else %}
+                    {{ comment.content | e | replace('\n', '<br>') | safe }}
+                {% endif %}
+            </div>
+
+            <!-- 审核原因 (仅管理员可见) -->
+            {% if is_hidden and is_admin and comment.moderation_reason %}
+            <div class="mt-1">
+                <small class="text-danger">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    屏蔽原因: {{ comment.moderation_reason }}
+                </small>
+            </div>
+            {% endif %}
+
+            <!-- 回复区域 — 由 JS 动态加载 -->
+            {% if comment.reply_count > 0 %}
+            <div class="replies-container mt-2 ps-3 border-start border-2" id="replies-{{ comment.id }}">
+                <button class="btn btn-sm btn-link text-muted load-replies-btn p-0"
+                        data-comment-id="{{ comment.id }}">
+                    <i class="bi bi-chevron-down"></i> 查看 {{ comment.reply_count }} 条回复
+                </button>
+                <div class="replies-list d-none"></div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>

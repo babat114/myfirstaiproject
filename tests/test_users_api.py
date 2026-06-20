@@ -1,9 +1,10 @@
 """
 ============================================
-用户管理 API 测试
+用户管理 API 测试 (参数化优化 v1.0)
 ============================================
 """
 import json
+import pytest
 from app.services.auth_service import AuthService
 from app.models.user import User
 from app import db
@@ -12,23 +13,22 @@ from app import db
 class TestUserAPI:
     """用户管理 API 测试"""
 
-    def test_list_users_as_admin(self, admin_client):
-        """管理员获取用户列表"""
-        response = admin_client.get('/api/users?per_page=20')
-        assert response.status_code == 200
-        data = json.loads(response.data)
-        assert data['success'] is True
-        assert 'users' in data['data']
-
-    def test_list_users_unauthorized(self, client):
-        """未登录获取用户列表应失败"""
-        response = client.get('/api/users')
-        assert response.status_code in (401, 302, 403)
-
-    def test_list_users_non_admin(self, logged_in_client):
-        """非管理员获取用户列表应失败"""
-        response = logged_in_client.get('/api/users')
-        assert response.status_code in (403, 302)
+    @pytest.mark.parametrize("client_fixture,expected_status_or_range", [
+        ("admin_client",     200),
+        ("client",           (401, 302, 403)),
+        ("logged_in_client", (403, 302)),
+    ])
+    def test_list_users_access(self, request, client_fixture,
+                                expected_status_or_range):
+        """参数化: 管理员 / 未登录 / 非管理员"""
+        client = request.getfixturevalue(client_fixture)
+        response = client.get('/api/users?per_page=20')
+        if isinstance(expected_status_or_range, tuple):
+            assert response.status_code in expected_status_or_range
+        else:
+            assert response.status_code == expected_status_or_range
+            data = json.loads(response.data)
+            assert data['success'] is True
 
     def test_get_user_detail_as_admin(self, admin_client, test_user):
         """管理员获取用户详情"""
@@ -81,47 +81,40 @@ class TestUserAPI:
         response = admin_client.delete(f'/api/users/{test_admin.id}')
         assert response.status_code in (400, 500)
 
-    def test_get_my_profile(self, logged_in_client):
-        """当前用户获取自己的资料"""
-        response = logged_in_client.get('/api/users/me')
-        assert response.status_code == 200
-        data = json.loads(response.data)
-        assert data['success'] is True
-
-    def test_update_my_profile(self, logged_in_client):
-        """当前用户更新自己的资料"""
-        response = logged_in_client.put(
-            '/api/users/me',
-            data=json.dumps({'full_name': 'My New Name'}),
-            content_type='application/json',
-        )
-        assert response.status_code == 200
-        data = json.loads(response.data)
-        assert data['success'] is True
+    @pytest.mark.parametrize("method,data,expected_status", [
+        ("get",  None,                         200),
+        ("put",  {"full_name": "My New Name"}, 200),
+    ])
+    def test_my_profile(self, logged_in_client, method, data, expected_status):
+        """参数化: GET / PUT 自己的资料"""
+        if method == "get":
+            response = logged_in_client.get('/api/users/me')
+        else:
+            response = logged_in_client.put(
+                '/api/users/me',
+                data=json.dumps(data),
+                content_type='application/json',
+            )
+        assert response.status_code == expected_status
+        data_resp = json.loads(response.data)
+        assert data_resp['success'] is True
 
 
 class TestAdminPages:
     """管理页面测试"""
 
-    def test_admin_page_requires_auth(self, client):
-        """未登录不能访问管理页面"""
-        response = client.get('/dashboard/admin', follow_redirects=True)
-        assert response.status_code == 200
-
-    def test_admin_page_as_admin(self, admin_client):
-        """管理员访问管理面板"""
-        response = admin_client.get('/dashboard/admin')
-        assert response.status_code == 200
-
-    def test_admin_page_as_user(self, logged_in_client):
-        """普通用户访问管理面板应重定向"""
-        response = logged_in_client.get('/dashboard/admin', follow_redirects=True)
-        assert response.status_code == 200
-
-    def test_admin_users_page(self, admin_client):
-        """管理员访问用户管理页面"""
-        response = admin_client.get('/dashboard/admin/users')
-        assert response.status_code == 200
+    @pytest.mark.parametrize("client_fixture,endpoint,expect_status,follow", [
+        ("client",           "/dashboard/admin",       200, True),
+        ("admin_client",     "/dashboard/admin",       200, False),
+        ("logged_in_client", "/dashboard/admin",       200, True),
+        ("admin_client",     "/dashboard/admin/users", 200, False),
+    ])
+    def test_admin_page_access(self, request, client_fixture, endpoint,
+                                expect_status, follow):
+        """参数化: 不同角色 / 不同页面"""
+        client = request.getfixturevalue(client_fixture)
+        response = client.get(endpoint, follow_redirects=follow)
+        assert response.status_code == expect_status
 
 
 class TestAuthServiceUserManagement:

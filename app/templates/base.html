@@ -4,120 +4,141 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    <title>{% block title %}AI Platform{% endblock %} - AI模型管理平台</title>
+    <title>{% block title %}AI Platform{% endblock %} · AI模型管理平台</title>
 
-    <!-- Element Plus CSS (Bootstrap 之前加载，Bootstrap 布局优先) -->
-    <link href="https://cdn.jsdelivr.net/npm/element-plus/dist/index.css" rel="stylesheet"
-          onerror="this.onerror=null;this.href='{{ url_for('static', filename='css/element-plus-fallback.css') }}'">
     <!-- Bootstrap 5 CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <!-- Bootstrap Icons -->
+    <!-- Bootstrap Icons (GitHub uses similar icon system) -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
-    <!-- Chart.js (CDN + 本地 fallback) -->
+    <!-- Chart.js (lazy — only loaded on pages that need it) -->
+    {% block chartjs %}
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
     <script>
     if (typeof Chart === 'undefined') {
         document.write('<script src="{{ url_for('static', filename='js/chart.umd.min.js') }}"><\/script>');
     }
     </script>
-    <!-- 自定义 CSS -->
+    {% endblock %}
+
+    <!-- Custom CSS — GitHub-inspired design system -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <!-- Subtle enhancements — scroll reveal, step indicators, print -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/beautify.css') }}">
     {% block extra_css %}{% endblock %}
+
+    <!-- Theme flash prevention — must run before paint -->
+    <script>
+    (function() {
+        var stored = localStorage.getItem('theme');
+        if (stored === 'dark') {
+            document.documentElement.setAttribute('data-theme', 'dark');
+        } else if (!stored && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+            document.documentElement.setAttribute('data-theme', 'dark');
+        }
+    })();
+    </script>
 </head>
 <body>
-    <!-- 页面加载指示器 -->
+    <!-- Page loader (minimal) -->
     <div id="pageLoader" class="page-loader-overlay" aria-hidden="true">
         <div class="page-loader-spinner">
-            <div class="spinner-border text-primary" style="width:3rem;height:3rem;" role="status">
+            <div class="spinner-border" style="width:2rem;height:2rem;color:var(--color-text-tertiary);" role="status">
                 <span class="visually-hidden">加载中...</span>
             </div>
-            <p class="mt-2 text-muted small">AI Platform 加载中...</p>
         </div>
     </div>
 
-    <!-- 导航栏 -->
-    <nav class="navbar navbar-expand-lg navbar-dark bg-dark sticky-top">
+    <!-- Navigation — GitHub-style dark header -->
+    <nav class="navbar navbar-expand-lg navbar-dark sticky-top">
         <div class="container-fluid">
-            <a class="navbar-brand fw-bold" href="{{ url_for('dashboard.index') }}">
-                <i class="bi bi-cpu-fill"></i> AI Platform
+            <a class="navbar-brand" href="{{ url_for('dashboard.index') }}">
+                <svg width="22" height="22" viewBox="0 0 16 16" fill="currentColor" style="vertical-align:-3px;">
+                    <path d="M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0ZM4.5 7.5a.5.5 0 0 0 0 1h7a.5.5 0 0 0 0-1h-7Z"/>
+                </svg>
+                AI Platform
             </a>
 
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse"
-                    data-bs-target="#navbarNav">
+                    data-bs-target="#navbarNav" aria-label="切换导航">
                 <span class="navbar-toggler-icon"></span>
             </button>
 
             <div class="collapse navbar-collapse" id="navbarNav">
+                <!-- Theme toggle — always visible regardless of auth state -->
+                <ul class="navbar-nav me-2">
+                    <li class="nav-item d-flex align-items-center">
+                        <button class="theme-toggle-btn" id="themeToggle" title="切换日间/夜间模式" aria-label="切换主题">
+                            <i class="bi bi-moon-stars" id="themeIcon"></i>
+                        </button>
+                    </li>
+                </ul>
+
                 {% if current_user.is_authenticated %}
                 <ul class="navbar-nav me-auto">
                     <li class="nav-item">
                         <a class="nav-link {% if request.endpoint and request.endpoint.startswith('dashboard') %}active{% endif %}"
                            href="{{ url_for('dashboard.index') }}">
-                            <i class="bi bi-speedometer2"></i> 仪表盘
+                            仪表盘
                         </a>
                     </li>
                     <li class="nav-item dropdown">
                         <a class="nav-link dropdown-toggle {% if request.endpoint and 'datasets' in request.endpoint %}active{% endif %}"
-                           href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-                            <i class="bi bi-database"></i> 数据集
+                           href="#" role="button" data-bs-toggle="dropdown">
+                            数据集
                         </a>
                         <ul class="dropdown-menu">
                             <li><a class="dropdown-item" href="{{ url_for('datasets.list_datasets') }}">我的数据集</a></li>
                             <li><a class="dropdown-item" href="{{ url_for('datasets.public_datasets') }}">公开数据集</a></li>
                             <li><hr class="dropdown-divider"></li>
-                            <li><a class="dropdown-item" href="{{ url_for('datasets.create_dataset') }}">+ 上传数据集</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('datasets.create_dataset') }}">上传数据集</a></li>
                         </ul>
                     </li>
                     <li class="nav-item dropdown">
                         <a class="nav-link dropdown-toggle {% if request.endpoint and 'models' in request.endpoint %}active{% endif %}"
-                           href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-                            <i class="bi bi-cpu"></i> 模型
+                           href="#" role="button" data-bs-toggle="dropdown">
+                            模型
                         </a>
                         <ul class="dropdown-menu">
                             <li><a class="dropdown-item" href="{{ url_for('models.list_models') }}">我的模型</a></li>
                             <li><a class="dropdown-item" href="{{ url_for('models.public_models') }}">公开模型</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('models.leaderboard') }}"><i class="bi bi-trophy-fill text-warning"></i> 排行榜</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('models.compare') }}"><i class="bi bi-bar-chart-fill text-info"></i> 模型对比</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('models.leaderboard') }}">排行榜</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('models.compare') }}">模型对比</a></li>
                             <li><hr class="dropdown-divider"></li>
-                            <li><a class="dropdown-item" href="{{ url_for('models.create_model') }}">+ 注册模型</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('models.create_model') }}">注册模型</a></li>
                         </ul>
                     </li>
                     <li class="nav-item dropdown">
                         <a class="nav-link dropdown-toggle {% if request.endpoint and 'training' in request.endpoint %}active{% endif %}"
-                           href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-                            <i class="bi bi-play-circle"></i> 训练
+                           href="#" role="button" data-bs-toggle="dropdown">
+                            训练
                         </a>
                         <ul class="dropdown-menu">
                             <li><a class="dropdown-item" href="{{ url_for('training.list_jobs') }}">训练任务</a></li>
                             <li><hr class="dropdown-divider"></li>
-                            <li><a class="dropdown-item" href="{{ url_for('training.create_job') }}">+ 新建任务</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('training.create_job') }}">新建任务</a></li>
                         </ul>
                     </li>
                 </ul>
 
-                <!-- 用户菜单 -->
+                <!-- User menu -->
                 <ul class="navbar-nav">
                     <li class="nav-item dropdown">
                         <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
-                            <i class="bi bi-person-circle"></i>
+                            <img src="https://avatars.githubusercontent.com/u/0?s=20" alt="" width="20" height="20"
+                                 style="border-radius:50%;margin-right:2px;vertical-align:-4px;"
+                                 onerror="this.style.display='none'">
                             {{ current_user.username }}
                             {% if current_user.is_admin %}
-                            <span class="badge bg-warning text-dark">管理员</span>
+                            <span class="badge bg-warning text-dark" style="font-size:10px;">admin</span>
                             {% endif %}
                         </a>
                         <ul class="dropdown-menu dropdown-menu-end">
-                            <li><a class="dropdown-item" href="{{ url_for('auth.profile') }}">
-                                <i class="bi bi-gear"></i> 个人设置
-                            </a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('auth.profile') }}">个人设置</a></li>
                             {% if current_user.is_admin %}
-                            <li><a class="dropdown-item" href="{{ url_for('dashboard.admin') }}">
-                                <i class="bi bi-shield-lock"></i> 管理面板
-                            </a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('dashboard.admin') }}">管理面板</a></li>
                             {% endif %}
                             <li><hr class="dropdown-divider"></li>
-                            <li><a class="dropdown-item text-danger" href="{{ url_for('auth.logout') }}">
-                                <i class="bi bi-box-arrow-right"></i> 注销
-                            </a></li>
+                            <li><a class="dropdown-item text-danger" href="{{ url_for('auth.logout') }}">注销</a></li>
                         </ul>
                     </li>
                 </ul>
@@ -135,12 +156,13 @@
         </div>
     </nav>
 
-    <!-- 消息提示 (由 el-enhance.js 自动转换为居中通知) -->
+    <!-- Flash messages (converted to centered notifications by JS) -->
     <div class="container-fluid mt-3" id="flashMessagesArea">
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
                 {% for category, message in messages %}
-                    <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert" data-flash-category="{{ category }}" data-flash-message="{{ message }}">
+                    <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert"
+                         data-flash-category="{{ category }}" data-flash-message="{{ message }}">
                         {{ message }}
                         <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
                     </div>
@@ -149,53 +171,47 @@
         {% endwith %}
     </div>
 
-    <!-- 居中通知容器 -->
+    <!-- Centered notification container -->
     <div id="centeredMessages" class="centered-messages-container"></div>
 
-    <!-- 主内容区域 -->
+    <!-- Main content -->
     <main class="container-fluid py-3">
         {% block content %}{% endblock %}
     </main>
 
-    <!-- 页脚 -->
-    <footer class="bg-light text-center py-3 mt-auto border-top">
-        <p class="text-muted mb-0">
-            &copy; {{ now.year if now else '2026' }} AI Platform v{{ version }} |
-            基于 Flask + MySQL 构建
-        </p>
+    <!-- Footer -->
+    <footer class="text-center py-3 mt-auto">
+        <div class="container-fluid">
+            <span>&copy; {{ now.year if now else '2026' }} AI Platform</span>
+            <span class="mx-2" style="color:var(--color-border-default);">·</span>
+            <span>基于 Flask + MySQL 构建</span>
+            <span class="mx-2" style="color:var(--color-border-default);">·</span>
+            <span>v{{ version }}</span>
+        </div>
     </footer>
 
     <!-- Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 
-    <!-- Vue 3 + Element Plus CDN (UI 增强层: 回到顶部、消息通知等) -->
-    <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.prod.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/element-plus/dist/index.full.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@element-plus/icons-vue"></script>
-    <script src="{{ url_for('static', filename='js/el-enhance.js') }}"></script>
-
-    <!-- CSRF 自动注入到所有 POST 表单 (含动态表单) -->
+    <!-- CSRF auto-injection for all POST forms -->
     <script>
     (function() {
-        const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
+        var csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
         if (!csrfToken) return;
 
-        // 为表单注入 CSRF token
         function injectCSRF(form) {
             if (!form || form.method.toUpperCase() !== 'POST') return;
             if (form.querySelector('input[name="csrf_token"]')) return;
-            const input = document.createElement('input');
+            var input = document.createElement('input');
             input.type = 'hidden';
             input.name = 'csrf_token';
             input.value = csrfToken;
             form.appendChild(input);
         }
 
-        // 现有表单
         document.querySelectorAll('form[method="POST"]').forEach(injectCSRF);
 
-        // 动态表单: MutationObserver 监听新增的 form
-        const observer = new MutationObserver(function(mutations) {
+        var observer = new MutationObserver(function(mutations) {
             mutations.forEach(function(mutation) {
                 mutation.addedNodes.forEach(function(node) {
                     if (node.nodeType === 1) {
@@ -211,12 +227,12 @@
     })();
     </script>
 
-    <!-- 全局确认弹窗 (替代浏览器原生 confirm) -->
+    <!-- Global confirm modal (replaces native confirm) -->
     <div class="modal fade" id="globalConfirmModal" tabindex="-1" data-bs-backdrop="static">
         <div class="modal-dialog modal-dialog-centered modal-sm">
             <div class="modal-content shadow-lg border-0">
-                <div class="modal-header bg-warning text-dark py-2">
-                    <h6 class="modal-title"><i class="bi bi-exclamation-triangle-fill me-1"></i><span id="confirmModalTitle">确认操作</span></h6>
+                <div class="modal-header py-2">
+                    <h6 class="modal-title" id="confirmModalTitle">确认操作</h6>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body text-center py-3">
@@ -224,30 +240,28 @@
                 </div>
                 <div class="modal-footer justify-content-center py-2">
                     <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
-                    <button type="button" class="btn btn-danger btn-sm" id="confirmModalBtn">确认删除</button>
+                    <button type="button" class="btn btn-danger btn-sm" id="confirmModalBtn">确认</button>
                 </div>
             </div>
         </div>
     </div>
-    <!-- 自定义 JS -->
+
+    <!-- Custom JS -->
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/beautify.js') }}"></script>
     {% block extra_js %}{% endblock %}
 
-    <!-- 页面加载完成 — 隐藏 loader -->
+    <!-- Page loader cleanup -->
     <script>
     (function() {
-        const loader = document.getElementById('pageLoader');
-        if (loader) {
-            if (document.readyState === 'complete') {
-                loader.classList.add('fade-out');
-                setTimeout(function() { loader.remove(); }, 350);
-            } else {
-                window.addEventListener('load', function() {
-                    loader.classList.add('fade-out');
-                    setTimeout(function() { loader.remove(); }, 350);
-                });
-            }
+        var loader = document.getElementById('pageLoader');
+        if (!loader) return;
+        function hideLoader() {
+            loader.classList.add('fade-out');
+            setTimeout(function() { loader.remove(); }, 300);
         }
+        if (document.readyState === 'complete') { hideLoader(); }
+        else { window.addEventListener('load', hideLoader); }
     })();
     </script>
 </body>

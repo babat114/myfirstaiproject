@@ -352,7 +352,7 @@
             </div>
             <div class="collapse" id="trainingLog">
                 <div class="card-body p-0">
-                    <pre class="bg-dark text-light p-3 m-0 rounded-bottom" style="max-height:300px;overflow-y:auto;font-size:12px;line-height:1.5;">{{ model.training_job.log_text }}</pre>
+                    <pre class="bg-dark text-light p-3 m-0 rounded-bottom log-output-sm">{{ model.training_job.log_text }}</pre>
                 </div>
             </div>
         </div>
@@ -361,6 +361,71 @@
 
     <!-- 右侧 -->
     <div class="col-lg-4">
+        <!-- 框架参数摘要 — 按框架类型展示不同参数 -->
+        {% if model.hyperparameters_dict %}
+        <div class="card mb-3 border-info">
+            <div class="card-header bg-info bg-opacity-10">
+                <h6 class="mb-0"><i class="bi bi-cpu"></i> 训练参数摘要
+                    <small class="text-muted">({{ model.framework or 'sklearn' }})</small>
+                </h6>
+            </div>
+            <div class="card-body p-2">
+                {% set hp = model.hyperparameters_dict %}
+                {% set algo = hp.get('algorithm', '') %}
+                {% set fw = (model.framework or '').lower() %}
+                <div class="row g-1 small">
+                    {% if fw in ('pytorch', 'tensorflow', 'keras') or algo == 'mlp' %}
+                        {# 深度学习框架: 显示网络架构参数 #}
+                        {% if hp.get('hidden_layers') %}
+                        <div class="col-6"><span class="text-muted">Hidden Layers:</span> <strong>{{ hp.hidden_layers }}</strong></div>
+                        {% endif %}
+                        {% if hp.get('learning_rate') %}
+                        <div class="col-6"><span class="text-muted">Learning Rate:</span> <strong>{{ "%.5f"|format(hp.learning_rate|float) }}</strong></div>
+                        {% endif %}
+                        {% if hp.get('batch_size') %}
+                        <div class="col-6"><span class="text-muted">Batch Size:</span> <strong>{{ hp.batch_size }}</strong></div>
+                        {% endif %}
+                        {% if hp.get('dropout') is not none %}
+                        <div class="col-6"><span class="text-muted">Dropout:</span> <strong>{{ hp.dropout }}</strong></div>
+                        {% endif %}
+                        {% if hp.get('weight_decay') %}
+                        <div class="col-6"><span class="text-muted">Weight Decay:</span> <strong>{{ "%.5f"|format(hp.weight_decay|float) }}</strong></div>
+                        {% endif %}
+                        {% if hp.get('val_size') %}
+                        <div class="col-6"><span class="text-muted">Val Split:</span> <strong>{{ hp.val_size }}</strong></div>
+                        {% endif %}
+                        {% if hp.get('early_stopping_patience') %}
+                        <div class="col-6"><span class="text-muted">Early Stop:</span> <strong>{{ hp.early_stopping_patience }} epochs</strong></div>
+                        {% endif %}
+                    {% elif algo.startswith('transformer') %}
+                        {# NLP Transformers #}
+                        {% if hp.get('model_name') %}<div class="col-12"><span class="text-muted">Model:</span> <strong>{{ hp.model_name }}</strong></div>{% endif %}
+                        {% if hp.get('max_length') %}<div class="col-6"><span class="text-muted">Max Len:</span> <strong>{{ hp.max_length }}</strong></div>{% endif %}
+                        {% if hp.get('batch_size') %}<div class="col-6"><span class="text-muted">Batch:</span> <strong>{{ hp.batch_size }}</strong></div>{% endif %}
+                    {% else %}
+                        {# sklearn 传统ML: 显示算法+任务类型+关键超参 #}
+                        <div class="col-6"><span class="text-muted">Algorithm:</span> <strong>{{ algo }}</strong></div>
+                        <div class="col-6"><span class="text-muted">Task:</span> <strong>{{ hp.get('task_type', hp.get('ml_task_type', '-')) }}</strong></div>
+                        {% if hp.get('n_estimators') %}<div class="col-6"><span class="text-muted">n_estimators:</span> <strong>{{ hp.n_estimators }}</strong></div>{% endif %}
+                        {% if hp.get('max_depth') %}<div class="col-6"><span class="text-muted">max_depth:</span> <strong>{{ hp.max_depth }}</strong></div>{% endif %}
+                        {% if hp.get('C') %}<div class="col-6"><span class="text-muted">C:</span> <strong>{{ hp.C }}</strong></div>{% endif %}
+                        {% if hp.get('kernel') %}<div class="col-6"><span class="text-muted">kernel:</span> <strong>{{ hp.kernel }}</strong></div>{% endif %}
+                        {% if hp.get('n_clusters') %}<div class="col-6"><span class="text-muted">n_clusters:</span> <strong>{{ hp.n_clusters }}</strong></div>{% endif %}
+                    {% endif %}
+                    {# 通用参数 #}
+                    {% if hp.get('tuned') %}
+                    <div class="col-12 mt-1">
+                        <span class="badge bg-success"><i class="bi bi-check-circle"></i> 已调优
+                        {% if hp.get('best_cv_score') %}
+                         CV: {{ "%.4f"|format(hp.best_cv_score|float) }}
+                        {% endif %}</span>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
         <!-- 模型文件 -->
         <div class="card mb-3">
             <div class="card-header"><h6 class="mb-0"><i class="bi bi-file-earmark-zip"></i> 模型文件</h6></div>
@@ -390,6 +455,42 @@
             </div>
         </div>
 
+        <!-- 模型导出与下载 -->
+        <div class="card mb-3 border-success" id="exportCard">
+            <div class="card-header bg-success bg-opacity-10">
+                <h6 class="mb-0"><i class="bi bi-box-arrow-down"></i> 导出与下载</h6>
+            </div>
+            <div class="card-body">
+                <div class="d-grid gap-2">
+                    <!-- 下载模型文件 -->
+                    <a href="/api/v1/models/{{ model.uuid }}/download" class="btn btn-outline-primary btn-sm" id="downloadModelBtn">
+                        <i class="bi bi-download"></i> 下载模型文件
+                    </a>
+                    <!-- 导出 ONNX -->
+                    <button class="btn btn-outline-info btn-sm" id="exportOnnxBtn" onclick="ExportPanel.exportOnnx()">
+                        <i class="bi bi-box-arrow-up-right"></i> 导出 ONNX
+                    </button>
+                    <!-- Docker 部署包 -->
+                    <button class="btn btn-outline-success btn-sm" id="exportDeployBtn" onclick="ExportPanel.exportDeploy()">
+                        <i class="bi bi-box-seam"></i> 生成 Docker 部署包
+                    </button>
+                    <!-- 复制 API 端点 -->
+                    <button class="btn btn-outline-secondary btn-sm" id="copyApiBtn" onclick="ExportPanel.copyApiEndpoint()">
+                        <i class="bi bi-clipboard"></i> 复制 API 端点
+                    </button>
+                </div>
+                <!-- 部署健康状态 -->
+                <hr class="my-2">
+                <div class="d-flex align-items-center justify-content-between" id="deployHealthRow">
+                    <small class="text-muted"><i class="bi bi-heart-pulse"></i> 部署健康:</small>
+                    <span id="deployHealthBadge" class="badge bg-secondary">
+                        <span class="spinner-border spinner-border-sm" style="width:10px;height:10px;"></span> 检查中...
+                    </span>
+                </div>
+                <div id="exportStatus" class="small text-muted mt-2 text-center" style="display:none;"></div>
+            </div>
+        </div>
+
         <!-- 元信息 -->
         <div class="card mb-3">
             <div class="card-header"><h6 class="mb-0"><i class="bi bi-info-circle"></i> 元信息</h6></div>
@@ -400,6 +501,101 @@
                 <p class="mb-0"><strong>更新时间:</strong> {{ model.updated_at.strftime('%Y-%m-%d %H:%M') if model.updated_at else '-' }}</p>
             </div>
         </div>
+
+        <!-- ============ 快速体验 - 交互式模型测试 ============ -->
+        {% if model.status in ('trained', 'deployed') %}
+        <div class="card mb-3 border-primary" id="quick-test-card">
+            <div class="card-header bg-primary bg-opacity-10 d-flex justify-content-between align-items-center">
+                <h6 class="mb-0"><i class="bi bi-magic"></i> 快速体验</h6>
+                <small class="text-muted">试试模型效果</small>
+            </div>
+            <div class="card-body">
+                <!-- 输入区 -->
+                <div class="mb-3">
+                    <label class="form-label small fw-bold">
+                        <i class="bi bi-chat-left-text"></i>
+                        {% set algo = model.hyperparameters_dict.get('algorithm', '') %}
+                        {% if algo.startswith('transformer') %}
+                        输入文本 (情感分析/NLP)
+                        {% elif model.model_type == 'classification' %}
+                        输入文本或关键词
+                        {% else %}
+                        输入特征值 (JSON格式)
+                        {% endif %}
+                    </label>
+                    <textarea
+                        id="quickTestInput"
+                        class="form-control form-control-sm"
+                        rows="3"
+                        placeholder="{% if algo.startswith('transformer') %}输入一句话，如: 这个产品质量很好，我非常满意！{% elif model.model_type == 'regression' %}{"feature1": 1.0, "feature2": 2.5}{% else %}输入要测试的内容...{% endif %}"
+                    ></textarea>
+                    <div class="d-flex justify-content-between mt-1">
+                        <small id="quickTestMode" class="text-muted">
+                            <span class="badge bg-light text-dark">文本模式</span>
+                        </small>
+                        <small class="text-muted" id="quickTestCharCount">0 / 500</small>
+                    </div>
+                </div>
+
+                <!-- 预测按钮 -->
+                <button
+                    id="quickTestBtn"
+                    class="btn btn-primary btn-sm w-100 mb-3"
+                    onclick="runQuickPredict()"
+                >
+                    <i class="bi bi-play-fill"></i>
+                    <span id="quickTestBtnText">开始预测</span>
+                </button>
+
+                <!-- 结果展示区 -->
+                <div id="quickTestResult" class="d-none">
+                    <div class="border rounded p-3 bg-light">
+                        <!-- 预测标签 -->
+                        <div class="text-center mb-3">
+                            <div class="text-muted small mb-1">预测结果</div>
+                            <span id="quickTestPrediction" class="badge fs-5 px-4 py-2" style="font-size:1.1rem;"></span>
+                        </div>
+
+                        <!-- 置信度进度条 -->
+                        <div class="mb-2">
+                            <div class="d-flex justify-content-between small mb-1">
+                                <span>置信度</span>
+                                <span id="quickTestConfidence" class="fw-bold">0%</span>
+                            </div>
+                            <div class="progress progress-sm">
+                                <div id="quickTestConfBar" class="progress-bar progress-bar-striped progress-bar-animated"
+                                     role="progressbar" style="width:0%;"></div>
+                            </div>
+                        </div>
+
+                        <!-- Top-N 概率 -->
+                        <div id="quickTestProbs" class="mt-3"></div>
+
+                        <!-- 输入预览 -->
+                        <small id="quickTestNote" class="text-muted d-block mt-2"></small>
+                    </div>
+                </div>
+
+                <!-- 错误提示 -->
+                <div id="quickTestError" class="alert alert-danger alert-sm py-2 d-none mt-2"></div>
+
+                <!-- 提示 -->
+                <div class="mt-2 small text-muted">
+                    <i class="bi bi-info-circle"></i>
+                    {% if algo.startswith('transformer') %}
+                    输入中文/英文文本，模型将预测情感类别
+                    {% elif model.model_type == 'classification' %}
+                    分类模型 — 输入文本或关键词查看预测类别
+                    {% elif model.model_type == 'regression' %}
+                    回归模型 — 输入JSON格式的特征值: {"col": value, ...}
+                    {% else %}
+                    输入文本或特征值进行快速预测
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% endif %}
+        <!-- ============ 快速体验 END ============ -->
 
         <!-- 快速操作 -->
         <div class="card border-success">
@@ -422,6 +618,116 @@
         </div>
     </div>
 </div>
+
+<!-- ============ 评论区模块 (仅公开模型) ============ -->
+{% if model.is_public and comments_data is not none %}
+<div class="row mt-4">
+    <div class="col-lg-8">
+        <div class="card" id="comments-section">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h6 class="mb-0">
+                    <i class="bi bi-chat-square-text"></i>
+                    评论区
+                    <span class="badge bg-secondary rounded-pill ms-2" id="comment-count-badge">{{ comments_data.total }}</span>
+                </h6>
+            </div>
+
+            <!-- 发表评论表单 -->
+            <div class="card-body border-bottom">
+                <form method="POST" action="{{ url_for('comments.add_comment') }}" id="comment-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="model_id" value="{{ model.id }}">
+                    <input type="hidden" name="parent_id" id="comment-parent-id" value="">
+                    <div id="reply-indicator" class="alert alert-info small py-2 mb-2 d-none">
+                        <i class="bi bi-reply-fill"></i>
+                        回复 <strong id="reply-to-user"></strong>
+                        <button type="button" class="btn-close btn-close-sm float-end" id="cancel-reply" aria-label="取消回复"></button>
+                    </div>
+                    <div class="mb-2">
+                        <textarea name="content" id="comment-content" class="form-control" rows="3"
+                                  placeholder="写下你的评论... (支持 Markdown 格式, 最多2000字)"
+                                  maxlength="2000" required></textarea>
+                        <div class="form-text text-end">
+                            <small id="comment-char-count">0 / 2000</small>
+                        </div>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <small class="text-muted">
+                            <i class="bi bi-info-circle"></i> 请保持友善，违规评论将被自动屏蔽
+                        </small>
+                        <button type="submit" class="btn btn-primary btn-sm">
+                            <i class="bi bi-send"></i> 发表评论
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- 评论列表 -->
+            <div class="card-body p-0" id="comments-list">
+                {% if comments_data.comments %}
+                    {% for comment in comments_data.comments %}
+                        {% include "includes/_comment_card.html" %}
+                    {% endfor %}
+                {% else %}
+                    <div class="text-center py-5 text-muted" id="no-comments-msg">
+                        <i class="bi bi-chat-dots" style="font-size: 2rem;"></i>
+                        <p class="mt-2">暂无评论，来发表第一条评论吧！</p>
+                    </div>
+                {% endif %}
+            </div>
+
+            <!-- 分页 -->
+            {% if comments_data.pages > 1 %}
+            <div class="card-footer">
+                <nav>
+                    <ul class="pagination pagination-sm justify-content-center mb-0">
+                        <li class="page-item {{ 'disabled' if not comments_data.has_prev }}">
+                            <a class="page-link" href="?comment_page={{ comments_data.current_page - 1 }}#comments-section"
+                               {% if not comments_data.has_prev %}tabindex="-1"{% endif %}>
+                                上一页
+                            </a>
+                        </li>
+                        {% for p in range(1, comments_data.pages + 1) %}
+                            {% if p == comments_data.current_page %}
+                            <li class="page-item active"><span class="page-link">{{ p }}</span></li>
+                            {% elif p <= 3 or p > comments_data.pages - 3 or (p - comments_data.current_page)|abs <= 2 %}
+                            <li class="page-item"><a class="page-link" href="?comment_page={{ p }}#comments-section">{{ p }}</a></li>
+                            {% elif p == 4 or p == comments_data.pages - 3 %}
+                            <li class="page-item disabled"><span class="page-link">...</span></li>
+                            {% endif %}
+                        {% endfor %}
+                        <li class="page-item {{ 'disabled' if not comments_data.has_next }}">
+                            <a class="page-link" href="?comment_page={{ comments_data.current_page + 1 }}#comments-section"
+                               {% if not comments_data.has_next %}tabindex="-1"{% endif %}>
+                                下一页
+                            </a>
+                        </li>
+                    </ul>
+                </nav>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="col-lg-4">
+        <div class="card">
+            <div class="card-header"><h6 class="mb-0"><i class="bi bi-info-circle"></i> 评论守则</h6></div>
+            <div class="card-body small text-muted">
+                <ul class="mb-0 ps-3">
+                    <li>请保持友善和尊重</li>
+                    <li>禁止人身攻击和辱骂</li>
+                    <li>禁止发布广告和垃圾信息</li>
+                    <li>禁止发布色情、赌博等违法内容</li>
+                    <li>违规评论将被系统自动屏蔽</li>
+                    <li>管理员有权删除不当评论</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+<!-- ============ 评论区 END ============ -->
+
 {% endblock %}
 
 {% block extra_js %}
@@ -641,5 +947,556 @@
     });
 })();
 {% endif %}
+</script>
+
+<script>
+// ============ 快速体验 — 交互式模型预测 ============
+(function() {
+    var isRunning = false;
+
+    // 字数统计
+    var inputEl = document.getElementById('quickTestInput');
+    var charCountEl = document.getElementById('quickTestCharCount');
+    if (inputEl && charCountEl) {
+        inputEl.addEventListener('input', function() {
+            charCountEl.textContent = this.value.length + ' / 500';
+            if (this.value.length > 450) charCountEl.classList.add('text-warning');
+            else charCountEl.classList.remove('text-warning');
+        });
+    }
+
+    // 支持 Enter 提交 (Ctrl+Enter)
+    if (inputEl) {
+        inputEl.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault();
+                runQuickPredict();
+            }
+        });
+    }
+
+    window.runQuickPredict = function() {
+        if (isRunning) return;
+        var input = inputEl ? inputEl.value.trim() : '';
+        if (!input) {
+            showQuickError('请输入要测试的文本或特征值。');
+            return;
+        }
+
+        isRunning = true;
+        var btn = document.getElementById('quickTestBtn');
+        var btnText = document.getElementById('quickTestBtnText');
+        var resultDiv = document.getElementById('quickTestResult');
+        var errorDiv = document.getElementById('quickTestError');
+
+        btn.disabled = true;
+        btnText.textContent = '分析中...';
+        btn.querySelector('i').className = 'spinner-border spinner-border-sm';
+        resultDiv.classList.add('d-none');
+        errorDiv.classList.add('d-none');
+
+        // 判断输入模式: JSON → features, 纯文本 → text
+        var reqBody;
+        var isJson = false;
+        try { JSON.parse(input); isJson = true; } catch(e) {}
+        if (isJson && input.trim().startsWith('{')) {
+            var parsed = JSON.parse(input);
+            reqBody = {features: parsed};
+        } else {
+            reqBody = {text: input};
+        }
+
+        var modelUuid = '{{ model.uuid }}';
+        var csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+
+        fetch('/api/v1/models/' + modelUuid + '/quick-predict', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrfToken,
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            body: JSON.stringify(reqBody)
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            isRunning = false;
+            btn.disabled = false;
+            btnText.textContent = '开始预测';
+            btn.querySelector('i').className = 'bi bi-play-fill';
+
+            if (data.success && data.data) {
+                showQuickResult(data.data);
+            } else {
+                showQuickError(data.message || '预测失败');
+            }
+        })
+        .catch(function(err) {
+            isRunning = false;
+            btn.disabled = false;
+            btnText.textContent = '开始预测';
+            btn.querySelector('i').className = 'bi bi-play-fill';
+            showQuickError('网络错误: ' + (err.message || '请检查连接'));
+        });
+    };
+
+    function showQuickResult(d) {
+        var resultDiv = document.getElementById('quickTestResult');
+        resultDiv.classList.remove('d-none');
+
+        // 预测标签 (颜色根据置信度)
+        var predEl = document.getElementById('quickTestPrediction');
+        predEl.textContent = d.prediction;
+        var conf = d.confidence || 0;
+        if (conf >= 0.85) {
+            predEl.className = 'badge bg-success fs-5 px-4 py-2';
+        } else if (conf >= 0.60) {
+            predEl.className = 'badge bg-warning text-dark fs-5 px-4 py-2';
+        } else {
+            predEl.className = 'badge bg-danger fs-5 px-4 py-2';
+        }
+
+        // 置信度
+        var confPct = Math.round(conf * 100);
+        document.getElementById('quickTestConfidence').textContent = confPct + '%';
+        var bar = document.getElementById('quickTestConfBar');
+        bar.style.width = confPct + '%';
+        if (confPct >= 80) bar.className = 'progress-bar bg-success';
+        else if (confPct >= 55) bar.className = 'progress-bar bg-warning';
+        else bar.className = 'progress-bar bg-danger';
+
+        // 概率分布
+        var probsDiv = document.getElementById('quickTestProbs');
+        if (d.probabilities && d.probabilities.length > 1) {
+            var html = '<div class="small fw-bold mb-1">概率分布</div>';
+            d.probabilities.forEach(function(p) {
+                var pct = Math.round((p.probability || 0) * 100);
+                html += '<div class="d-flex align-items-center mb-1">';
+                html += '<span class="small me-2" style="min-width:60px;">' + escapeHtml(p.class) + '</span>';
+                html += '<div class="flex-grow-1 progress" style="height:6px;">';
+                html += '<div class="progress-bar bg-info" style="width:' + pct + '%;"></div></div>';
+                html += '<span class="small ms-2" style="min-width:35px;">' + pct + '%</span>';
+                html += '</div>';
+            });
+            probsDiv.innerHTML = html;
+        } else {
+            probsDiv.innerHTML = '';
+        }
+
+        // 提示信息
+        var noteEl = document.getElementById('quickTestNote');
+        if (d.note) {
+            noteEl.textContent = 'ⓘ ' + d.note;
+            noteEl.classList.remove('d-none');
+        } else if (d.input_mode === 'text') {
+            noteEl.textContent = '输入: "' + (d.input_text || '').substring(0, 80) + '"';
+            noteEl.classList.remove('d-none');
+        } else {
+            noteEl.classList.add('d-none');
+        }
+
+        // 滚动到结果
+        resultDiv.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+    }
+
+    function showQuickError(msg) {
+        var errorDiv = document.getElementById('quickTestError');
+        errorDiv.textContent = msg;
+        errorDiv.classList.remove('d-none');
+        errorDiv.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+    }
+
+    function escapeHtml(str) {
+        var div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+    }
+})();
+
+// ============ 评论区交互逻辑 ============
+(function() {
+    var commentForm = document.getElementById('comment-form');
+    var commentContent = document.getElementById('comment-content');
+    var charCount = document.getElementById('comment-char-count');
+    var parentIdInput = document.getElementById('comment-parent-id');
+    var replyIndicator = document.getElementById('reply-indicator');
+    var replyToUser = document.getElementById('reply-to-user');
+    var cancelReplyBtn = document.getElementById('cancel-reply');
+
+    // 字数统计
+    if (commentContent && charCount) {
+        commentContent.addEventListener('input', function() {
+            charCount.textContent = this.value.length + ' / 2000';
+            if (this.value.length > 1800) {
+                charCount.classList.add('text-warning');
+            } else {
+                charCount.classList.remove('text-warning');
+            }
+        });
+    }
+
+    // 回复按钮
+    document.querySelectorAll('.reply-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var commentId = this.getAttribute('data-comment-id');
+            var username = this.getAttribute('data-username');
+            parentIdInput.value = commentId;
+            replyToUser.textContent = '@' + username;
+            replyIndicator.classList.remove('d-none');
+            commentContent.placeholder = '写下你的回复...';
+            commentContent.focus();
+            // 滚动到评论框
+            commentContent.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        });
+    });
+
+    // 取消回复
+    if (cancelReplyBtn) {
+        cancelReplyBtn.addEventListener('click', function() {
+            parentIdInput.value = '';
+            replyIndicator.classList.add('d-none');
+            commentContent.placeholder = '写下你的评论... (支持 Markdown 格式, 最多2000字)';
+        });
+    }
+
+    // 删除评论 (AJAX)
+    document.querySelectorAll('.delete-comment-btn').forEach(function(btn) {
+        btn.addEventListener('click', function(e) {
+            e.preventDefault();
+            var commentId = this.getAttribute('data-comment-id');
+            var csrfToken = this.getAttribute('data-csrf');
+
+            showConfirmModal('确定要删除此评论吗？删除后不可恢复。', '删除评论', '确认删除')
+                .then(function(confirmed) {
+                    if (!confirmed) return;
+
+                    var formData = new FormData();
+                    formData.append('csrf_token', csrfToken);
+
+                    fetch('/comments/' + commentId + '/delete', {
+                        method: 'POST',
+                        headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                        body: formData
+                    })
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        if (data.success) {
+                            // 平滑移除评论卡片
+                            var card = document.querySelector('[data-comment-id="' + commentId + '"]');
+                            if (card) {
+                                card.style.transition = 'opacity 0.3s';
+                                card.style.opacity = '0';
+                                setTimeout(function() { card.remove(); }, 300);
+                            }
+                            // 更新评论计数
+                            updateCommentCount(-1);
+                            showCenteredMessage('评论已删除', 'success', 2000);
+                        } else {
+                            showCenteredMessage(data.message || '删除失败', 'danger', 3000);
+                        }
+                    })
+                    .catch(function() {
+                        showCenteredMessage('删除失败，请重试', 'danger', 3000);
+                    });
+                });
+        });
+    });
+
+    // 加载回复
+    document.querySelectorAll('.load-replies-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var commentId = this.getAttribute('data-comment-id');
+            var container = document.getElementById('replies-' + commentId);
+            if (!container) return;
+
+            var repliesList = container.querySelector('.replies-list');
+            if (!repliesList) return;
+
+            // 已加载则切换显示
+            if (!repliesList.classList.contains('d-none')) {
+                repliesList.classList.add('d-none');
+                this.innerHTML = '<i class="bi bi-chevron-down"></i> 查看回复';
+                return;
+            }
+
+            // 首次加载
+            if (!repliesList.hasAttribute('data-loaded')) {
+                this.disabled = true;
+                this.innerHTML = '<span class="spinner-border spinner-border-sm"></span> 加载中...';
+
+                fetch('/api/v1/comments/' + commentId + '/replies', {
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.success && data.data.length > 0) {
+                        var html = '';
+                        data.data.forEach(function(reply) {
+                            var isHidden = !reply.is_visible;
+                            html += '<div class="reply-item py-2 border-bottom border-muted ' + (isHidden ? 'comment-hidden' : '') + '">';
+                            html += '<div class="d-flex">';
+                            html += '<div class="comment-avatar-sm rounded-circle d-flex align-items-center justify-content-center ' +
+                                    (reply.user.is_admin ? 'bg-warning text-dark' : 'bg-secondary text-white') +
+                                    '" style="width:24px;height:24px;font-size:11px;font-weight:600;margin-right:8px;">' +
+                                    reply.user.username[0].toUpperCase() + '</div>';
+                            html += '<div>';
+                            html += '<strong>' + (reply.user.full_name || reply.user.username) + '</strong> ';
+                            html += '<small class="text-muted">@' + reply.user.username + '</small>';
+                            if (isHidden) {
+                                html += ' <span class="badge bg-danger" style="font-size:10px;">已屏蔽</span>';
+                            }
+                            html += '<span class="text-muted mx-1">·</span>';
+                            html += '<small class="text-muted">' + (reply.created_at || '').substring(0, 16).replace('T', ' ') + '</small>';
+                            html += '<div class="mt-1">' + (isHidden ? '<em class="text-muted">[此回复已被屏蔽]</em>' :
+                                    (reply.content || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>')) + '</div>';
+                            html += '</div></div></div>';
+                        });
+                        repliesList.innerHTML = html;
+                        repliesList.setAttribute('data-loaded', 'true');
+                    } else {
+                        repliesList.innerHTML = '<p class="text-muted small mb-0">暂无回复</p>';
+                        repliesList.setAttribute('data-loaded', 'true');
+                    }
+                    repliesList.classList.remove('d-none');
+                    btn.innerHTML = '<i class="bi bi-chevron-up"></i> 收起回复';
+                    btn.disabled = false;
+                })
+                .catch(function() {
+                    btn.innerHTML = '<i class="bi bi-chevron-down"></i> 查看回复';
+                    btn.disabled = false;
+                    showCenteredMessage('加载失败', 'danger', 2000);
+                });
+            } else {
+                repliesList.classList.remove('d-none');
+                btn.innerHTML = '<i class="bi bi-chevron-up"></i> 收起回复';
+            }
+        });
+    });
+
+    // 更新评论计数
+    function updateCommentCount(delta) {
+        var badge = document.getElementById('comment-count-badge');
+        if (badge) {
+            var count = parseInt(badge.textContent) + delta;
+            badge.textContent = Math.max(0, count);
+        }
+        // 如果评论数为0，显示空状态
+        if (badge && parseInt(badge.textContent) === 0) {
+            var list = document.getElementById('comments-list');
+            if (list && list.querySelectorAll('.comment-card').length === 0) {
+                list.innerHTML = '<div class="text-center py-5 text-muted">' +
+                    '<i class="bi bi-chat-dots" style="font-size:2rem;"></i>' +
+                    '<p class="mt-2">暂无评论，来发表第一条评论吧！</p></div>';
+            }
+        }
+    }
+})();
+
+// ============ 模型导出面板 ============
+var ExportPanel = {
+    modelUuid: '{{ model.uuid }}',
+
+    _status: function(msg, type) {
+        var el = document.getElementById('exportStatus');
+        if (!el) return;
+        el.style.display = '';
+        el.textContent = msg;
+        el.className = 'small mt-2 text-center text-' + (type || 'muted');
+    },
+
+    _csrfHeaders: function() {
+        var token = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+        return { 'X-CSRFToken': token, 'X-Requested-With': 'XMLHttpRequest' };
+    },
+
+    _setLoading: function(btnId, loading) {
+        var btn = document.getElementById(btnId);
+        if (!btn) return;
+        if (loading) {
+            btn._origHTML = btn.innerHTML;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> 处理中...';
+            btn.disabled = true;
+        } else {
+            btn.innerHTML = btn._origHTML || btn.innerHTML;
+            btn.disabled = false;
+        }
+    },
+
+    exportOnnx: async function() {
+        this._setLoading('exportOnnxBtn', true);
+        this._status('正在启动 ONNX 导出...', 'info');
+        try {
+            // 启动异步任务
+            var resp = await fetch('/api/v1/models/' + this.modelUuid + '/export/async/onnx', {
+                method: 'POST',
+                headers: Object.assign({}, this._csrfHeaders(), {'Content-Type': 'application/json'}),
+                body: '{}'
+            });
+            var data = await resp.json();
+            if (!data.success || !data.data || !data.data.task_id) {
+                this._status(data.message || '启动失败', 'danger');
+                showCenteredMessage(data.message || '启动失败', 'error');
+                this._setLoading('exportOnnxBtn', false);
+                return;
+            }
+            // 轮询进度
+            await this._pollTask(data.data.task_id, 'exportOnnxBtn', 'ONNX');
+        } catch (err) {
+            this._status('网络错误: ' + (err.message || '请检查连接'), 'danger');
+            this._setLoading('exportOnnxBtn', false);
+        }
+    },
+
+    exportDeploy: async function() {
+        this._setLoading('exportDeployBtn', true);
+        this._status('正在启动部署包生成...', 'info');
+        try {
+            var resp = await fetch('/api/v1/models/' + this.modelUuid + '/export/async/deploy', {
+                method: 'POST',
+                headers: Object.assign({}, this._csrfHeaders(), {'Content-Type': 'application/json'}),
+                body: '{}'
+            });
+            var data = await resp.json();
+            if (!data.success || !data.data || !data.data.task_id) {
+                this._status(data.message || '启动失败', 'danger');
+                showCenteredMessage(data.message || '启动失败', 'error');
+                this._setLoading('exportDeployBtn', false);
+                return;
+            }
+            await this._pollTask(data.data.task_id, 'exportDeployBtn', 'Docker 部署包');
+            // 自动下载 zip (如果有)
+            if (this._lastDeployUrl) {
+                window.location.href = this._lastDeployUrl;
+                this._lastDeployUrl = null;
+            }
+        } catch (err) {
+            this._status('网络错误: ' + (err.message || '请检查连接'), 'danger');
+            this._setLoading('exportDeployBtn', false);
+        }
+    },
+
+    _lastDeployUrl: null,
+
+    _pollTask: async function(taskId, btnId, label) {
+        var self = this;
+        var maxPolls = 60;  // 最多轮询 60 次 (90s)
+        var pollCount = 0;
+
+        while (pollCount < maxPolls) {
+            await new Promise(function(r) { setTimeout(r, 1500); });  // 1.5s 间隔
+            pollCount++;
+
+            try {
+                var resp = await fetch(
+                    '/api/v1/models/' + this.modelUuid + '/export/status?task_id=' + taskId,
+                    { headers: this._csrfHeaders() }
+                );
+                var data = await resp.json();
+                if (!data.success || !data.data) continue;
+
+                var task = data.data;
+                this._status(label + ' — ' + task.message + ' (' + task.progress + '%)', 'info');
+
+                if (task.status === 'completed') {
+                    this._status(task.message, 'success');
+                    showCenteredMessage(label + ' 导出成功!', 'success');
+                    this._setLoading(btnId, false);
+                    // 保存 deploy 下载 URL
+                    if (task.result && typeof task.result === 'string' && task.result.includes('deploy')) {
+                        // 尝试获取下载链接
+                    }
+                    if (task.task_type === 'deploy' && task.result) {
+                        this._lastDeployUrl = '/api/v1/models/' + this.modelUuid + '/export/download/' +
+                            this.modelUuid.replace(/-/g, '') + '_deploy.zip';
+                    }
+                    return;
+                }
+
+                if (task.status === 'failed') {
+                    this._status(task.error || '导出失败', 'danger');
+                    showCenteredMessage(task.error || '导出失败', 'error');
+                    this._setLoading(btnId, false);
+                    return;
+                }
+            } catch (err) {
+                // 轮询错误静默处理, 继续重试
+            }
+        }
+        // 超时
+        this._status('导出超时 — 请稍后在导出目录中查看结果', 'warning');
+        showCenteredMessage(label + ' 导出可能仍在进行中', 'warning', 4000);
+        this._setLoading(btnId, false);
+    },
+
+    copyApiEndpoint: function() {
+        var url = window.location.origin + '/api/v1/models/' + this.modelUuid + '/predict';
+        navigator.clipboard.writeText(url).then(function() {
+            showCenteredMessage('API 端点已复制到剪贴板', 'success', 2000);
+        }).catch(function() {
+            // Fallback
+            var ta = document.createElement('textarea');
+            ta.value = url;
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+            showCenteredMessage('API 端点已复制: ' + url, 'success', 2500);
+        });
+    }
+};
+
+// ============ 部署健康检查 ============
+(function() {
+    var badge = document.getElementById('deployHealthBadge');
+    if (!badge) return;
+
+    var modelUuid = '{{ model.uuid }}';
+    var csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+
+    fetch('/api/v1/models/' + modelUuid + '/deploy/health', {
+        headers: {
+            'X-CSRFToken': csrfToken,
+            'X-Requested-With': 'XMLHttpRequest'
+        }
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (!data.success) {
+            badge.className = 'badge bg-secondary';
+            badge.textContent = 'N/A';
+            badge.title = data.message || '检查失败';
+            return;
+        }
+
+        var d = data.data;
+        var status = d.status;
+        var info = d.container_info || {};
+
+        if (status === 'healthy') {
+            badge.className = 'badge bg-success';
+            badge.innerHTML = '<i class="bi bi-check-circle"></i> 健康运行中';
+            badge.title = '容器响应正常 | ' + (info.health_url || '');
+            if (info.health_response && info.health_response.model) {
+                badge.title += ' | 模型: ' + info.health_response.model;
+            }
+        } else if (status === 'unreachable') {
+            badge.className = 'badge bg-warning text-dark';
+            badge.innerHTML = '<i class="bi bi-exclamation-triangle"></i> 无法访问';
+            badge.title = '部署包存在但容器无响应';
+            if (info.error) badge.title += ' | ' + info.error;
+        } else if (status === 'not_deployed') {
+            badge.className = 'badge bg-secondary';
+            badge.innerHTML = '<i class="bi bi-box"></i> 未部署';
+            badge.title = '尚未生成 Docker 部署包';
+        }
+    })
+    .catch(function(err) {
+        badge.className = 'badge bg-danger';
+        badge.innerHTML = '<i class="bi bi-x-circle"></i> 检查失败';
+        badge.title = '网络错误: ' + (err.message || '');
+    });
+})();
 </script>
 {% endblock %}

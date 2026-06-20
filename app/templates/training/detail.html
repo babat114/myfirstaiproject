@@ -104,7 +104,7 @@
                            placeholder="如 10" value="{{ job.total_epochs }}"
                            {% set algo = hparams.get('algorithm', '') %}
                            {% if algo in ('linear_regression','ridge','logistic_regression','svm','svr','knn','knn_regressor','kmeans','dbscan','agglomerative','minibatch_kmeans','decision_tree') %}
-                           disabled title="闭环模型({{ algo }})一次训练即收敛，不支持多轮epoch" style="background:#f8f9fa;color:#999;"
+                           disabled title="闭环模型({{ algo }})一次训练即收敛，不支持多轮epoch" class="input-muted"
                            {% endif %}>
                     {% if algo in ('linear_regression','ridge','logistic_regression','svm','svr','knn','knn_regressor','kmeans','dbscan','agglomerative','minibatch_kmeans','decision_tree') %}
                     <small class="text-muted"><i class="bi bi-info-circle"></i> {{ algo }} 为闭环模型，固定1轮</small>
@@ -145,9 +145,17 @@
                             <option value="gradient_boosting_regressor">GB Regressor</option>
                             <option value="ridge">Ridge</option>
                             <option value="knn_regressor">KNN Regressor</option>
+                            <option value="linear_regression">Linear Regression</option>
+                            <option value="svr">SVR</option>
                         </optgroup>
                         <optgroup label="深度学习">
                             <option value="mlp">PyTorch MLP</option>
+                        </optgroup>
+                        <optgroup label="聚类">
+                            <option value="kmeans">K-Means</option>
+                            <option value="dbscan">DBSCAN</option>
+                            <option value="agglomerative">层次聚类 (Agglomerative)</option>
+                            <option value="minibatch_kmeans">MiniBatch K-Means</option>
                         </optgroup>
                     </select>
                 </div>
@@ -167,6 +175,20 @@
                 </button>
                 <button type="button" class="btn btn-outline-secondary" onclick="toggleParamForm()">取消</button>
             </div>
+            {# 隐藏字段: sklearn算法参数 (AI推荐/GridSearchCV/AutoML 通过JS填充) #}
+            <input type="hidden" name="n_estimators" id="hf_n_estimators" value="">
+            <input type="hidden" name="max_depth" id="hf_max_depth" value="">
+            <input type="hidden" name="min_samples_split" id="hf_min_samples_split" value="">
+            <input type="hidden" name="min_samples_leaf" id="hf_min_samples_leaf" value="">
+            <input type="hidden" name="C" id="hf_C" value="">
+            <input type="hidden" name="alpha" id="hf_alpha" value="">
+            <input type="hidden" name="class_weight" id="hf_class_weight" value="">
+            <input type="hidden" name="max_features" id="hf_max_features" value="">
+            <input type="hidden" name="n_neighbors" id="hf_n_neighbors" value="">
+            <input type="hidden" name="kernel" id="hf_kernel" value="">
+            <input type="hidden" name="learning_rate_init" id="hf_learning_rate_init" value="">
+            <input type="hidden" name="weight_decay" id="hf_weight_decay" value="">
+            <input type="hidden" name="early_stopping_patience" id="hf_early_stopping_patience" value="">
         </form>
     </div>
 </div>
@@ -279,7 +301,7 @@
                         <small class="fw-bold" id="gsStatusLabel">正在搜索...</small>
                         <small id="gsPercentLabel">0%</small>
                     </div>
-                    <div class="progress mb-2" style="height:18px;">
+                    <div class="progress mb-2 progress-md">
                         <div class="progress-bar progress-bar-striped progress-bar-animated bg-warning"
                              id="gsProgressBar" style="width:0%">0%</div>
                     </div>
@@ -325,7 +347,7 @@
                         <small class="fw-bold" id="amlStatusLabel">正在搜索...</small>
                         <small id="amlPercentLabel">0%</small>
                     </div>
-                    <div class="progress mb-2" style="height:18px;">
+                    <div class="progress mb-2 progress-md">
                         <div class="progress-bar progress-bar-striped progress-bar-animated bg-primary"
                              id="amlProgressBar" style="width:0%">0%</div>
                     </div>
@@ -336,13 +358,11 @@
                         <div class="col-3"><span class="text-muted">当前算法:</span> <span id="amlCurAlgo">-</span></div>
                     </div>
                     {# 日志 #}
-                    <div id="amlLogBox" class="small mb-2"
-                         style="max-height:80px;overflow-y:auto;background:#1a1a2e;color:#0f0;font-family:monospace;font-size:0.7rem;padding:4px 8px;border-radius:4px;">
-                    </div>
+                    <div id="amlLogBox" class="small mb-2 terminal-output">
                 </div>
                 {# 结果对比表 #}
                 <div id="amlResultArea" style="display:none;">
-                    <div class="table-responsive" style="max-height:250px;">
+                    <div class="table-responsive scrollable-250">
                         <table class="table table-sm table-hover small mb-2" id="amlRankTable">
                             <thead><tr><th>算法</th><th>框架</th><th>最佳分数</th><th>耗时</th><th>操作</th></tr></thead>
                             <tbody></tbody>
@@ -369,12 +389,9 @@
                         {{ job.status }}
                     </span>
                 </div>
-                <div class="progress mb-2" style="height: 42px;">
-                    <div id="progressBar" class="progress-bar progress-bar-striped {% if job.status == 'running' %}progress-bar-animated{% endif %}"
-                         style="width:{{ job.progress_percent }}%; transition: width 0.5s ease;
-                                background: linear-gradient(90deg, #4361ee, #3a0ca3) !important;
-                                text-shadow: 0 1px 3px rgba(0,0,0,0.4);
-                                font-size: 1rem;">
+                <div class="progress mb-2 progress-xl">
+                    <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-ai-gradient {% if job.status == 'running' %}progress-bar-animated{% endif %}"
+                         style="width:{{ job.progress_percent }}%; transition: width 0.5s ease; font-size: 1rem;">
                         <span id="progressText" class="fw-bold">{{ job.progress_percent }}%</span>
                     </div>
                 </div>
@@ -395,7 +412,7 @@
                 <small class="text-muted" id="keyframeCount">-</small>
             </div>
             <div class="card-body p-2">
-                <div id="keyframeTimeline" class="d-flex flex-wrap gap-2" style="min-height:48px; align-items:center;">
+                <div id="keyframeTimeline" class="d-flex flex-wrap gap-2 min-h-48 align-items-center">
                     <span class="text-muted small">{% if job.status in ('running', 'queued') %}等待训练数据...{% elif not job.metrics_history %}暂无关键帧数据{% else %}加载中...{% endif %}</span>
                 </div>
             </div>
@@ -437,8 +454,7 @@
                 </div>
             </div>
             <div class="card-body p-0">
-                <pre id="logArea" class="bg-dark text-light p-3 m-0 rounded-bottom"
-                     style="max-height: 380px; overflow-y: auto; font-size: 12.5px; line-height: 1.65; font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace;">{{ job.log_text or '等待训练开始...' }}</pre>
+                <pre id="logArea" class="bg-dark text-light p-3 m-0 rounded-bottom log-output">{{ job.log_text or '等待训练开始...' }}</pre>
             </div>
         </div>
     </div>
@@ -794,6 +810,19 @@ function applyRetrainSuggestions(guidance) {
                     };
                 })(formEl), 3000);
             }
+        } else if (s.suggested !== undefined && s.suggested !== null && s.param) {
+            // 表单中没有对应字段, 动态创建隐藏input
+            formEl = document.createElement('input');
+            formEl.type = 'hidden';
+            formEl.name = s.param;
+            formEl.id = 'hf_dyn_' + s.param;
+            var newVal = s.suggested;
+            if (s.param === 'hidden_layers' && Array.isArray(newVal)) {
+                newVal = newVal.join(',');
+            }
+            formEl.value = newVal;
+            document.getElementById('paramRetrainForm').appendChild(formEl);
+            appliedParams.push(param + ': ' + JSON.stringify(s.suggested) + ' (隐藏字段)');
         }
 
         // 显示备选建议 (如更换算法)
@@ -1011,8 +1040,17 @@ function applyAIDiagToForm() {
     if (!card.style.display || card.style.display === 'none') {
         card.style.display = '';
     }
+    var filledCount = 0;
     aiDiagData.suggestions.forEach(function(s) {
         var el = document.querySelector('[name="' + s.param + '"]');
+        if (!el) {
+            // 动态创建隐藏字段以传递AI推荐的参数
+            el = document.createElement('input');
+            el.type = 'hidden';
+            el.name = s.param;
+            el.id = 'hf_dyn_' + s.param;
+            document.getElementById('paramRetrainForm').appendChild(el);
+        }
         if (el && !el.disabled) {
             var v = s.suggested;
             if (s.param === 'hidden_layers' || s.param === 'hidden_layers_str') {
@@ -1022,9 +1060,14 @@ function applyAIDiagToForm() {
             el.value = v;
             el.style.borderColor = '#0dcaf0';
             el.style.boxShadow = '0 0 0 0.2rem rgba(13,202,240,0.25)';
+            filledCount++;
         }
     });
-    showCenteredMessage('AI推荐参数已填充到表单, 请确认后提交', 'info', 3000);
+    if (filledCount > 0) {
+        showCenteredMessage('AI推荐 ' + filledCount + ' 项参数已填充到表单, 请确认后提交', 'info', 3000);
+    } else {
+        showCenteredMessage('AI推荐参数已填充, 请确认后提交', 'info', 3000);
+    }
 }
 
 // ── Tab 2/3 通用: SSE进度+结果处理 ──

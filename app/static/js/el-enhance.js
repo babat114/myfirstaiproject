@@ -307,10 +307,7 @@ function initChartResize() {
         /* -------- 通用美化 -------- */
         .table > thead { background: #fafafa; }
         .btn { font-weight: 500; letter-spacing: 0.2px; }
-        input.form-control:focus, select.form-select:focus {
-            border-color: #4e73df !important;
-            box-shadow: 0 0 0 0.18rem rgba(78,115,223,0.15) !important;
-        }
+        /* 表单聚焦效果统一由 style.css (:root --brand-400) 管理, 此处不再覆写避免冲突 */
     `;
 
     const style = document.createElement('style');

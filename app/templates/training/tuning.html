@@ -243,7 +243,7 @@
 </div>
 {% endblock %}
 
-{% block scripts %}
+{% block extra_js %}
 <script>
 {% include 'training/_tuning_progress_modal.html' %}
 // ============ 超参数调优页 — 动态表单联动 + 搜索空间预览 ============
@@ -418,5 +418,108 @@ function showTuningError(msg) {
     var form = document.getElementById('tuning-form');
     form.parentNode.insertBefore(alertDiv, form);
 }
+
+// ── AutoML 自动启动: 从创建页面重定向过来, 预填参数并自动提交 ──
+{% if auto_start and presets %}
+(function() {
+    var p = {{ presets|tojson }};
+    // 预填表单
+    if (p.dataset_id) {
+        var dsSelect = document.querySelector('select[name="dataset_id"]');
+        if (dsSelect) { dsSelect.value = p.dataset_id; dsSelect.dispatchEvent(new Event('change')); }
+    }
+    if (p.task_type) {
+        var ttSelect = document.getElementById('task-type');
+        if (ttSelect) { ttSelect.value = p.task_type; ttSelect.dispatchEvent(new Event('change')); }
+    }
+    if (p.algorithm) {
+        var algoSelect = document.getElementById('algorithm-select');
+        if (algoSelect) { algoSelect.value = p.algorithm; algoSelect.dispatchEvent(new Event('change')); }
+    }
+    if (p.target_column) {
+        // 等待列信息加载完成后设置目标列
+        setTimeout(function() {
+            var tcSelect = document.querySelector('select[name="target_column"]');
+            if (tcSelect) {
+                for (var i = 0; i < tcSelect.options.length; i++) {
+                    if (tcSelect.options[i].value === p.target_column) {
+                        tcSelect.value = p.target_column;
+                        break;
+                    }
+                }
+            }
+        }, 500);
+    }
+    if (p.tuning_method) {
+        var tmSelect = document.querySelector('select[name="tuning_method"]');
+        if (tmSelect) tmSelect.value = p.tuning_method;
+    }
+    if (p.n_iter) {
+        var niInput = document.querySelector('input[name="n_iter"]');
+        if (niInput) niInput.value = p.n_iter;
+    }
+    var cvInput = document.querySelector('input[name="cv"]');
+    if (cvInput) cvInput.value = p.cv || 5;
+    if (p.start_training) {
+        var stCheck = document.querySelector('input[name="start_training"]');
+        if (stCheck) stCheck.checked = true;
+    }
+
+    // 延迟自动提交 (等待列信息加载)
+    setTimeout(function() {
+        document.getElementById('tuning-form').dispatchEvent(new Event('submit'));
+    }, 800);
+})();
+{% endif %}
+
+// ── 非AJAX回退: redirect携带tuning_id → 页面加载后自动连接SSE进度 ──
+{% if live_tuning_id %}
+(function() {
+    var tuningId = {{ live_tuning_id|tojson }};
+    var streamUrl = '/api/v1/stream/tuning/' + encodeURIComponent(tuningId) + '/stream';
+    showTuningProgressModal();
+    // 复用已有的 SSE 连接函数 (定义在 _tuning_progress_modal.html)
+    var es = new EventSource(streamUrl);
+    es.onmessage = function(e) {
+        try {
+            var session = JSON.parse(e.data);
+            if (session.error) {
+                document.getElementById('tuningLogBox').innerHTML =
+                    '<div style="color:#f66">[错误] ' + escapeTuningHtml(session.error) + '</div>';
+                return;
+            }
+            updateTuningProgressUI(session);
+            if (session.status === 'completed') {
+                es.close();
+                if (session.result && session.result.best_algo) {
+                    showCenteredMessage('调优完成! 最优: ' + session.result.best_algo, 'success', 4000);
+                } else {
+                    var failMsg = session.result && session.result.error_msg
+                        ? session.result.error_msg
+                        : '所有算法均搜索失败，请检查数据集格式或手动配置参数。';
+                    document.getElementById('tuningStatusLabel').textContent = '搜索失败';
+                    var bar = document.getElementById('tuningProgressBar');
+                    bar.classList.remove('progress-bar-animated', 'bg-warning');
+                    bar.classList.add('bg-danger');
+                    bar.textContent = '失败';
+                    showCenteredMessage(failMsg, 'warning', 6000);
+                }
+                setTimeout(function() { location.reload(); }, 3000);
+            } else if (session.status === 'failed') {
+                es.close();
+                showCenteredMessage('调优失败: ' + (session.error || '未知错误'), 'error', 6000);
+                setTimeout(function() { location.reload(); }, 3000);
+            }
+        } catch(ex) {}
+    };
+    es.onerror = function() {
+        if (es.readyState === EventSource.CLOSED) {
+            document.getElementById('tuningLogBox').innerHTML +=
+                '<div style="color:#f66">[错误] SSE 连接断开</div>';
+            showCenteredMessage('SSE 连接断开，请刷新页面重试', 'error', 5000);
+        }
+    };
+})();
+{% endif %}
 </script>
 {% endblock %}

@@ -2,6 +2,8 @@
 {% block title %}测试模型 - {{ model.name }}{% endblock %}
 
 {% block content %}
+<meta name="model-uuid" content="{{ model.uuid }}">
+
 <nav aria-label="breadcrumb">
     <ol class="breadcrumb">
         <li class="breadcrumb-item"><a href="{{ url_for('models.list_models') }}">模型</a></li>
@@ -22,65 +24,191 @@
 </div>
 {% endif %}
 
+{% if model_file_error %}
+<div class="alert alert-warning alert-dismissible fade show">
+    <i class="bi bi-exclamation-circle"></i> <strong>注意:</strong> {{ model_file_error }}
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% endif %}
+
 <div class="row g-4">
     <!-- 左侧: 操作面板 -->
     <div class="col-lg-5">
-        <!-- 上传测试数据 -->
-        <div class="card mb-4">
-            <div class="card-header"><h6 class="mb-0"><i class="bi bi-file-earmark-arrow-up"></i> 上传测试数据</h6></div>
+
+        {% if model.model_type == 'nlp' %}
+        <!-- NLP 模型: 文本输入区 -->
+        <div class="card mb-4 border-primary">
+            <div class="card-header bg-primary bg-opacity-10">
+                <h6 class="mb-0"><i class="bi bi-chat-text"></i> 输入文本</h6>
+            </div>
             <div class="card-body">
-                <form method="POST" enctype="multipart/form-data">
+                {% if model_file_error %}
+                <div class="text-center py-4 text-muted">
+                    <i class="bi bi-file-earmark-x" style="font-size: 2rem;"></i>
+                    <p class="mt-2">模型文件不可用，暂无法进行文本预测</p>
+                </div>
+                {% else %}
+                <form method="POST" data-ajax-action="predict_text">
+                    <input type="hidden" name="action" value="predict_text">
+                    <div class="mb-3">
+                        <textarea name="text_input" class="form-control" rows="6" id="nlpTextInput"
+                            placeholder="在此输入文本内容...&#10;例如: 这部电影非常精彩，演员表现出色，剧情扣人心弦。">{{ request.form.get('text_input', '') }}</textarea>
+                    </div>
+                    <!-- 实时预测开关 -->
+                    <div class="d-flex align-items-center mb-2">
+                        <div class="form-check form-switch me-2">
+                            <input class="form-check-input" type="checkbox" id="livePredictToggle">
+                            <label class="form-check-label small" for="livePredictToggle">实时预测</label>
+                        </div>
+                        <span id="livePredictStatus" class="small text-muted">
+                            <i class="bi bi-pause-circle"></i> 已暂停
+                        </span>
+                        <span id="livePredictDebounce" class="small text-muted ms-2" style="display:none;">
+                            <i class="bi bi-three-dots"></i> 输入中...
+                        </span>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <small class="text-muted">
+                            <i class="bi bi-info-circle"></i> 文本将通过 TF-IDF 转为特征向量后预测
+                        </small>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-send"></i> 分析情感
+                        </button>
+                    </div>
+                </form>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- 图像上传区 (通用 — 所有模型类型均可使用) -->
+        <div class="card mb-4 border-success">
+            <div class="card-header bg-success bg-opacity-10">
+                <h6 class="mb-0"><i class="bi bi-image"></i> 上传图像 (通用)</h6>
+            </div>
+            <div class="card-body">
+                {% if model_file_error %}
+                <div class="text-center py-4 text-muted">
+                    <i class="bi bi-file-earmark-x" style="font-size: 2rem;"></i>
+                    <p class="mt-2">模型文件不可用，暂无法进行图像预测</p>
+                </div>
+                {% else %}
+                <form method="POST" enctype="multipart/form-data" id="imagePredictForm" data-ajax-action="predict_image">
+                    <input type="hidden" name="action" value="predict_image">
+                    <!-- 拖拽上传区 -->
+                    <div class="image-upload-zone mb-3" id="imageDropZone">
+                        {% if image_preview %}
+                        <img src="data:image/png;base64,{{ image_preview }}" class="img-preview" alt="预览">
+                        <p class="text-muted small mt-2">点击或拖拽更换图像</p>
+                        {% else %}
+                        <i class="bi bi-cloud-upload" style="font-size: 2.5rem; color: #aaa;"></i>
+                        <p class="text-muted mt-2">点击选择图像或拖拽到此处</p>
+                        <p class="text-muted small">支持 JPG / PNG / WebP</p>
+                        {% endif %}
+                    </div>
+                    <input type="file" name="image_file" class="form-control" id="imageFileInput"
+                        accept="image/jpeg,image/png,image/webp,image/gif,image/bmp">
+                    <div class="d-flex justify-content-between align-items-center mt-3">
+                        <small class="text-muted">
+                            <i class="bi bi-info-circle"></i> 图像通过预训练 CNN 提取特征后预测
+                        </small>
+                        <button type="submit" class="btn btn-success">
+                            <i class="bi bi-cpu"></i> 识别图像
+                        </button>
+                    </div>
+                </form>
+                {% endif %}
+            </div>
+        </div>
+
+        {% if model.model_type not in ('nlp', 'computer_vision') %}
+        <!-- 通用模型: 手动输入特征值 -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <a class="text-decoration-none d-flex justify-content-between align-items-center" data-bs-toggle="collapse" href="#manualInput">
+                    <h6 class="mb-0"><i class="bi bi-keyboard"></i> 手动输入特征值
+                        {% if feature_names %}<span class="badge bg-secondary ms-2">{{ feature_names|length }} 个特征</span>{% endif %}
+                    </h6>
+                    <i class="bi bi-chevron-down"></i>
+                </a>
+            </div>
+            <div class="collapse show" id="manualInput">
+                <div class="card-body">
+                    {% if model_file_error %}
+                    <div class="alert alert-warning py-2 small">
+                        <i class="bi bi-exclamation-triangle"></i> {{ model_file_error }}
+                    </div>
+                    {% endif %}
+                    <form method="POST" data-ajax-action="predict_manual">
+                        <input type="hidden" name="action" value="predict_manual">
+                        <input type="hidden" name="feature_count" value="{{ feature_names|length if feature_names else 5 }}">
+                        <input type="hidden" name="feature_names_json" value="{{ feature_names|tojson|forceescape if feature_names else '[]' }}">
+                        <div id="manualFeatureInputs" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(200px, 1fr)); gap:0.5rem; max-height:400px; overflow-y:auto; padding-right:4px;">
+                            {% if feature_names %}
+                                {% for name in feature_names %}
+                                <div>
+                                    <label class="form-label small text-truncate d-block" title="{{ name }}">{{ name }}</label>
+                                    <input type="number" step="any" name="feature_{{ loop.index0 }}" class="form-control form-control-sm" data-feature-name="{{ name }}" placeholder="输入 {{ name }} 的值">
+                                </div>
+                                {% endfor %}
+                            {% else %}
+                                {% for i in range(5) %}
+                                <div>
+                                    <label class="form-label small">特征 {{ i + 1 }}</label>
+                                    <input type="number" step="any" name="feature_{{ i }}" class="form-control form-control-sm" data-feature-name="特征{{ i + 1 }}" placeholder="输入数值">
+                                </div>
+                                {% endfor %}
+                            {% endif %}
+                        </div>
+                        <div class="d-flex gap-2 mt-2">
+                            <button type="button" class="btn btn-outline-secondary btn-sm" id="randomFillBtn" title="随机填充所有特征值">
+                                <i class="bi bi-shuffle"></i> 随机填充
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" id="resetAllBtn" title="清空所有输入">
+                                <i class="bi bi-arrow-counterclockwise"></i> 重置
+                            </button>
+                            <button type="submit" class="btn btn-outline-primary btn-sm ms-auto">
+                                <i class="bi bi-send"></i> 预测
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- 上传测试数据 (所有模型类型通用) -->
+        <div class="card mb-4">
+            <div class="card-header"><h6 class="mb-0"><i class="bi bi-file-earmark-arrow-up"></i> 上传测试数据文件</h6></div>
+            <div class="card-body">
+                {% if model_file_error %}
+                <div class="alert alert-warning py-2 small">
+                    <i class="bi bi-exclamation-triangle"></i> {{ model_file_error }}
+                </div>
+                {% endif %}
+                <form method="POST" enctype="multipart/form-data" data-ajax-action="predict_file">
                     <input type="hidden" name="action" value="predict_file">
                     <div class="mb-3">
                         <label class="form-label">选择 CSV/Excel/JSON 文件</label>
                         <input type="file" name="test_file" class="form-control" accept=".csv,.xlsx,.xls,.json">
                     </div>
                     {% if feature_names %}
-                    <div class="mb-3">
+                    <div class="mb-3 d-flex justify-content-between align-items-start">
                         <small class="text-muted">需要特征列: <code>{{ feature_names[:10]|join(', ') }}{% if feature_names|length > 10 %}... (共{{ feature_names|length }}列){% endif %}</code></small>
+                        <a href="/api/v1/models/{{ model.uuid }}/predict-template" class="btn btn-outline-secondary btn-sm flex-shrink-0 ms-2" title="下载 CSV 模板 (utf-8 编码, Excel 兼容)" id="csvTemplateBtn">
+                            <i class="bi bi-download"></i> CSV模板
+                        </a>
                     </div>
                     {% endif %}
-                    <button type="submit" class="btn btn-primary w-100">
-                        <i class="bi bi-play-fill"></i> 执行预测
-                    </button>
-                </form>
-            </div>
-        </div>
-
-        <!-- 手动输入 -->
-        <div class="card mb-4">
-            <div class="card-header">
-                <a class="text-decoration-none d-flex justify-content-between align-items-center" data-bs-toggle="collapse" href="#manualInput">
-                    <h6 class="mb-0"><i class="bi bi-keyboard"></i> 手动输入特征值</h6>
-                    <i class="bi bi-chevron-down"></i>
-                </a>
-            </div>
-            <div class="collapse" id="manualInput">
-                <div class="card-body">
-                    <form method="POST">
-                        <input type="hidden" name="action" value="predict_manual">
-                        <input type="hidden" name="feature_count" value="{{ feature_names|length or 5 }}">
-                        <input type="hidden" name="feature_names_json" value="{{ feature_names|tojson|forceescape if feature_names else '[]' }}">
-                        {% if feature_names %}
-                            {% for name in feature_names[:10] %}
-                            <div class="mb-2">
-                                <label class="form-label small">{{ name }}</label>
-                                <input type="number" step="any" name="feature_{{ loop.index0 }}" class="form-control form-control-sm" placeholder="输入 {{ name }} 的值">
-                            </div>
-                            {% endfor %}
-                        {% else %}
-                            {% for i in range(5) %}
-                            <div class="mb-2">
-                                <label class="form-label small">特征 {{ i + 1 }}</label>
-                                <input type="number" step="any" name="feature_{{ i }}" class="form-control form-control-sm" placeholder="输入数值">
-                            </div>
-                            {% endfor %}
-                        {% endif %}
-                        <button type="submit" class="btn btn-outline-primary btn-sm w-100 mt-2">
-                            <i class="bi bi-send"></i> 预测
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-primary flex-grow-1">
+                            <i class="bi bi-play-fill"></i> 执行预测
                         </button>
-                    </form>
-                </div>
+                        <button type="button" class="btn btn-outline-primary" id="exportPredictBtn" title="直接下载预测结果文件 (原始数据 + 预测列)">
+                            <i class="bi bi-download"></i> 导出文件
+                        </button>
+                    </div>
+                </form>
             </div>
         </div>
 
@@ -89,7 +217,7 @@
             <div class="card-header bg-success text-white"><h6 class="mb-0"><i class="bi bi-clipboard-data"></i> 完整模型评估</h6></div>
             <div class="card-body">
                 <p class="small text-muted">使用原始训练数据集进行完整评估，生成混淆矩阵、分类报告等。</p>
-                <form method="POST">
+                <form method="POST" data-ajax-action="run_test">
                     <input type="hidden" name="action" value="run_test">
                     <button type="submit" class="btn btn-success w-100">
                         <i class="bi bi-graph-up"></i> 运行完整评估
@@ -103,7 +231,7 @@
             <div class="card-header bg-info text-white"><h6 class="mb-0"><i class="bi bi-bar-chart-steps"></i> 特征重要性分析</h6></div>
             <div class="card-body">
                 <p class="small text-muted">分析模型各特征的重要程度（支持树模型和线性模型）。</p>
-                <form method="POST">
+                <form method="POST" data-ajax-action="feature_importance">
                     <input type="hidden" name="action" value="feature_importance">
                     <button type="submit" class="btn btn-info w-100">
                         <i class="bi bi-bar-chart"></i> 分析特征重要性
@@ -115,169 +243,1211 @@
 
     <!-- 右侧: 结果展示 -->
     <div class="col-lg-7">
-        <!-- 预测结果 -->
-        {% if result and result.success %}
-        <div class="card mb-4 border-primary">
-            <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
-                <h6 class="mb-0"><i class="bi bi-check-circle"></i> 预测结果 ({{ result.num_samples }} 条)</h6>
-                <span class="badge bg-light text-dark">{{ result.task_type }}</span>
-            </div>
-            <div class="card-body p-0">
-                <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
-                    <table class="table table-hover table-sm mb-0">
-                        <thead class="table-light sticky-top">
-                            <tr>
-                                <th>#</th>
-                                <th>预测值</th>
-                                {% if result.probabilities %}
-                                <th>置信度 (Top-3)</th>
-                                {% endif %}
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for pred in result.predictions[:50] %}
-                            <tr>
-                                <td>{{ loop.index }}</td>
-                                <td>
-                                    <span class="badge bg-primary fs-6">{{ pred }}</span>
-                                </td>
-                                {% if result.probabilities %}
-                                <td>
-                                    {% for prob in result.probabilities[loop.index0] %}
-                                    <span class="badge bg-secondary me-1">{{ prob.class }}: {{ '%.2f'|format(prob.probability * 100) }}%</span>
-                                    {% endfor %}
-                                </td>
-                                {% endif %}
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
+        <!-- 服务端渲染结果 (无 JS 降级) -->
+        <div id="serverResults">
+            <!-- 预测结果 -->
+            {% if result and result.success %}
+            <div class="card mb-4 border-primary">
+                <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                    <h6 class="mb-0"><i class="bi bi-check-circle"></i> 预测结果 ({{ result.num_samples }} 条)</h6>
+                    <span class="badge bg-light text-dark">{{ result.task_type }}</span>
                 </div>
-                {% if result.predictions|length > 50 %}
-                <div class="text-center py-2 text-muted small">仅显示前 50 条结果</div>
-                {% endif %}
-            </div>
-        </div>
-
-        <!-- 预测分布图 -->
-        {% if result.predictions|length > 1 %}
-        <div class="card mb-4">
-            <div class="card-header"><h6 class="mb-0">预测分布</h6></div>
-            <div class="card-body">
-                <canvas id="predDistChart" height="160"></canvas>
-            </div>
-        </div>
-        {% endif %}
-        {% endif %}
-
-        <!-- 完整评估报告 -->
-        {% if test_report and test_report.success %}
-        <div class="card mb-4 border-success">
-            <div class="card-header bg-success text-white"><h6 class="mb-0"><i class="bi bi-clipboard-data"></i> 评估报告</h6></div>
-            <div class="card-body">
-                <!-- 指标卡片 -->
-                <div class="row g-2 mb-3 text-center">
-                    {% if test_report.task_type == 'classification' %}
-                    <div class="col-3">
-                        <div class="border rounded p-2"><h5 class="text-primary mb-0">{{ '%.2f'|format(test_report.accuracy * 100) }}%</h5><small>准确率</small></div>
-                    </div>
-                    <div class="col-3">
-                        <div class="border rounded p-2"><h5 class="text-success mb-0">{{ '%.3f'|format(test_report.get('precision_macro', test_report.get('precision', 0))) }}</h5><small>查准率 (macro)</small></div>
-                    </div>
-                    <div class="col-3">
-                        <div class="border rounded p-2"><h5 class="text-info mb-0">{{ '%.3f'|format(test_report.get('recall_macro', test_report.get('recall', 0))) }}</h5><small>召回率 (macro)</small></div>
-                    </div>
-                    <div class="col-3">
-                        <div class="border rounded p-2"><h5 class="text-warning mb-0">{{ '%.3f'|format(test_report.get('f1_macro', test_report.get('f1_score', 0))) }}</h5><small>F1分数 (macro)</small></div>
-                    </div>
-                    {# 对比 weighted vs macro 差异 #}
-                    {% if test_report.get('precision_weighted') is not none %}
-                    <div class="col-12"><hr class="my-1"><small class="text-muted">
-                        加权: P={{ '%.3f'|format(test_report.precision_weighted) }}
-                        R={{ '%.3f'|format(test_report.recall_weighted) }}
-                        F1={{ '%.3f'|format(test_report.f1_weighted) }}
-                        | Macro: P={{ '%.3f'|format(test_report.precision_macro) }}
-                        R={{ '%.3f'|format(test_report.recall_macro) }}
-                        F1={{ '%.3f'|format(test_report.f1_macro) }}
-                    </small></div>
-                    {% endif %}
-                    {% else %}
-                    <div class="col-3">
-                        <div class="border rounded p-2"><h5 class="text-danger mb-0">{{ '%.4f'|format(test_report.mse) }}</h5><small>MSE</small></div>
-                    </div>
-                    <div class="col-3">
-                        <div class="border rounded p-2"><h5 class="text-warning mb-0">{{ '%.4f'|format(test_report.mae) }}</h5><small>MAE</small></div>
-                    </div>
-                    <div class="col-3">
-                        <div class="border rounded p-2"><h5 class="text-info mb-0">{{ '%.4f'|format(test_report.rmse) }}</h5><small>RMSE</small></div>
-                    </div>
-                    <div class="col-3">
-                        <div class="border rounded p-2"><h5 class="text-success mb-0">{{ '%.4f'|format(test_report.r2) }}</h5><small>R²</small></div>
-                    </div>
-                    {% endif %}
-                </div>
-
-                <!-- 混淆矩阵 (分类) -->
-                {% if test_report.confusion_matrix %}
-                <div class="row">
-                    <div class="col-md-7">
-                        <canvas id="confusionMatrixChart" height="220"></canvas>
-                    </div>
-                    <div class="col-md-5">
-                        <h6 class="mb-2">混淆矩阵</h6>
-                        <div class="table-responsive" style="max-height:220px;overflow-y:auto;">
-                            <table class="table table-bordered table-sm small">
-                                <thead><tr><th></th>
-                                {% for label in test_report.confusion_matrix_labels %}
-                                <th class="text-center">{{ label }}</th>
-                                {% endfor %}
-                                </tr></thead>
-                                <tbody>
-                                {% for row in test_report.confusion_matrix %}
-                                {% set outer_idx = loop.index0 %}
+                <div class="card-body p-0">
+                    <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                        <table class="table table-hover table-sm mb-0">
+                            <thead class="table-light sticky-top">
                                 <tr>
-                                    <th>{{ test_report.confusion_matrix_labels[outer_idx] }}</th>
-                                    {% for val in row %}
-                                    <td class="text-center {% if loop.index0 == outer_idx %}table-primary fw-bold{% endif %}">{{ val }}</td>
-                                    {% endfor %}
+                                    <th>#</th>
+                                    <th>预测值</th>
+                                    {% if result.probabilities %}
+                                    <th>置信度 (Top-3)</th>
+                                    {% endif %}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for pred in result.predictions[:50] %}
+                                <tr>
+                                    <td>{{ loop.index }}</td>
+                                    <td>
+                                        <span class="badge bg-primary fs-6">{{ pred }}</span>
+                                    </td>
+                                    {% if result.probabilities %}
+                                    <td>
+                                        {% for prob in result.probabilities[loop.index0] %}
+                                        <span class="badge bg-secondary me-1">{{ prob.class }}: {{ '%.2f'|format(prob.probability * 100) }}%</span>
+                                        {% endfor %}
+                                    </td>
+                                    {% endif %}
                                 </tr>
                                 {% endfor %}
-                                </tbody>
-                            </table>
+                            </tbody>
+                        </table>
+                    </div>
+                    {% if result.predictions|length > 50 %}
+                    <div class="text-center py-2 text-muted small">仅显示前 50 条结果</div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- 预测分布图 -->
+            {% if result.predictions|length > 1 %}
+            <div class="card mb-4">
+                <div class="card-header"><h6 class="mb-0">预测分布</h6></div>
+                <div class="card-body">
+                    <canvas id="predDistChart" height="160"></canvas>
+                </div>
+            </div>
+            {% endif %}
+            {% endif %}
+
+            <!-- 完整评估报告 -->
+            {% if test_report and test_report.success %}
+            <div class="card mb-4 border-success">
+                <div class="card-header bg-success text-white"><h6 class="mb-0"><i class="bi bi-clipboard-data"></i> 评估报告</h6></div>
+                <div class="card-body">
+                    <!-- 指标卡片 -->
+                    <div class="row g-2 mb-3 text-center">
+                        {% if test_report.task_type == 'classification' %}
+                        <div class="col-3">
+                            <div class="border rounded p-2"><h5 class="text-primary mb-0">{{ '%.2f'|format(test_report.accuracy * 100) }}%</h5><small>准确率</small></div>
+                        </div>
+                        <div class="col-3">
+                            <div class="border rounded p-2"><h5 class="text-success mb-0">{{ '%.3f'|format(test_report.get('precision_macro', test_report.get('precision', 0))) }}</h5><small>查准率 (macro)</small></div>
+                        </div>
+                        <div class="col-3">
+                            <div class="border rounded p-2"><h5 class="text-info mb-0">{{ '%.3f'|format(test_report.get('recall_macro', test_report.get('recall', 0))) }}</h5><small>召回率 (macro)</small></div>
+                        </div>
+                        <div class="col-3">
+                            <div class="border rounded p-2"><h5 class="text-warning mb-0">{{ '%.3f'|format(test_report.get('f1_macro', test_report.get('f1_score', 0))) }}</h5><small>F1分数 (macro)</small></div>
+                        </div>
+                        {% if test_report.get('precision_weighted') is not none %}
+                        <div class="col-12"><hr class="my-1"><small class="text-muted">
+                            加权: P={{ '%.3f'|format(test_report.precision_weighted) }}
+                            R={{ '%.3f'|format(test_report.recall_weighted) }}
+                            F1={{ '%.3f'|format(test_report.f1_weighted) }}
+                            | Macro: P={{ '%.3f'|format(test_report.precision_macro) }}
+                            R={{ '%.3f'|format(test_report.recall_macro) }}
+                            F1={{ '%.3f'|format(test_report.f1_macro) }}
+                        </small></div>
+                        {% endif %}
+                        {% else %}
+                        <div class="col-3">
+                            <div class="border rounded p-2"><h5 class="text-danger mb-0">{{ '%.4f'|format(test_report.mse) }}</h5><small>MSE</small></div>
+                        </div>
+                        <div class="col-3">
+                            <div class="border rounded p-2"><h5 class="text-warning mb-0">{{ '%.4f'|format(test_report.mae) }}</h5><small>MAE</small></div>
+                        </div>
+                        <div class="col-3">
+                            <div class="border rounded p-2"><h5 class="text-info mb-0">{{ '%.4f'|format(test_report.rmse) }}</h5><small>RMSE</small></div>
+                        </div>
+                        <div class="col-3">
+                            <div class="border rounded p-2"><h5 class="text-success mb-0">{{ '%.4f'|format(test_report.r2) }}</h5><small>R²</small></div>
+                        </div>
+                        {% endif %}
+                    </div>
+
+                    <!-- 混淆矩阵 (分类) -->
+                    {% if test_report.confusion_matrix %}
+                    <div class="row">
+                        <div class="col-md-7">
+                            <canvas id="confusionMatrixChart" height="220"></canvas>
+                        </div>
+                        <div class="col-md-5">
+                            <h6 class="mb-2">混淆矩阵</h6>
+                            <div class="table-responsive" style="max-height:220px;overflow-y:auto;">
+                                <table class="table table-bordered table-sm small">
+                                    <thead><tr><th></th>
+                                    {% for label in test_report.confusion_matrix_labels %}
+                                    <th class="text-center">{{ label }}</th>
+                                    {% endfor %}
+                                    </tr></thead>
+                                    <tbody>
+                                    {% for row in test_report.confusion_matrix %}
+                                    {% set outer_idx = loop.index0 %}
+                                    <tr>
+                                        <th>{{ test_report.confusion_matrix_labels[outer_idx] }}</th>
+                                        {% for val in row %}
+                                        <td class="text-center {% if loop.index0 == outer_idx %}table-primary fw-bold{% endif %}">{{ val }}</td>
+                                        {% endfor %}
+                                    </tr>
+                                    {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     </div>
+                    {% endif %}
+
+                    <!-- 残差图 (回归) -->
+                    {% if test_report.predictions_scatter %}
+                    <canvas id="residualChart" height="220"></canvas>
+                    {% endif %}
                 </div>
-                {% endif %}
+            </div>
+            {% endif %}
 
-                <!-- 残差图 (回归) -->
-                {% if test_report.predictions_scatter %}
-                <canvas id="residualChart" height="220"></canvas>
-                {% endif %}
+            <!-- 特征重要性 -->
+            {% if feature_importance and feature_importance.success %}
+            <div class="card mb-4 border-info">
+                <div class="card-header bg-info text-white"><h6 class="mb-0"><i class="bi bi-bar-chart-steps"></i> 特征重要性</h6></div>
+                <div class="card-body">
+                    <canvas id="featureImportanceChart" height="240"></canvas>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- AJAX 动态结果区域 -->
+        <div id="ajaxResults" style="display:none;">
+            <div id="ajaxResultContent">
+                <!-- 初始状态: 欢迎提示 -->
+                <div id="ajaxWelcome" class="card border-dashed">
+                    <div class="card-body text-center py-5 text-muted">
+                        <i class="bi bi-magic" style="font-size: 3rem;"></i>
+                        <h5 class="mt-3">交互式模型测试</h5>
+                        <p class="mb-0">在左侧面板输入数据或上传文件，<br>结果将直接在此区域展示，无需刷新页面。</p>
+                    </div>
+                </div>
             </div>
         </div>
-        {% endif %}
-
-        <!-- 特征重要性 -->
-        {% if feature_importance and feature_importance.success %}
-        <div class="card mb-4 border-info">
-            <div class="card-header bg-info text-white"><h6 class="mb-0"><i class="bi bi-bar-chart-steps"></i> 特征重要性</h6></div>
-            <div class="card-body">
-                <canvas id="featureImportanceChart" height="240"></canvas>
-            </div>
-        </div>
-        {% endif %}
     </div>
 </div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
-// ============ 模型测试页 — 预测分布 + 混淆矩阵 + 特征重要性 + 残差图 ============
+// ============ 图像上传拖拽与预览 (CV 模型) ============
+(function() {
+    const dropZone = document.getElementById('imageDropZone');
+    const fileInput = document.getElementById('imageFileInput');
+    if (!dropZone || !fileInput) return;
 
-// 1. 预测分布柱状图: 展示每个类别的预测数量
+    // 点击触发文件选择
+    dropZone.addEventListener('click', function(e) {
+        if (e.target.tagName !== 'BUTTON') fileInput.click();
+    });
+
+    // 拖拽高亮
+    dropZone.addEventListener('dragover', function(e) {
+        e.preventDefault();
+        dropZone.classList.add('dragover');
+    });
+    dropZone.addEventListener('dragleave', function() {
+        dropZone.classList.remove('dragover');
+    });
+
+    // 释放拖拽
+    dropZone.addEventListener('drop', function(e) {
+        e.preventDefault();
+        dropZone.classList.remove('dragover');
+        if (e.dataTransfer.files.length > 0) {
+            fileInput.files = e.dataTransfer.files;
+            updatePreview(e.dataTransfer.files[0]);
+        }
+    });
+
+    // 文件选择变化
+    fileInput.addEventListener('change', function() {
+        if (fileInput.files.length > 0) {
+            updatePreview(fileInput.files[0]);
+        }
+    });
+
+    // 预览选中的图像
+    function updatePreview(file) {
+        if (!file.type.match(/^image\//)) return;
+        var reader = new FileReader();
+        reader.onload = function(e) {
+            dropZone.innerHTML = '<img src="' + e.target.result + '" class="img-preview" alt="预览">' +
+                '<p class="text-muted small mt-2">点击或拖拽更换图像</p>';
+        };
+        reader.readAsDataURL(file);
+    }
+})();
+
+
+// ============ TestPage AJAX 控制器 ============
+var TestPage = {
+    // 模型 UUID (从 meta 标签读取)
+    modelUuid: '',
+
+    // Chart.js 实例追踪 { canvasId: chartInstance }
+    chartInstances: {},
+
+    // ======== 初始化 ========
+    init: function() {
+        this.modelUuid = document.querySelector('meta[name="model-uuid"]')?.getAttribute('content') || '';
+        if (!this.modelUuid) {
+            console.warn('TestPage: 缺少 model-uuid meta 标签，AJAX 功能降级');
+            return;
+        }
+
+        // 隐藏服务端渲染结果，显示 AJAX 区域
+        var serverResults = document.getElementById('serverResults');
+        var ajaxResults = document.getElementById('ajaxResults');
+        if (serverResults && ajaxResults) {
+            serverResults.style.display = 'none';
+            ajaxResults.style.display = '';
+        }
+
+        // 绑定所有 AJAX 表单
+        this._bindForms();
+
+        // 绑定随机填充 / 重置按钮
+        this._bindUtilityButtons();
+
+        // 初始化实时预测 (NLP 模型)
+        this._initLivePredict();
+
+        console.log('TestPage: AJAX 控制器已初始化 (model=' + this.modelUuid + ')');
+    },
+
+    // ======== 表单绑定与拦截 ========
+    _bindForms: function() {
+        var self = this;
+        document.querySelectorAll('form[data-ajax-action]').forEach(function(form) {
+            form.addEventListener('submit', function(e) {
+                e.preventDefault();
+                var action = form.getAttribute('data-ajax-action');
+                self._handleAction(action, form);
+            });
+        });
+    },
+
+    _bindUtilityButtons: function() {
+        var self = this;
+        var randomBtn = document.getElementById('randomFillBtn');
+        var resetBtn = document.getElementById('resetAllBtn');
+        var csvBtn = document.getElementById('csvTemplateBtn');
+        var exportBtn = document.getElementById('exportPredictBtn');
+        if (randomBtn) randomBtn.addEventListener('click', function() { self._randomFill(); });
+        if (resetBtn) resetBtn.addEventListener('click', function() { self._resetAllFeatures(); });
+        if (csvBtn) csvBtn.addEventListener('click', function(e) { e.preventDefault(); self._downloadCsvTemplate(); });
+        if (exportBtn) exportBtn.addEventListener('click', function() { self._exportPredictFile(); });
+    },
+
+    // ======== 实时文本预测 (NLP debounce auto-predict) ========
+    _livePredictEnabled: false,
+    _liveDebounceTimer: null,
+    _liveDebounceMs: 500,
+
+    _initLivePredict: function() {
+        var self = this;
+        var textarea = document.getElementById('nlpTextInput');
+        var toggle = document.getElementById('livePredictToggle');
+        if (!textarea || !toggle) return;  // 非 NLP 模型页面不初始化
+
+        // 切换开关
+        toggle.addEventListener('change', function() {
+            self._livePredictEnabled = toggle.checked;
+            self._updateLiveStatus();
+            if (self._livePredictEnabled) {
+                // 如果已有文本，立即触发一次预测
+                var text = textarea.value.trim();
+                if (text.length >= 2) {
+                    self._debouncedPredict(textarea);
+                }
+            }
+        });
+
+        // 输入事件 (500ms debounce)
+        textarea.addEventListener('input', function() {
+            if (!self._livePredictEnabled) return;
+            self._updateLiveStatus('typing');
+            clearTimeout(self._liveDebounceTimer);
+            self._liveDebounceTimer = setTimeout(function() {
+                var text = textarea.value.trim();
+                if (text.length >= 2) {
+                    self._debouncedPredict(textarea);
+                } else {
+                    self._updateLiveStatus('idle');
+                }
+            }, self._liveDebounceMs);
+        });
+    },
+
+    _updateLiveStatus: function(state) {
+        var statusEl = document.getElementById('livePredictStatus');
+        var debounceEl = document.getElementById('livePredictDebounce');
+        if (!statusEl) return;
+
+        if (!this._livePredictEnabled) {
+            statusEl.innerHTML = '<i class="bi bi-pause-circle"></i> 已暂停';
+            statusEl.className = 'small text-muted';
+            if (debounceEl) debounceEl.style.display = 'none';
+            return;
+        }
+
+        if (state === 'typing') {
+            statusEl.innerHTML = '<i class="bi bi-pencil"></i> 监听中';
+            statusEl.className = 'small text-info';
+            if (debounceEl) debounceEl.style.display = '';
+        } else if (state === 'predicting') {
+            statusEl.innerHTML = '<span class="spinner-border spinner-border-sm"></span> 预测中...';
+            statusEl.className = 'small text-primary';
+            if (debounceEl) debounceEl.style.display = 'none';
+        } else {
+            statusEl.innerHTML = '<i class="bi bi-check-circle"></i> 就绪';
+            statusEl.className = 'small text-success';
+            if (debounceEl) debounceEl.style.display = 'none';
+        }
+    },
+
+    _debouncedPredict: async function(textarea) {
+        var self = this;
+        var text = textarea.value.trim();
+        if (!text || text.length < 2) return;
+
+        self._updateLiveStatus('predicting');
+        try {
+            var resp = await fetch('/api/v1/models/' + this.modelUuid + '/quick-predict', {
+                method: 'POST',
+                headers: this._jsonHeaders(),
+                body: JSON.stringify({ text: text })
+            });
+            var data = await resp.json();
+            if (data.success && data.data) {
+                this._renderQuickPredictResult(data.data);
+                this._updateLiveStatus('idle');
+            } else {
+                this._updateLiveStatus('idle');
+                // 实时模式下不弹错误 — 静默降级
+            }
+        } catch (err) {
+            this._updateLiveStatus('idle');
+        }
+    },
+
+    // CSV 模板下载 (AJAX + Blob, 带错误提示)
+    _downloadCsvTemplate: async function() {
+        try {
+            var resp = await fetch('/api/v1/models/' + this.modelUuid + '/predict-template', {
+                method: 'GET',
+                headers: this._csrfHeaders()
+            });
+            if (!resp.ok) {
+                var errData = await resp.json().catch(function() { return null; });
+                showCenteredMessage(errData?.message || '下载模板失败 (HTTP ' + resp.status + ')', 'error');
+                return;
+            }
+            var blob = await resp.blob();
+            var disposition = resp.headers.get('Content-Disposition') || '';
+            var match = disposition.match(/filename="?([^"]+)"?/);
+            var filename = match ? match[1] : 'template.csv';
+            var url = URL.createObjectURL(blob);
+            var a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            showCenteredMessage('CSV 模板已下载 — ' + filename, 'success', 2500);
+        } catch (err) {
+            showCenteredMessage('网络错误: ' + (err.message || '请检查连接'), 'error');
+        }
+    },
+
+    // 服务端导出预测文件 (上传文件 → 批量预测 → 下载含原始数据+预测列的文件)
+    _exportPredictFile: async function() {
+        var self = this;
+        var form = document.querySelector('form[data-ajax-action="predict_file"]');
+        if (!form) return;
+        var fileInput = form.querySelector('input[name="test_file"]');
+        var file = fileInput?.files[0];
+        if (!file) {
+            showCenteredMessage('请先选择要上传的数据文件', 'warning');
+            return;
+        }
+
+        var btn = document.getElementById('exportPredictBtn');
+        var origHTML = btn ? btn.innerHTML : null;
+        if (btn) {
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+            btn.disabled = true;
+        }
+
+        try {
+            var formData = new FormData();
+            formData.append('file', file);
+
+            var resp = await fetch('/api/v1/models/' + this.modelUuid + '/predict-export?format=csv', {
+                method: 'POST',
+                headers: this._csrfHeaders(),
+                body: formData
+            });
+
+            if (!resp.ok) {
+                var errData = await resp.json().catch(function() { return null; });
+                showCenteredMessage(errData?.message || '导出失败 (HTTP ' + resp.status + ')', 'error');
+                return;
+            }
+
+            var blob = await resp.blob();
+            var disposition = resp.headers.get('Content-Disposition') || '';
+            var match = disposition.match(/filename="?([^"]+)"?/);
+            var filename = match ? match[1] : 'predictions_export.csv';
+            var url = URL.createObjectURL(blob);
+            var a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            showCenteredMessage('预测文件已导出 — ' + filename, 'success', 2500);
+        } catch (err) {
+            showCenteredMessage('网络错误: ' + (err.message || '请检查连接'), 'error');
+        } finally {
+            if (btn && origHTML) {
+                btn.innerHTML = origHTML;
+                btn.disabled = false;
+            }
+        }
+    },
+
+    // ======== 动作分发 ========
+    _handleAction: function(action, form) {
+        switch (action) {
+            case 'predict_text':   return this.predictText(form);
+            case 'predict_manual': return this.predictManual(form);
+            case 'predict_file':   return this.predictFile(form);
+            case 'predict_image':  return this.predictImage(form);
+            case 'run_test':       return this.runEvaluation(form);
+            case 'feature_importance': return this.getFeatureImportance(form);
+            default:
+                console.warn('TestPage: 未知 action=' + action);
+                form.submit();  // 降级为普通提交
+        }
+    },
+
+    // ======== CSRF & 通用 Headers ========
+    _csrfHeaders: function() {
+        var token = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+        return {
+            'X-CSRFToken': token,
+            'X-Requested-With': 'XMLHttpRequest'
+        };
+    },
+
+    _jsonHeaders: function() {
+        var h = this._csrfHeaders();
+        h['Content-Type'] = 'application/json';
+        return h;
+    },
+
+    // ======== 加载状态管理 ========
+    _showLoading: function(form) {
+        var btn = form ? form.querySelector('button[type="submit"]') : null;
+        if (btn && !btn._testPageOrigHTML) {
+            btn._testPageOrigHTML = btn.innerHTML;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span> 处理中...';
+            btn.disabled = true;
+        }
+        // 骨架屏
+        var content = document.getElementById('ajaxResultContent');
+        if (content) {
+            content.innerHTML =
+                '<div class="card"><div class="card-body text-center py-5">' +
+                '<div class="spinner-border text-primary mb-3" role="status"></div>' +
+                '<p class="text-muted mb-0">正在处理请求...</p></div></div>';
+        }
+        // 销毁旧图表
+        this._destroyAllCharts();
+    },
+
+    _hideLoading: function(form) {
+        var btn = form ? form.querySelector('button[type="submit"]') : null;
+        if (btn && btn._testPageOrigHTML) {
+            btn.innerHTML = btn._testPageOrigHTML;
+            btn.disabled = false;
+            delete btn._testPageOrigHTML;
+        }
+    },
+
+    _showError: function(message) {
+        var content = document.getElementById('ajaxResultContent');
+        if (content) {
+            content.innerHTML =
+                '<div class="card border-danger">' +
+                '<div class="card-body text-center py-4">' +
+                '<i class="bi bi-exclamation-triangle text-danger" style="font-size: 2rem;"></i>' +
+                '<p class="text-danger mt-2 mb-0">' + this._escapeHtml(message) + '</p>' +
+                '</div></div>';
+        }
+    },
+
+    // ======== 6 个核心方法 ========
+
+    // 1. 文本预测 → POST /api/v1/models/<uuid>/quick-predict
+    predictText: async function(form) {
+        this._showLoading(form);
+        try {
+            var text = (form.querySelector('textarea[name="text_input"]')?.value || '').trim();
+            if (!text) {
+                this._hideLoading(form);
+                this._showError('请输入文本内容后再点击预测。');
+                return;
+            }
+            var resp = await fetch('/api/v1/models/' + this.modelUuid + '/quick-predict', {
+                method: 'POST',
+                headers: this._jsonHeaders(),
+                body: JSON.stringify({ text: text })
+            });
+            var data = await resp.json();
+            this._hideLoading(form);
+            if (data.success && data.data) {
+                this._renderQuickPredictResult(data.data);
+            } else {
+                this._showError(data.message || '文本预测失败');
+                showCenteredMessage(data.message || '文本预测失败', 'error');
+            }
+        } catch (err) {
+            this._hideLoading(form);
+            this._showError('网络错误: ' + (err.message || '请检查连接'));
+        }
+    },
+
+    // 2. 手动特征预测 → POST /api/v1/models/<uuid>/quick-predict
+    predictManual: async function(form) {
+        this._showLoading(form);
+        try {
+            var features = this._collectManualFeatures(form);
+            if (!features || Object.keys(features).length === 0) {
+                this._hideLoading(form);
+                this._showError('请至少输入一个特征值后再点击预测。');
+                return;
+            }
+            var resp = await fetch('/api/v1/models/' + this.modelUuid + '/quick-predict', {
+                method: 'POST',
+                headers: this._jsonHeaders(),
+                body: JSON.stringify({ features: features })
+            });
+            var data = await resp.json();
+            this._hideLoading(form);
+            if (data.success && data.data) {
+                this._renderQuickPredictResult(data.data);
+            } else {
+                this._showError(data.message || '特征预测失败');
+                showCenteredMessage(data.message || '特征预测失败', 'error');
+            }
+        } catch (err) {
+            this._hideLoading(form);
+            this._showError('网络错误: ' + (err.message || '请检查连接'));
+        }
+    },
+
+    // 3. 文件批量预测 → POST /api/v1/models/<uuid>/predict (FormData)
+    predictFile: async function(form) {
+        this._showLoading(form);
+        try {
+            var fileInput = form.querySelector('input[name="test_file"]');
+            var file = fileInput?.files[0];
+            if (!file) {
+                this._hideLoading(form);
+                this._showError('请选择要上传的测试数据文件。');
+                return;
+            }
+            var formData = new FormData();
+            formData.append('file', file);
+
+            var headers = this._csrfHeaders();
+            // 不设置 Content-Type，让浏览器自动设置 multipart/form-data boundary
+
+            var resp = await fetch('/api/v1/models/' + this.modelUuid + '/predict', {
+                method: 'POST',
+                headers: headers,
+                body: formData
+            });
+            var data = await resp.json();
+            this._hideLoading(form);
+            if (data.success && data.data) {
+                this._renderBatchPredictResult(data.data);
+            } else {
+                this._showError(data.message || '文件预测失败');
+                showCenteredMessage(data.message || '文件预测失败', 'error');
+            }
+        } catch (err) {
+            this._hideLoading(form);
+            this._showError('网络错误: ' + (err.message || '请检查连接'));
+        }
+    },
+
+    // 4. 图像预测 → POST /api/v1/models/<uuid>/predict (FormData)
+    predictImage: async function(form) {
+        this._showLoading(form);
+        try {
+            var fileInput = form.querySelector('input[name="image_file"]');
+            var file = fileInput?.files[0];
+            if (!file) {
+                this._hideLoading(form);
+                this._showError('请选择要上传的图像文件。');
+                return;
+            }
+            var formData = new FormData();
+            formData.append('file', file);
+
+            var headers = this._csrfHeaders();
+
+            var resp = await fetch('/api/v1/models/' + this.modelUuid + '/predict', {
+                method: 'POST',
+                headers: headers,
+                body: formData
+            });
+            var data = await resp.json();
+            this._hideLoading(form);
+            if (data.success && data.data) {
+                this._renderBatchPredictResult(data.data);
+            } else {
+                this._showError(data.message || '图像预测失败 (图像特征提取将在 Phase 1 Task 6 中增强)');
+                showCenteredMessage(data.message || '图像预测失败', 'warning');
+            }
+        } catch (err) {
+            this._hideLoading(form);
+            this._showError('网络错误: ' + (err.message || '请检查连接'));
+        }
+    },
+
+    // 5. 完整评估 → POST /api/v1/models/<uuid>/evaluate
+    runEvaluation: async function(form) {
+        this._showLoading(form);
+        try {
+            var headers = this._csrfHeaders();
+            headers['Content-Type'] = 'application/json';
+
+            var resp = await fetch('/api/v1/models/' + this.modelUuid + '/evaluate', {
+                method: 'POST',
+                headers: headers,
+                body: '{}'
+            });
+            var data = await resp.json();
+            this._hideLoading(form);
+            if (data.success && data.data) {
+                this._renderEvalReport(data.data);
+            } else {
+                this._showError(data.message || '评估失败');
+                showCenteredMessage(data.message || '评估失败', 'error');
+            }
+        } catch (err) {
+            this._hideLoading(form);
+            this._showError('网络错误: ' + (err.message || '请检查连接'));
+        }
+    },
+
+    // 6. 特征重要性 → GET /api/v1/models/<uuid>/feature-importance
+    getFeatureImportance: async function(form) {
+        this._showLoading(form);
+        try {
+            var resp = await fetch('/api/v1/models/' + this.modelUuid + '/feature-importance', {
+                method: 'GET',
+                headers: this._csrfHeaders()
+            });
+            var data = await resp.json();
+            this._hideLoading(form);
+            if (data.success && data.features) {
+                this._renderFeatureImportance(data);
+            } else {
+                this._showError(data.message || data.error || '无法获取特征重要性');
+                showCenteredMessage(data.message || data.error || '无法获取特征重要性', 'warning');
+            }
+        } catch (err) {
+            this._hideLoading(form);
+            this._showError('网络错误: ' + (err.message || '请检查连接'));
+        }
+    },
+
+    // ======== 手动特征值收集 ========
+    _collectManualFeatures: function(form) {
+        var features = {};
+        var inputs = form.querySelectorAll('input[data-feature-name]');
+        inputs.forEach(function(inp) {
+            var name = inp.getAttribute('data-feature-name');
+            var val = inp.value.trim();
+            if (name && val !== '') {
+                features[name] = parseFloat(val);
+            }
+        });
+        return features;
+    },
+
+    // ======== 随机填充 / 重置 ========
+    _randomFill: function() {
+        var inputs = document.querySelectorAll('#manualFeatureInputs input[data-feature-name]');
+        inputs.forEach(function(inp) {
+            // 在 [-10, 10] 范围内随机生成，保留2位小数
+            inp.value = (Math.random() * 20 - 10).toFixed(2);
+        });
+    },
+
+    _resetAllFeatures: function() {
+        var inputs = document.querySelectorAll('#manualFeatureInputs input[data-feature-name]');
+        inputs.forEach(function(inp) { inp.value = ''; });
+    },
+
+    // ======== 结果渲染方法 ========
+
+    // 渲染单条快速预测结果
+    _renderQuickPredictResult: function(d) {
+        var conf = d.confidence || 0;
+        var confPct = Math.round(conf * 100);
+        var badgeClass = conf >= 0.85 ? 'bg-success' : (conf >= 0.60 ? 'bg-warning text-dark' : 'bg-danger');
+        var barClass = confPct >= 80 ? 'bg-success' : (confPct >= 55 ? 'bg-warning' : 'bg-danger');
+
+        var html = '';
+
+        // 预测结果卡片
+        html += '<div class="card mb-4 border-primary">';
+        html += '<div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">';
+        html += '<h6 class="mb-0"><i class="bi bi-check-circle"></i> 预测结果</h6>';
+        html += '<span class="badge bg-light text-dark">' + this._escapeHtml(d.model_type || '') + '</span>';
+        html += '</div>';
+        html += '<div class="card-body">';
+
+        // 预测标签 + 置信度
+        html += '<div class="text-center mb-3">';
+        html += '<span class="badge fs-5 px-4 py-2 ' + badgeClass + '">' + this._escapeHtml(String(d.prediction)) + '</span>';
+        html += '<div class="mt-2 mb-1 d-flex justify-content-between"><small>置信度</small><small class="fw-bold">' + confPct + '%</small></div>';
+        html += '<div class="progress" style="height:8px;">';
+        html += '<div class="progress-bar ' + barClass + '" role="progressbar" style="width:' + confPct + '%;"></div></div>';
+        html += '</div>';
+
+        // 概率分布
+        if (d.probabilities && d.probabilities.length > 1) {
+            html += '<div class="small fw-bold mb-2">概率分布</div>';
+            d.probabilities.forEach(function(p) {
+                var pct = Math.round((p.probability || 0) * 100);
+                html += '<div class="d-flex align-items-center mb-1">';
+                html += '<span class="small me-2" style="min-width:70px;">' + this._escapeHtml(String(p.class)) + '</span>';
+                html += '<div class="flex-grow-1 progress" style="height:6px;">';
+                html += '<div class="progress-bar bg-info" role="progressbar" style="width:' + pct + '%;"></div></div>';
+                html += '<span class="small ms-2" style="min-width:35px;">' + pct + '%</span>';
+                html += '</div>';
+            }.bind(this));
+        }
+
+        // 输入预览 / 备注
+        if (d.input_text) {
+            html += '<div class="mt-3 small text-muted">';
+            html += '<i class="bi bi-chat-left-text"></i> 输入: "' + this._escapeHtml(d.input_text.substring(0, 100)) + '"';
+            html += '</div>';
+        }
+        if (d.note) {
+            html += '<div class="mt-1 small text-muted">';
+            html += '<i class="bi bi-info-circle"></i> ' + this._escapeHtml(d.note);
+            html += '</div>';
+        }
+
+        html += '</div></div>';
+
+        var content = document.getElementById('ajaxResultContent');
+        if (content) content.innerHTML = html;
+    },
+
+    // 渲染批量预测结果 (文件/图像上传)
+    _renderBatchPredictResult: function(d) {
+        var predictions = d.predictions || [];
+        var probs = d.probabilities || [];
+        var numSamples = d.num_samples || predictions.length;
+
+        // 保存原始数据供导出
+        this._lastBatchData = d;
+
+        var html = '';
+
+        // 预测结果卡片
+        html += '<div class="card mb-4 border-primary">';
+        html += '<div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">';
+        html += '<h6 class="mb-0"><i class="bi bi-check-circle"></i> 预测结果 (' + numSamples + ' 条)</h6>';
+        html += '<div class="d-flex gap-1">';
+        html += '<button class="btn btn-sm btn-outline-light" onclick="TestPage.exportResults(\'csv\')" title="导出为 CSV"><i class="bi bi-filetype-csv"></i> CSV</button>';
+        html += '<button class="btn btn-sm btn-outline-light" onclick="TestPage.exportResults(\'json\')" title="导出为 JSON"><i class="bi bi-filetype-json"></i> JSON</button>';
+        html += '<span class="badge bg-light text-dark">' + this._escapeHtml(d.task_type || '') + '</span>';
+        html += '</div>';
+        html += '</div>';
+        html += '<div class="card-body p-0">';
+
+        if (predictions.length > 0) {
+            html += '<div class="table-responsive" style="max-height: 400px; overflow-y: auto;">';
+            html += '<table class="table table-hover table-sm mb-0">';
+            html += '<thead class="table-light sticky-top"><tr><th>#</th><th>预测值</th>';
+            if (probs.length > 0) html += '<th>置信度 (Top-3)</th>';
+            html += '</tr></thead><tbody>';
+
+            var limit = Math.min(predictions.length, 50);
+            for (var i = 0; i < limit; i++) {
+                html += '<tr><td>' + (i + 1) + '</td>';
+                html += '<td><span class="badge bg-primary fs-6">' + this._escapeHtml(String(predictions[i])) + '</span></td>';
+                if (probs[i]) {
+                    html += '<td>';
+                    probs[i].forEach(function(p) {
+                        html += '<span class="badge bg-secondary me-1">' + this._escapeHtml(String(p.class)) + ': ' + (p.probability * 100).toFixed(1) + '%</span>';
+                    }.bind(this));
+                    html += '</td>';
+                }
+                html += '</tr>';
+            }
+            html += '</tbody></table></div>';
+            if (predictions.length > 50) {
+                html += '<div class="text-center py-2 text-muted small">仅显示前 50 条结果</div>';
+            }
+        }
+
+        html += '</div></div>';
+
+        // 预测分布图 (多条结果时)
+        if (predictions.length > 1) {
+            html += '<div class="card mb-4"><div class="card-header"><h6 class="mb-0">预测分布</h6></div>';
+            html += '<div class="card-body"><canvas id="ajaxPredDistChart" height="160"></canvas></div></div>';
+        }
+
+        var content = document.getElementById('ajaxResultContent');
+        if (content) content.innerHTML = html;
+
+        // 渲染分布图
+        if (predictions.length > 1) {
+            this._renderPredDistChart(predictions);
+        }
+    },
+
+    // 存储最近一次批量预测数据
+    _lastBatchData: null,
+
+    // 导出预测结果 (客户端 Blob 下载)
+    exportResults: function(format) {
+        var d = this._lastBatchData;
+        if (!d || !d.predictions || d.predictions.length === 0) {
+            showCenteredMessage('没有可导出的预测结果', 'warning');
+            return;
+        }
+        var predictions = d.predictions;
+        var probs = d.probabilities || [];
+        var filename, content, mime;
+
+        if (format === 'csv') {
+            // 构建 CSV: index, prediction, confidence, [top1_class, top1_prob, ...]
+            var rows = [];
+            var header = ['index', 'prediction'];
+            // 收集所有概率类别名
+            var allClasses = [];
+            if (probs.length > 0 && probs[0]) {
+                probs[0].forEach(function(p) { allClasses.push(p.class); });
+                header.push('confidence');
+                allClasses.forEach(function(c) { header.push('prob_' + c); });
+            }
+            rows.push(header.join(','));
+
+            for (var i = 0; i < predictions.length; i++) {
+                var row = [i + 1, '"' + String(predictions[i]).replace(/"/g, '""') + '"'];
+                if (probs[i] && probs[i].length > 0) {
+                    row.push((probs[i][0].probability || 0).toFixed(4));
+                    allClasses.forEach(function(c) {
+                        var found = probs[i].filter(function(p) { return p.class === c; });
+                        row.push(found.length > 0 ? (found[0].probability || 0).toFixed(4) : '0');
+                    });
+                }
+                rows.push(row.join(','));
+            }
+            content = '﻿' + rows.join('\n');  // BOM for Excel
+            mime = 'text/csv;charset=utf-8';
+            filename = 'predictions_export.csv';
+        } else {
+            // JSON
+            var items = [];
+            for (var i = 0; i < predictions.length; i++) {
+                var item = { index: i + 1, prediction: predictions[i] };
+                if (probs[i]) {
+                    item.probabilities = probs[i];
+                    item.confidence = probs[i].length > 0 ? probs[i][0].probability : null;
+                }
+                items.push(item);
+            }
+            content = JSON.stringify({ total: predictions.length, task_type: d.task_type || '', predictions: items }, null, 2);
+            mime = 'application/json';
+            filename = 'predictions_export.json';
+        }
+
+        var blob = new Blob([content], { type: mime });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showCenteredMessage('已导出 ' + predictions.length + ' 条结果 (' + format.toUpperCase() + ')', 'success', 2500);
+    },
+
+    // 渲染完整评估报告
+    _renderEvalReport: function(d) {
+        var isCls = d.task_type === 'classification';
+        var html = '';
+
+        html += '<div class="card mb-4 border-success">';
+        html += '<div class="card-header bg-success text-white"><h6 class="mb-0"><i class="bi bi-clipboard-data"></i> 评估报告</h6></div>';
+        html += '<div class="card-body">';
+
+        // 指标卡片
+        html += '<div class="row g-2 mb-3 text-center">';
+        if (isCls) {
+            html += this._metricCard('准确率', (d.accuracy * 100).toFixed(1) + '%', 'text-primary');
+            html += this._metricCard('查准率 (macro)', (d.precision_macro || d.precision || 0).toFixed(3), 'text-success');
+            html += this._metricCard('召回率 (macro)', (d.recall_macro || d.recall || 0).toFixed(3), 'text-info');
+            html += this._metricCard('F1 (macro)', (d.f1_macro || d.f1_score || 0).toFixed(3), 'text-warning');
+        } else {
+            html += this._metricCard('MSE', (d.mse || 0).toFixed(4), 'text-danger');
+            html += this._metricCard('MAE', (d.mae || 0).toFixed(4), 'text-warning');
+            html += this._metricCard('RMSE', (d.rmse || 0).toFixed(4), 'text-info');
+            html += this._metricCard('R²', (d.r2 || 0).toFixed(4), 'text-success');
+        }
+        html += '</div>';
+
+        // 混淆矩阵 (分类)
+        if (isCls && d.confusion_matrix && d.confusion_matrix_labels) {
+            html += '<div class="row"><div class="col-md-7">';
+            html += '<canvas id="ajaxConfusionMatrixChart" height="220"></canvas></div>';
+            html += '<div class="col-md-5"><h6 class="mb-2">混淆矩阵</h6>';
+            html += '<div class="table-responsive" style="max-height:220px;overflow-y:auto;">';
+            html += '<table class="table table-bordered table-sm small"><thead><tr><th></th>';
+            d.confusion_matrix_labels.forEach(function(l) { html += '<th class="text-center">' + this._escapeHtml(String(l)) + '</th>'; }.bind(this));
+            html += '</tr></thead><tbody>';
+            d.confusion_matrix.forEach(function(row, ri) {
+                html += '<tr><th>' + this._escapeHtml(String(d.confusion_matrix_labels[ri])) + '</th>';
+                row.forEach(function(val, ci) {
+                    html += '<td class="text-center' + (ci === ri ? ' table-primary fw-bold' : '') + '">' + val + '</td>';
+                });
+                html += '</tr>';
+            }.bind(this));
+            html += '</tbody></table></div></div></div>';
+        }
+
+        // 残差图 (回归)
+        if (!isCls && d.predictions_scatter) {
+            html += '<canvas id="ajaxResidualChart" height="220"></canvas>';
+        }
+
+        html += '</div></div>';
+
+        var content = document.getElementById('ajaxResultContent');
+        if (content) content.innerHTML = html;
+
+        // 渲染图表
+        if (isCls && d.confusion_matrix && d.confusion_matrix_labels) {
+            this._renderConfusionMatrixChart(d.confusion_matrix, d.confusion_matrix_labels);
+        }
+        if (!isCls && d.predictions_scatter) {
+            this._renderResidualChart(d.predictions_scatter, d.r2 || 0);
+        }
+    },
+
+    // 渲染特征重要性
+    _renderFeatureImportance: function(d) {
+        var html = '';
+        html += '<div class="card mb-4 border-info">';
+        html += '<div class="card-header bg-info text-white"><h6 class="mb-0"><i class="bi bi-bar-chart-steps"></i> 特征重要性</h6></div>';
+        html += '<div class="card-body"><canvas id="ajaxFeatureImportanceChart" height="240"></canvas></div></div>';
+
+        var content = document.getElementById('ajaxResultContent');
+        if (content) content.innerHTML = html;
+
+        this._renderFeatureImportanceChart(d.features, d.importances);
+    },
+
+    // ======== 指标卡片 helper ========
+    _metricCard: function(label, value, colorClass) {
+        return '<div class="col-3"><div class="border rounded p-2">' +
+            '<h5 class="' + colorClass + ' mb-0">' + value + '</h5>' +
+            '<small>' + label + '</small></div></div>';
+    },
+
+    // ======== Chart.js 渲染方法 ========
+
+    _destroyAllCharts: function() {
+        for (var key in this.chartInstances) {
+            if (this.chartInstances.hasOwnProperty(key) && this.chartInstances[key]) {
+                this.chartInstances[key].destroy();
+                delete this.chartInstances[key];
+            }
+        }
+    },
+
+    _destroyChart: function(canvasId) {
+        if (this.chartInstances[canvasId]) {
+            this.chartInstances[canvasId].destroy();
+            delete this.chartInstances[canvasId];
+        }
+    },
+
+    // 预测分布柱状图
+    _renderPredDistChart: function(predictions) {
+        var canvasId = 'ajaxPredDistChart';
+        var canvas = document.getElementById(canvasId);
+        if (!canvas || typeof Chart === 'undefined') return;
+        this._destroyChart(canvasId);
+
+        var freq = {};
+        predictions.forEach(function(p) { var k = String(p); freq[k] = (freq[k] || 0) + 1; });
+        var labels = Object.keys(freq);
+        var data = Object.values(freq);
+        var colors = ['#4e73df','#1cc88a','#36b9cc','#f6c23e','#e74a3b','#858796','#5a5c69'];
+
+        this.chartInstances[canvasId] = new Chart(canvas.getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: '预测数量',
+                    data: data,
+                    backgroundColor: labels.map(function(_, i) { return colors[i % colors.length]; }),
+                    borderRadius: 6,
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { display: false } },
+                scales: { y: { beginAtZero: true, title: { display: true, text: '数量' } } }
+            }
+        });
+    },
+
+    // 混淆矩阵分组柱状图
+    _renderConfusionMatrixChart: function(cm, labels) {
+        var canvasId = 'ajaxConfusionMatrixChart';
+        var canvas = document.getElementById(canvasId);
+        if (!canvas || typeof Chart === 'undefined') return;
+        this._destroyChart(canvasId);
+
+        var bgColors = [
+            'rgba(78,115,223,0.85)', 'rgba(28,200,138,0.85)',
+            'rgba(54,185,204,0.85)', 'rgba(246,194,62,0.85)',
+            'rgba(231,74,59,0.85)', 'rgba(133,135,150,0.85)',
+            'rgba(90,92,105,0.85)', 'rgba(46,89,217,0.85)',
+        ];
+
+        var datasets = cm.map(function(row, i) {
+            return {
+                label: '真实: ' + labels[i],
+                data: row,
+                backgroundColor: bgColors[i % bgColors.length],
+                borderColor: '#fff',
+                borderWidth: 1,
+                borderRadius: 4,
+            };
+        });
+
+        this.chartInstances[canvasId] = new Chart(canvas.getContext('2d'), {
+            type: 'bar',
+            data: { labels: labels.map(function(l) { return '预测:' + l; }), datasets: datasets },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { position: 'top' },
+                    title: { display: true, text: '混淆矩阵分布', font: { size: 13 } }
+                },
+                scales: {
+                    x: { title: { display: true, text: '预测标签' }, stacked: false },
+                    y: { title: { display: true, text: '样本数' }, beginAtZero: true },
+                }
+            }
+        });
+    },
+
+    // 特征重要性水平柱状图
+    _renderFeatureImportanceChart: function(features, importances) {
+        var canvasId = 'ajaxFeatureImportanceChart';
+        var canvas = document.getElementById(canvasId);
+        if (!canvas || typeof Chart === 'undefined') return;
+        this._destroyChart(canvasId);
+
+        this.chartInstances[canvasId] = new Chart(canvas.getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels: features,
+                datasets: [{
+                    label: '重要性/系数',
+                    data: importances,
+                    backgroundColor: importances.map(function(v) { return v >= 0 ? '#1cc88a' : '#e74a3b'; }),
+                    borderRadius: 4,
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { title: { display: true, text: '重要性值' } },
+                    y: { ticks: { font: { size: 11 } } }
+                }
+            }
+        });
+    },
+
+    // 回归残差散点图
+    _renderResidualChart: function(scatterData, r2) {
+        var canvasId = 'ajaxResidualChart';
+        var canvas = document.getElementById(canvasId);
+        if (!canvas || typeof Chart === 'undefined') return;
+        this._destroyChart(canvasId);
+
+        var min = Infinity, max = -Infinity;
+        scatterData.forEach(function(d) {
+            if (d.true < min) min = d.true;
+            if (d.true > max) max = d.true;
+        });
+
+        this.chartInstances[canvasId] = new Chart(canvas.getContext('2d'), {
+            type: 'scatter',
+            data: {
+                datasets: [{
+                    label: '预测 vs 真实',
+                    data: scatterData.map(function(d) { return {x: d.true, y: d.pred}; }),
+                    backgroundColor: '#4e73df',
+                    pointRadius: 4,
+                    pointHoverRadius: 6,
+                }, {
+                    label: '完美预测线',
+                    data: [{x: min, y: min}, {x: max, y: max}],
+                    type: 'line',
+                    borderColor: '#e74a3b',
+                    borderDash: [6, 4],
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    fill: false,
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { position: 'top' },
+                    title: { display: true, text: '预测值 vs 真实值 (R² = ' + r2.toFixed(4) + ')' }
+                },
+                scales: {
+                    x: { title: { display: true, text: '真实值' } },
+                    y: { title: { display: true, text: '预测值' } },
+                }
+            }
+        });
+    },
+
+    // ======== HTML 转义 ========
+    _escapeHtml: function(str) {
+        var div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+    }
+};
+
+
+// ============ 服务端渲染图表 (无 JS 降级 — 仅当 serverResults 可见时执行) ============
+
+// 1. 预测分布柱状图
 {% if result and result.success and result.predictions|length > 1 %}
 (function() {
-    const ctx = document.getElementById('predDistChart').getContext('2d');
+    var serverResults = document.getElementById('serverResults');
+    if (!serverResults || serverResults.style.display === 'none') return;
+    var canvas = document.getElementById('predDistChart');
+    if (!canvas || typeof Chart === 'undefined') return;
+    const ctx = canvas.getContext('2d');
     const preds = {{ result.predictions | tojson }};
     const freq = {};
     preds.forEach(p => { freq[p] = (freq[p] || 0) + 1; });
@@ -307,14 +1477,17 @@
 })();
 {% endif %}
 
-// 2. 混淆矩阵分组柱状图: 每个真实标签的预测分布 (替代热力图)
+// 2. 混淆矩阵分组柱状图
 {% if test_report and test_report.success and test_report.confusion_matrix %}
 (function() {
-    const ctx = document.getElementById('confusionMatrixChart').getContext('2d');
+    var serverResults = document.getElementById('serverResults');
+    if (!serverResults || serverResults.style.display === 'none') return;
+    var canvas = document.getElementById('confusionMatrixChart');
+    if (!canvas || typeof Chart === 'undefined') return;
+    const ctx = canvas.getContext('2d');
     const cm = {{ test_report.confusion_matrix | tojson }};
     const labels = {{ test_report.confusion_matrix_labels | tojson }};
 
-    // 使用分组柱状图展示每个真实标签的预测分布
     const datasets = cm.map((row, i) => ({
         label: '真实: ' + labels[i],
         data: row,
@@ -347,10 +1520,14 @@
 })();
 {% endif %}
 
-// 3. 特征重要性水平柱状图: 显示各特征对预测的贡献程度
+// 3. 特征重要性水平柱状图
 {% if feature_importance and feature_importance.success %}
 (function() {
-    const ctx = document.getElementById('featureImportanceChart').getContext('2d');
+    var serverResults = document.getElementById('serverResults');
+    if (!serverResults || serverResults.style.display === 'none') return;
+    var canvas = document.getElementById('featureImportanceChart');
+    if (!canvas || typeof Chart === 'undefined') return;
+    const ctx = canvas.getContext('2d');
     const features = {{ feature_importance.features | tojson }};
     const importances = {{ feature_importance.importances | tojson }};
 
@@ -378,10 +1555,14 @@
 })();
 {% endif %}
 
-// 4. 回归残差散点图: 预测值 vs 真实值 + 完美预测对角线
+// 4. 回归残差散点图
 {% if test_report and test_report.success and test_report.predictions_scatter %}
 (function() {
-    const ctx = document.getElementById('residualChart').getContext('2d');
+    var serverResults = document.getElementById('serverResults');
+    if (!serverResults || serverResults.style.display === 'none') return;
+    var canvas = document.getElementById('residualChart');
+    if (!canvas || typeof Chart === 'undefined') return;
+    const ctx = canvas.getContext('2d');
     const scatterData = {{ test_report.predictions_scatter | tojson }};
 
     new Chart(ctx, {
@@ -422,5 +1603,11 @@
     });
 })();
 {% endif %}
+
+
+// ============ 启动 ============
+document.addEventListener('DOMContentLoaded', function() {
+    TestPage.init();
+});
 </script>
 {% endblock %}

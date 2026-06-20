@@ -2,33 +2,33 @@
 {% block title %}仪表盘{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4">
+<div class="d-flex justify-content-between align-items-center mb-4 reveal reveal-up">
     <div>
-        <h2 class="mb-1"><i class="bi bi-speedometer2"></i> 仪表盘</h2>
-        <span class="text-muted">欢迎回来，{{ current_user.full_name or current_user.username }}！</span>
+        <h3 class="mb-1 fw-bold">仪表盘</h3>
+        <span class="text-muted">欢迎回来，{{ current_user.full_name or current_user.username }}</span>
     </div>
     <div>
-        <a href="{{ url_for('training.create_job') }}" class="btn btn-success me-2">
-            <i class="bi bi-plus-circle"></i> 新建训练
+        <a href="{{ url_for('training.create_job') }}" class="btn btn-success me-2 btn-sm">
+            新建训练
         </a>
-        <a href="{{ url_for('datasets.create_dataset') }}" class="btn btn-primary">
-            <i class="bi bi-cloud-upload"></i> 上传数据
+        <a href="{{ url_for('datasets.create_dataset') }}" class="btn btn-outline-secondary btn-sm">
+            上传数据
         </a>
     </div>
 </div>
 
-<!-- 统计卡片 -->
+<!-- Stats Cards -->
 <div class="row g-3 mb-4">
     <div class="col-xl-3 col-md-6">
-        <div class="card border-start border-primary border-4 h-100">
+        <div class="card border-start border-primary h-100">
             <div class="card-body">
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
-                        <h6 class="text-primary text-uppercase small fw-bold">数据集</h6>
+                        <h6 class="text-muted text-uppercase small fw-semibold">数据集</h6>
                         <h2 class="fw-bold mb-0">{{ dataset_stats.total_count }}</h2>
                     </div>
-                    <div class="rounded-circle bg-primary bg-opacity-10 p-3">
-                        <i class="bi bi-database text-primary fs-4"></i>
+                    <div class="rounded-circle bg-opacity-10 p-2">
+                        <i class="bi bi-database fs-4" style="color:var(--color-text-tertiary);"></i>
                     </div>
                 </div>
                 <small class="text-muted">{{ dataset_stats.total_size_gb }} GB · {{ dataset_stats.public_count }} 公开</small>
@@ -37,15 +37,15 @@
     </div>
 
     <div class="col-xl-3 col-md-6">
-        <div class="card border-start border-success border-4 h-100">
+        <div class="card border-start border-success h-100">
             <div class="card-body">
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
-                        <h6 class="text-success text-uppercase small fw-bold">模型</h6>
+                        <h6 class="text-muted text-uppercase small fw-semibold">模型</h6>
                         <h2 class="fw-bold mb-0">{{ model_stats.total_count }}</h2>
                     </div>
-                    <div class="rounded-circle bg-success bg-opacity-10 p-3">
-                        <i class="bi bi-cpu text-success fs-4"></i>
+                    <div class="rounded-circle bg-opacity-10 p-2">
+                        <i class="bi bi-cpu fs-4" style="color:var(--color-text-tertiary);"></i>
                     </div>
                 </div>
                 <small class="text-muted">{{ model_stats.deployed_count }} 已部署 · 最高准确率 {{ "%.1f"|format((model_stats.max_accuracy or 0) * 100) }}%</small>
@@ -54,19 +54,19 @@
     </div>
 
     <div class="col-xl-3 col-md-6">
-        <div class="card border-start border-info border-4 h-100">
+        <div class="card border-start border-info h-100">
             <div class="card-body">
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
-                        <h6 class="text-info text-uppercase small fw-bold">训练任务</h6>
+                        <h6 class="text-muted text-uppercase small fw-semibold">训练任务</h6>
                         <h2 class="fw-bold mb-0">{{ job_stats.total_count }}</h2>
                     </div>
-                    <div class="rounded-circle bg-info bg-opacity-10 p-3">
-                        <i class="bi bi-play-circle text-info fs-4"></i>
+                    <div class="rounded-circle bg-opacity-10 p-2">
+                        <i class="bi bi-play-circle fs-4" style="color:var(--color-text-tertiary);"></i>
                     </div>
                 </div>
                 <small class="text-muted">
-                    {% if job_stats.running_count %}<span class="text-warning fw-bold">{{ job_stats.running_count }} 运行中</span> · {% endif %}
+                    {% if job_stats.running_count %}<span class="text-warning fw-semibold">{{ job_stats.running_count }} 运行中</span> · {% endif %}
                     {{ job_stats.completed_count }} 已完成 · {{ job_stats.failed_count }} 失败
                 </small>
             </div>
@@ -74,19 +74,19 @@
     </div>
 
     <div class="col-xl-3 col-md-6">
-        <div class="card border-start border-warning border-4 h-100">
+        <div class="card border-start border-warning h-100">
             <div class="card-body">
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
-                        <h6 class="text-warning text-uppercase small fw-bold">平均准确率</h6>
+                        <h6 class="text-muted text-uppercase small fw-semibold">平均准确率</h6>
                         <h2 class="fw-bold mb-0">
                             {% if model_stats.avg_accuracy %}
                                 {{ "%.1f"|format(model_stats.avg_accuracy * 100) }}%
                             {% else %}-{% endif %}
                         </h2>
                     </div>
-                    <div class="rounded-circle bg-warning bg-opacity-10 p-3">
-                        <i class="bi bi-graph-up text-warning fs-4"></i>
+                    <div class="rounded-circle bg-opacity-10 p-2">
+                        <i class="bi bi-graph-up fs-4" style="color:var(--color-text-tertiary);"></i>
                     </div>
                 </div>
                 <small class="text-muted">最高 {{ "%.1f"|format((model_stats.max_accuracy or 0) * 100) }}%</small>
@@ -95,59 +95,56 @@
     </div>
 </div>
 
-<!-- 图表和最近记录 -->
+<!-- Charts Row -->
 <div class="row g-4">
     <div class="col-lg-8">
         <div class="card h-100">
-            <div class="card-header"><h5 class="card-title mb-0">资源总览</h5></div>
-            <div class="card-body d-flex align-items-center" style="min-height:300px;">
-                <canvas id="overviewChart" height="260"></canvas>
+            <div class="card-header">资源总览</div>
+            <div class="card-body d-flex align-items-center" style="min-height:280px;">
+                <canvas id="overviewChart" height="240"></canvas>
             </div>
         </div>
     </div>
-
     <div class="col-lg-4">
         <div class="card h-100">
-            <div class="card-header"><h5 class="card-title mb-0">模型类型分布</h5></div>
-            <div class="card-body d-flex align-items-center justify-content-center" style="min-height:300px;">
-                <canvas id="modelTypeChart" height="260"></canvas>
+            <div class="card-header">模型类型分布</div>
+            <div class="card-body d-flex align-items-center justify-content-center" style="min-height:280px;">
+                <canvas id="modelTypeChart" height="240"></canvas>
             </div>
         </div>
     </div>
 </div>
 
-<!-- 快速操作 + 最近记录 -->
+<!-- Quick Actions + Recent Items -->
 <div class="row g-4 mt-2">
-    <!-- 快速操作 -->
     <div class="col-lg-3">
         <div class="card h-100">
-            <div class="card-header"><h6 class="mb-0"><i class="bi bi-lightning"></i> 快速操作</h6></div>
+            <div class="card-header">快速操作</div>
             <div class="card-body d-grid gap-2">
-                <a href="{{ url_for('training.create_job') }}" class="btn btn-outline-success text-start">
-                    <i class="bi bi-play-circle"></i> 新建训练任务
+                <a href="{{ url_for('training.create_job') }}" class="btn btn-outline-secondary btn-sm text-start">
+                    新建训练任务
                 </a>
-                <a href="{{ url_for('datasets.create_dataset') }}" class="btn btn-outline-primary text-start">
-                    <i class="bi bi-cloud-upload"></i> 上传数据集
+                <a href="{{ url_for('datasets.create_dataset') }}" class="btn btn-outline-secondary btn-sm text-start">
+                    上传数据集
                 </a>
-                <a href="{{ url_for('models.create_model') }}" class="btn btn-outline-info text-start">
-                    <i class="bi bi-cpu"></i> 注册模型
+                <a href="{{ url_for('models.create_model') }}" class="btn btn-outline-secondary btn-sm text-start">
+                    注册模型
                 </a>
-                <a href="{{ url_for('models.compare') }}" class="btn btn-outline-warning text-start">
-                    <i class="bi bi-bar-chart"></i> 模型对比
+                <a href="{{ url_for('models.compare') }}" class="btn btn-outline-secondary btn-sm text-start">
+                    模型对比
                 </a>
-                <a href="{{ url_for('models.leaderboard') }}" class="btn btn-outline-dark text-start">
-                    <i class="bi bi-trophy"></i> 排行榜
+                <a href="{{ url_for('models.leaderboard') }}" class="btn btn-outline-secondary btn-sm text-start">
+                    排行榜
                 </a>
             </div>
         </div>
     </div>
 
-    <!-- 最近数据集 -->
     <div class="col-lg-3">
         <div class="card h-100">
             <div class="card-header d-flex justify-content-between align-items-center">
-                <h6 class="mb-0">最近数据集</h6>
-                <a href="{{ url_for('datasets.list_datasets') }}" class="btn btn-sm btn-outline-primary">全部</a>
+                最近数据集
+                <a href="{{ url_for('datasets.list_datasets') }}" class="btn btn-sm btn-outline-secondary">全部</a>
             </div>
             <div class="list-group list-group-flush">
                 {% if recent_datasets %}
@@ -156,7 +153,7 @@
                        class="list-group-item list-group-item-action py-2">
                         <div class="d-flex justify-content-between align-items-center">
                             <div>
-                                <strong class="d-block">{{ ds.name }}</strong>
+                                <strong class="d-block" style="font-size:13px;">{{ ds.name }}</strong>
                                 <small class="text-muted">{{ ds.file_format }} · {{ ds.category }}</small>
                             </div>
                             <small class="text-muted">{{ ds.file_size_mb }} MB</small>
@@ -173,12 +170,11 @@
         </div>
     </div>
 
-    <!-- 最近模型 -->
     <div class="col-lg-3">
         <div class="card h-100">
             <div class="card-header d-flex justify-content-between align-items-center">
-                <h6 class="mb-0">最近模型</h6>
-                <a href="{{ url_for('models.list_models') }}" class="btn btn-sm btn-outline-success">全部</a>
+                最近模型
+                <a href="{{ url_for('models.list_models') }}" class="btn btn-sm btn-outline-secondary">全部</a>
             </div>
             <div class="list-group list-group-flush">
                 {% if recent_models %}
@@ -187,7 +183,7 @@
                        class="list-group-item list-group-item-action py-2">
                         <div class="d-flex justify-content-between align-items-center">
                             <div>
-                                <strong class="d-block">{{ m.name }}</strong>
+                                <strong class="d-block" style="font-size:13px;">{{ m.name }}</strong>
                                 <small class="text-muted">{{ model_type_labels.get(m.model_type, m.model_type) }} · v{{ m.version }}</small>
                             </div>
                             <span class="badge bg-{{ 'success' if m.status == 'deployed' else 'primary' if m.status == 'trained' else 'secondary' }}">
@@ -206,12 +202,11 @@
         </div>
     </div>
 
-    <!-- 最近训练 -->
     <div class="col-lg-3">
         <div class="card h-100">
             <div class="card-header d-flex justify-content-between align-items-center">
-                <h6 class="mb-0">最近训练</h6>
-                <a href="{{ url_for('training.list_jobs') }}" class="btn btn-sm btn-outline-info">全部</a>
+                最近训练
+                <a href="{{ url_for('training.list_jobs') }}" class="btn btn-sm btn-outline-secondary">全部</a>
             </div>
             <div class="list-group list-group-flush">
                 {% if recent_jobs %}
@@ -220,7 +215,7 @@
                        class="list-group-item list-group-item-action py-2">
                         <div class="d-flex justify-content-between align-items-center">
                             <div class="w-75">
-                                <strong class="d-block text-truncate">{{ j.name }}</strong>
+                                <strong class="d-block text-truncate" style="font-size:13px;">{{ j.name }}</strong>
                                 <div class="progress mt-1" style="height:4px;">
                                     <div class="progress-bar bg-{{ 'success' if j.progress_percent == 100 else 'info' }}"
                                          style="width:{{ j.progress_percent }}%"></div>
@@ -246,71 +241,49 @@
 
 {% block extra_js %}
 <script>
-// ========== 资源总览 — 横向堆叠条形图 ==========
-// 每段独立 dataset，图例颜色 = 实际条形颜色
-const overviewCtx = document.getElementById('overviewChart').getContext('2d');
+// Detect theme for chart text color
+var isDark = document.documentElement.hasAttribute('data-theme');
+var chartTextColor = isDark ? 'rgba(255,255,255,0.80)' : '#1f2328';
+var chartGridColor = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)';
+var chartTickColor = isDark ? 'rgba(255,255,255,0.55)' : '#656d76';
 
-const dsPriv = {{ dataset_stats.total_count - dataset_stats.public_count }};
-const dsPubl = {{ dataset_stats.public_count }};
-const mdPriv = {{ model_stats.private_count }};
-const mdPubl = {{ model_stats.public_count }};
-const jbDone = {{ job_stats.completed_count }};
-const jbActv = {{ job_stats.active_or_paused_count }};
-const jbFail = {{ job_stats.failed_count }};
+// Resource overview — stacked horizontal bar chart
+var overviewCtx = document.getElementById('overviewChart').getContext('2d');
+
+var dsPriv = {{ dataset_stats.total_count - dataset_stats.public_count }};
+var dsPubl = {{ dataset_stats.public_count }};
+var mdPriv = {{ model_stats.private_count }};
+var mdPubl = {{ model_stats.public_count }};
+var jbDone = {{ job_stats.completed_count }};
+var jbActv = {{ job_stats.active_or_paused_count }};
+var jbFail = {{ job_stats.failed_count }};
 
 new Chart(overviewCtx, {
     type: 'bar',
     data: {
         labels: ['数据集', '模型', '训练任务'],
         datasets: [
-            {
-                label: '数据集 — 私有',  data: [dsPriv, 0, 0],
-                backgroundColor: 'rgba(111,66,193,0.80)',
-                borderColor: '#6f42c1', borderWidth: 1.5,
-            },
-            {
-                label: '数据集 — 公开',  data: [dsPubl, 0, 0],
-                backgroundColor: 'rgba(111,66,193,0.30)',
-                borderColor: '#6f42c1', borderWidth: 1.5, borderDash: [4, 2],
-            },
-            {
-                label: '模型 — 私有',    data: [0, mdPriv, 0],
-                backgroundColor: 'rgba(23,162,184,0.80)',
-                borderColor: '#17a2b8', borderWidth: 1.5,
-            },
-            {
-                label: '模型 — 公开',    data: [0, mdPubl, 0],
-                backgroundColor: 'rgba(23,162,184,0.30)',
-                borderColor: '#17a2b8', borderWidth: 1.5, borderDash: [4, 2],
-            },
-            {
-                label: '已完成',         data: [0, 0, jbDone],
-                backgroundColor: 'rgba(28,200,138,0.80)',
-                borderColor: '#1cc88a', borderWidth: 1.5,
-            },
-            {
-                label: '暂停 / 进行中',   data: [0, 0, jbActv],
-                backgroundColor: 'rgba(246,194,62,0.80)',
-                borderColor: '#f6c23e', borderWidth: 1.5,
-            },
-            {
-                label: '失败',           data: [0, 0, jbFail],
-                backgroundColor: 'rgba(231,74,59,0.65)',
-                borderColor: '#e74a3b', borderWidth: 1.5, borderDash: [4, 2],
-            },
+            { label: '私有',  data: [dsPriv, mdPriv, 0],
+              backgroundColor: 'rgba(9,105,218,0.70)', borderColor: '#0969da', borderWidth: 1 },
+            { label: '公开',  data: [dsPubl, mdPubl, 0],
+              backgroundColor: 'rgba(9,105,218,0.25)', borderColor: '#0969da', borderWidth: 1, borderDash: [3,2] },
+            { label: '已完成', data: [0, 0, jbDone],
+              backgroundColor: 'rgba(31,136,61,0.70)', borderColor: '#1f883d', borderWidth: 1 },
+            { label: '进行中', data: [0, 0, jbActv],
+              backgroundColor: 'rgba(154,103,0,0.70)', borderColor: '#9a6700', borderWidth: 1 },
+            { label: '失败',   data: [0, 0, jbFail],
+              backgroundColor: 'rgba(207,34,46,0.60)', borderColor: '#cf222e', borderWidth: 1, borderDash: [3,2] }
         ]
     },
     options: {
-        indexAxis: 'y',
-        responsive: true,
-        maintainAspectRatio: false,
+        indexAxis: 'y', responsive: true, maintainAspectRatio: false,
         plugins: {
             legend: {
                 position: 'top',
                 labels: {
-                    usePointStyle: true, padding: 16, font: { size: 11 },
+                    color: chartTextColor,
+                    usePointStyle: true, padding: 12, font: { size: 11 },
                     filter: function(item, data) {
-                        // 只显示非零数据的图例项
                         return data.datasets[item.datasetIndex].data.some(function(v) { return v > 0; });
                     }
                 }
@@ -326,28 +299,25 @@ new Chart(overviewCtx, {
         },
         scales: {
             x: {
-                stacked: true,
-                beginAtZero: true,
-                grid: { color: 'rgba(0,0,0,0.04)' },
-                ticks: { stepSize: 20, font: { size: 11 } }
+                stacked: true, beginAtZero: true,
+                grid: { color: chartGridColor },
+                ticks: { stepSize: 20, font: { size: 11 }, color: chartTickColor }
             },
             y: {
                 stacked: true,
                 grid: { display: false },
-                ticks: { font: { size: 12, weight: 'bold' } }
+                ticks: { font: { size: 12, weight: 'bold' }, color: chartTickColor }
             }
         }
     }
 });
 
-
-// 模型类型分布
-const typeCtx = document.getElementById('modelTypeChart').getContext('2d');
-const modelTypes = {{ model_stats.types | tojson }};
-// 英文 key → 中文标签
-const typeLabelMap = {{ model_type_labels | tojson }};
-const typeLabels = Object.keys(modelTypes).map(k => typeLabelMap[k] || k);
-const typeValues = Object.values(modelTypes);
+// Model type distribution
+var typeCtx = document.getElementById('modelTypeChart').getContext('2d');
+var modelTypes = {{ model_stats.types | tojson }};
+var typeLabelMap = {{ model_type_labels | tojson }};
+var typeLabels = Object.keys(modelTypes).map(function(k) { return typeLabelMap[k] || k; });
+var typeValues = Object.values(modelTypes);
 
 if (typeLabels.length > 0) {
     new Chart(typeCtx, {
@@ -356,48 +326,46 @@ if (typeLabels.length > 0) {
             labels: typeLabels,
             datasets: [{
                 data: typeValues,
-                backgroundColor: ['#4e73df', '#1cc88a', '#36b9cc', '#f6c23e', '#e74a3b', '#858796', '#5a5c69', '#2e59d9'],
+                backgroundColor: ['#0969da', '#1f883d', '#9a6700', '#cf222e', '#6e7781', '#8250df', '#1a7f37', '#0550ae'],
                 borderWidth: 2,
-                borderColor: '#fff',
+                borderColor: '#fff'
             }]
         },
         options: {
-            responsive: true,
-            maintainAspectRatio: false,
+            responsive: true, maintainAspectRatio: false,
             plugins: {
                 legend: {
-                    position: 'right',
-                    align: 'center',
+                    position: 'right', align: 'center',
                     labels: {
-                        padding: 12,
-                        usePointStyle: true,
-                        pointStyleWidth: 10,
-                        font: { size: 12 },
+                        color: chartTextColor,
+                        padding: 10, usePointStyle: true, pointStyleWidth: 8, font: { size: 11 },
                         generateLabels: function(chart) {
-                            const data = chart.data;
-                            return data.labels.map((label, i) => ({
-                                text: label + '  (' + data.datasets[0].data[i] + ')',
-                                fillStyle: data.datasets[0].backgroundColor[i],
-                                strokeStyle: data.datasets[0].borderColor,
-                                lineWidth: 2,
-                                hidden: !chart.getDataVisibility(i),
-                                index: i,
-                                pointStyle: 'circle',
-                            }));
+                            var data = chart.data;
+                            return data.labels.map(function(label, i) {
+                                return {
+                                    text: label + '  (' + data.datasets[0].data[i] + ')',
+                                    fillStyle: data.datasets[0].backgroundColor[i],
+                                    strokeStyle: data.datasets[0].borderColor,
+                                    lineWidth: 1,
+                                    hidden: !chart.getDataVisibility(i),
+                                    index: i,
+                                    pointStyle: 'circle'
+                                };
+                            });
                         }
                     }
                 },
                 tooltip: {
                     callbacks: {
                         label: function(ctx) {
-                            const total = ctx.dataset.data.reduce((a, b) => a + b, 0);
-                            const pct = total > 0 ? Math.round(ctx.raw / total * 100) : 0;
+                            var total = ctx.dataset.data.reduce(function(a, b) { return a + b; }, 0);
+                            var pct = total > 0 ? Math.round(ctx.raw / total * 100) : 0;
                             return ' ' + ctx.label + ': ' + ctx.raw + ' (' + pct + '%)';
                         }
                     }
                 }
             },
-            cutout: '60%',
+            cutout: '60%'
         }
     });
 } else {
