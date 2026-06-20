@@ -95,14 +95,24 @@ class BaseTrainer(ABC):
 
     @staticmethod
     def load_checkpoint(output_dir: str) -> dict:
-        """从磁盘加载训练快照。返回恢复元数据字典, 无检查点时返回空字典。
+        """从磁盘加载训练快照。返回恢复状态字典, 无检查点时返回空字典。
 
         子类可重写以恢复框架特定状态。返回的字典可包含:
-            - 'epoch': 已完成的epoch数 (从此epoch+1继续)
+            - 'epoch': 已完成的epoch数 (从此epoch继续)
             - 'best_val_loss': 最佳验证损失
             - 'patience_counter': 早停计数器
+            - '_restore': 任意子类特定数据 (传给 restore_checkpoint)
         """
         return {}
+
+    def restore_checkpoint(self, ckpt: dict):
+        """将检查点状态恢复到当前模型 — 在 build_model() 之后调用。
+
+        ckpt 是 load_checkpoint() 的返回值。
+        默认实现: 无操作 (sklearn 单epoch算法无需恢复)。
+        子类可重写以恢复模型权重/优化器状态/调度器状态。
+        """
+        pass
 
     @staticmethod
     def has_checkpoint(output_dir: str) -> bool:
@@ -132,6 +142,7 @@ class BaseTrainer(ABC):
 
             # —— 检查是否有检查点可恢复 ——
             os.makedirs(self.output_dir, exist_ok=True)
+            ckpt_meta = None
             if self.has_checkpoint(self.output_dir):
                 ckpt_meta = self.load_checkpoint(self.output_dir)
                 self._current_epoch = ckpt_meta.get('epoch', 0)
@@ -150,6 +161,11 @@ class BaseTrainer(ABC):
             self.callback.on_log('正在构建模型...')
             self.build_model()
             self.callback.on_log('模型构建完成')
+
+            # —— 恢复检查点权重/优化器/调度器状态 ——
+            if ckpt_meta:
+                self.restore_checkpoint(ckpt_meta)
+                self.callback.on_log('[检查点] 权重/优化器/早停状态已恢复')
 
             # 训练循环
             for epoch in range(self._current_epoch, self.total_epochs):
@@ -259,12 +275,16 @@ class BaseTrainer(ABC):
         self._pause_event.set()  # 取消时也解除暂停状态
 
     def _cleanup_checkpoint(self):
-        """训练成功完成或取消后清理检查点文件"""
+        """训练成功完成或取消后清理检查点文件 (文件或目录)"""
         import glob
+        import shutil
         pattern = os.path.join(self.output_dir, 'checkpoint*')
         for f in glob.glob(pattern):
             try:
-                os.remove(f)
+                if os.path.isdir(f):
+                    shutil.rmtree(f)
+                else:
+                    os.remove(f)
             except OSError:
                 pass
 

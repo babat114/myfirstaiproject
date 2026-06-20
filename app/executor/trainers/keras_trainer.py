@@ -395,7 +395,24 @@ class KerasTrainer(BaseTrainer):
             return {}
         with open(meta_path, 'r') as f:
             meta = json.load(f)
-        return {'epoch': meta.get('epoch', 0)}
+        return {
+            'epoch': meta.get('epoch', 0),
+            '_restore': {
+                'ckpt_dir': os.path.join(output_dir, 'checkpoint.keras'),
+                'meta': meta,
+            },
+        }
+
+    def restore_checkpoint(self, ckpt: dict):
+        """恢复 Keras 模型权重 + 优化器状态"""
+        restore_data = ckpt.get('_restore')
+        if not restore_data:
+            return
+        tf = _ensure_tf()
+        ckpt_dir = restore_data.get('ckpt_dir')
+        if ckpt_dir and os.path.exists(ckpt_dir):
+            self._model = tf.keras.models.load_model(ckpt_dir)
+            self.callback.on_log('[检查点] Keras 模型权重+优化器已恢复')
 
     @staticmethod
     def has_checkpoint(output_dir: str) -> bool:

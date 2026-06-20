@@ -56,15 +56,16 @@ def tuning_stream(tuning_id):
         const source = new EventSource('/api/v1/stream/tuning/' + tuningId + '/stream');
         source.onmessage = (e) => updateProgress(JSON.parse(e.data));
     """
+    # 先获取 tracker (可能抛异常), 成功后再占用 slot (避免 slot 泄漏)
+    from app.services.hyperparameter_tuning import get_tuning_tracker
+    tracker = get_tuning_tracker()
+
     if not _acquire_sse_slot():
         return Response(
             f"data: {json.dumps({'error': 'SSE 连接数已达上限，请稍后重试'}, ensure_ascii=False)}\n\n",
             mimetype='text/event-stream',
             status=503,
         )
-
-    from app.services.hyperparameter_tuning import get_tuning_tracker
-    tracker = get_tuning_tracker()
 
     def generate():
         last_step = -1

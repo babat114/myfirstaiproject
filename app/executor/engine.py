@@ -93,6 +93,25 @@ class TrainingExecutor:
         Returns:
             是否成功提交
         """
+        # ── 一次性恢复僵尸任务: 将上次异常退出遗留的 'running' 任务标记为 'interrupted' ──
+        if not getattr(self, '_zombies_recovered', False):
+            self._zombies_recovered = True
+            try:
+                stale = TrainingJob.query.filter_by(status='running').all()
+                for j in stale:
+                    j.status = 'interrupted'
+                    j.error_message = '服务异常退出，训练中断。请重新训练。'
+                    j.append_log('[系统] 检测到上次异常退出，训练已中断。')
+                if stale:
+                    db.session.commit()
+                    logger.info(f'已恢复 {len(stale)} 个僵尸训练任务 (running→interrupted)')
+            except Exception as e:
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
+                logger.warning(f'僵尸任务恢复失败 (非致命): {e}')
+
         # 从数据库刷新 job 以避免 DetachedInstanceError
         fresh_job = db.session.get(TrainingJob, job.id)
         if not fresh_job:
@@ -212,23 +231,38 @@ class TrainingExecutor:
         }
 
     def _graceful_shutdown(self):
-        """应用退出时优雅关闭线程池 — 标记运行中任务为 paused, 等待线程完成"""
+        """应用退出时优雅关闭线程池 — 标记运行中任务为 paused, 等待线程完成
+
+        注意: atexit 时 DB 连接池可能已关闭, 无法更新任务状态。
+        此时仅安全关闭训练线程池; 下次启动时引擎会自动将 running→interrupted。
+        """
         if getattr(self, '_shutting_down', False):
             return
         self._shutting_down = True
-        # 将所有运行中的任务标记为 paused (重启后可手动恢复)
-        for jid in list(self._active_trainers.keys()):
-            try:
-                job = db.session.get(TrainingJob, jid)
-                if job and job.status == 'running':
-                    job.status = 'paused'
-                    job.append_log('[系统] 服务关闭，训练已暂停。重启后可恢复。')
-                    db.session.commit()
-            except Exception:
+
+        # 尝试更新 DB 中运行任务的状态 (容忍连接已关闭)
+        _db_available = False
+        try:
+            from sqlalchemy import text
+            db.session.execute(text('SELECT 1'))
+            _db_available = True
+        except Exception:
+            pass
+
+        if _db_available:
+            for jid in list(self._active_trainers.keys()):
                 try:
-                    db.session.rollback()
+                    job = db.session.get(TrainingJob, jid)
+                    if job and job.status == 'running':
+                        job.status = 'paused'
+                        job.append_log('[系统] 服务关闭，训练已暂停。重启后可恢复。')
+                        db.session.commit()
                 except Exception:
-                    pass
+                    try:
+                        db.session.rollback()
+                    except Exception:
+                        pass
+
         # 关闭线程池 (容忍 logger 已关闭的情况)
         try:
             self._pool.shutdown(wait=True, cancel_futures=False)

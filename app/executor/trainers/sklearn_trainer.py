@@ -589,6 +589,9 @@ class SklearnTrainer(BaseTrainer):
 
                 before = Counter(self._y_train)
 
+                # 保存原始列名 (SMOTE/undersample 返回 numpy array 会丢失列名)
+                _orig_cols = list(self._X_train.columns)
+
                 if _balance == 'smote':
                     sampler = SMOTE(random_state=self.random_state or 42)
                     self._X_train, self._y_train = sampler.fit_resample(
@@ -601,12 +604,8 @@ class SklearnTrainer(BaseTrainer):
                     )
 
                 after = Counter(self._y_train)
-                # 转为 DataFrame (SMOTE 返回 numpy array)
-                self._X_train = pd.DataFrame(
-                    self._X_train,
-                    columns=self._X_train.columns if hasattr(self._X_train, 'columns')
-                    else [f'f_{i}' for i in range(self._X_train.shape[1])]
-                )
+                # 恢复 DataFrame + 原始列名 (SMOTE/undersample 返回 numpy array)
+                self._X_train = pd.DataFrame(self._X_train, columns=_orig_cols)
                 self._y_train = pd.Series(self._y_train)
                 self.callback.on_log(
                     f'[平衡] {_balance}: {dict(before)} → {dict(after)}'

@@ -435,7 +435,32 @@ class TransformersNLPTrainer(BaseTrainer):
         if not os.path.exists(ckpt_path):
             return {}
         ckpt = torch.load(ckpt_path, map_location='cpu', weights_only=True)
-        return {'epoch': ckpt.get('epoch', 0)}
+        return {
+            'epoch': ckpt.get('epoch', 0),
+            'best_val_loss': ckpt.get('best_val_loss', float('inf')),
+            'patience_counter': ckpt.get('patience_counter', 0),
+            '_restore': ckpt,
+        }
+
+    def restore_checkpoint(self, ckpt: dict):
+        """恢复 Transformers 模型权重 + 优化器 + 调度器 + 早停状态"""
+        restore_data = ckpt.get('_restore')
+        if not restore_data:
+            return
+
+        if self._model is not None and 'model_state' in restore_data:
+            self._model.load_state_dict(restore_data['model_state'])
+
+        if self._optimizer is not None and 'optimizer_state' in restore_data:
+            self._optimizer.load_state_dict(restore_data['optimizer_state'])
+
+        if self._scheduler is not None and 'scheduler_state' in restore_data:
+            self._scheduler.load_state_dict(restore_data['scheduler_state'])
+
+        self._best_val_loss = restore_data.get('best_val_loss', float('inf'))
+        self._patience_counter = restore_data.get('patience_counter', 0)
+        if 'best_model_state' in restore_data and restore_data['best_model_state'] is not None:
+            self._best_model_state = restore_data['best_model_state']
 
     @staticmethod
     def has_checkpoint(output_dir: str) -> bool:

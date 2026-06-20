@@ -1030,7 +1030,7 @@ def export_async(model_uuid, export_type):
         return jsonify({'success': False, 'message': '模型不存在。'}), 404
 
     user = get_current_user()
-    if model.owner_id != user.id and not user.is_admin:
+    if model.owner_id != user.id and not model.is_public and not user.is_admin:
         return jsonify({'success': False, 'message': '权限不足。'}), 403
 
     from app.services.export_task_tracker import ExportTaskTracker
@@ -1375,6 +1375,15 @@ def export_status(model_uuid):
     task_id = request.args.get('task_id', '').strip()
     if not task_id:
         return jsonify({'success': False, 'message': '缺少 task_id 参数。'}), 400
+
+    # 模型存在性 + 权限检查
+    model = ModelService.get_model_by_uuid(model_uuid)
+    if not model:
+        return jsonify({'success': False, 'message': '模型不存在。'}), 404
+
+    user = get_current_user()
+    if model.owner_id != user.id and not model.is_public and not user.is_admin:
+        return jsonify({'success': False, 'message': '权限不足。'}), 403
 
     from app.services.export_task_tracker import ExportTaskTracker
     tracker = ExportTaskTracker()
