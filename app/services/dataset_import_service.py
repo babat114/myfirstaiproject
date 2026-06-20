@@ -328,193 +328,189 @@ class DatasetImportService:
             logger.error(f'导入公开数据集失败: {e}', exc_info=True)
             return None, f'导入失败: {str(e)}'
 
+    # ── sklearn 通用辅助 ──
+
+    @staticmethod
+    def _build_sklearn_df(data, feature_names, target_values, target_name='target'):
+        """通用: 将 sklearn bunch/data 转换为 DataFrame
+
+        Args:
+            data: numpy array (n_samples, n_features)
+            feature_names: list of feature name strings
+            target_values: 1d array of target labels
+            target_name: target column name
+        """
+        df = pd.DataFrame(data, columns=feature_names)
+        df[target_name] = target_values
+        return df, target_name
+
+    @staticmethod
+    def _load_sklearn_builtin(loader_fn):
+        """加载 sklearn 自带数据集 (iris/wine/breast_cancer/diabetes/california_housing)"""
+        data = loader_fn()
+        # 特征名处理
+        if hasattr(data, 'feature_names') and data.feature_names:
+            feat_names = list(data.feature_names)
+        else:
+            feat_names = [f'feature_{i}' for i in range(data.data.shape[1])]
+        # 目标值处理: 有target_names则映射为文本标签
+        if hasattr(data, 'target_names') and data.target_names is not None:
+            target_vals = data.target_names[data.target]
+        else:
+            # load_digits 已在上层单独处理, 此处直接使用 data.target
+            target_vals = data.target
+        return DatasetImportService._build_sklearn_df(data.data, feat_names, target_vals)
+
+    @staticmethod
+    def _load_sklearn_generated(generator_fn, n_samples, feature_count, target_dtype=str):
+        """加载 sklearn 生成式数据集 (make_classification/make_blobs/make_moons/make_regression)"""
+        X, y = generator_fn()
+        feat_names = [f'feature_{i}' for i in range(X.shape[1])]
+        target_vals = y.astype(target_dtype) if target_dtype == str else y
+        return DatasetImportService._build_sklearn_df(X, feat_names, target_vals)
+
+    # ── sklearn 加载器注册表 ──
+
+    @staticmethod
+    def _load_sklearn_dataset(loader: str):
+        """根据 loader 名称分发到对应 sklearn 加载逻辑"""
+        import numpy as np
+        from sklearn import datasets
+
+        # 内置数据集 — 统一模式
+        builtin_map = {
+            'load_iris': datasets.load_iris,
+            'load_wine': datasets.load_wine,
+            'load_breast_cancer': datasets.load_breast_cancer,
+            'load_diabetes': datasets.load_diabetes,
+            'fetch_california_housing': datasets.fetch_california_housing,
+        }
+        if loader in builtin_map:
+            return DatasetImportService._load_sklearn_builtin(builtin_map[loader])
+
+        # load_digits: 特殊处理 (无feature_names, target用数字)
+        if loader == 'load_digits':
+            data = datasets.load_digits()
+            feat_names = [f'pixel_{i}' for i in range(data.data.shape[1])]
+            return DatasetImportService._build_sklearn_df(
+                data.data, feat_names, data.target.astype(str)
+            )
+
+        # 生成式数据集
+        generated_map = {
+            'make_classification_small': lambda: datasets.make_classification(
+                n_samples=1000, n_features=20, n_informative=10, n_classes=2, random_state=42),
+            'make_moons_noisy': lambda: datasets.make_moons(
+                n_samples=500, noise=0.2, random_state=42),
+            'make_blobs_multi': lambda: datasets.make_blobs(
+                n_samples=1000, n_features=5, centers=4, cluster_std=1.5, random_state=42),
+            'make_classification_dl': lambda: datasets.make_classification(
+                n_samples=50000, n_features=50, n_informative=30, n_redundant=10,
+                n_repeated=5, n_classes=4, n_clusters_per_class=2, flip_y=0.03,
+                class_sep=0.8, random_state=42),
+            'make_regression_dl': lambda: datasets.make_regression(
+                n_samples=30000, n_features=30, n_informative=20, noise=15.0,
+                bias=3.0, effective_rank=25, tail_strength=0.5, random_state=42),
+        }
+        if loader in generated_map:
+            X, y = generated_map[loader]()
+            feat_names = [f'feature_{i}' for i in range(X.shape[1])]
+            target_vals = y.astype(str) if loader != 'make_regression_dl' else y
+            return DatasetImportService._build_sklearn_df(X, feat_names, target_vals)
+
+        # fetch_openml 数据集
+        if loader == 'fetch_fashion_mnist':
+            try:
+                fmnist = datasets.fetch_openml('Fashion-MNIST', version=1, as_frame=False, parser='auto')
+                feat_names = [f'pixel_{i}' for i in range(fmnist.data.shape[1])]
+                return DatasetImportService._build_sklearn_df(
+                    fmnist.data, feat_names, fmnist.target.astype(str))
+            except Exception:
+                from tensorflow.keras.datasets import fashion_mnist
+                (X_train, y_train), (X_test, y_test) = fashion_mnist.load_data()
+                X_all = np.concatenate([X_train, X_test]).reshape(-1, 784)
+                y_all = np.concatenate([y_train, y_test])
+                feat_names = [f'pixel_{i}' for i in range(784)]
+                return DatasetImportService._build_sklearn_df(X_all, feat_names, y_all.astype(str))
+
+        if loader == 'fetch_covertype':
+            data = datasets.fetch_covtype()
+            feat_names = [f'feature_{i}' for i in range(data.data.shape[1])]
+            return DatasetImportService._build_sklearn_df(data.data, feat_names, data.target.astype(str))
+
+        if loader == 'fetch_adult':
+            try:
+                adult = datasets.fetch_openml('adult', version=2, as_frame=True, parser='auto')
+                df = adult.frame
+                df['target'] = df['class'].astype(str)
+                df = df.drop(columns=['class'])
+                return df, 'target'
+            except Exception:
+                np.random.seed(42)
+                n = 48842
+                df = pd.DataFrame({
+                    'age': np.random.randint(17, 90, n),
+                    'workclass': np.random.choice(['Private', 'Self-emp', 'Gov', 'Unknown'], n),
+                    'education_num': np.random.randint(1, 16, n),
+                    'marital_status': np.random.choice(['Married', 'Single', 'Divorced', 'Widowed'], n),
+                    'occupation': np.random.choice(['Tech', 'Sales', 'Craft', 'Manager', 'Other'], n),
+                    'hours_per_week': np.random.randint(1, 99, n),
+                    'capital_gain': np.random.exponential(1000, n).astype(int),
+                    'capital_loss': np.random.exponential(500, n).astype(int),
+                })
+                logit = (0.03 * df['age'] + 0.5 * df['education_num']
+                         + 0.01 * df['hours_per_week'] + 0.0001 * df['capital_gain']
+                         - 2 * np.random.randn(n))
+                df['target'] = (1 / (1 + np.exp(-logit)) > 0.5).astype(str)
+                return df, 'target'
+
+        return None, None
+
+    @staticmethod
+    def _load_uci_dataset(loader: str):
+        """加载 UCI 数据集"""
+        import numpy as np
+        if loader == 'fetch_wine_quality':
+            try:
+                url = 'https://archive.ics.uci.edu/ml/machine-learning-databases/wine-quality/winequality-red.csv'
+                df = pd.read_csv(url, sep=';')
+                df.columns = [c.strip().replace(' ', '_') for c in df.columns]
+                return df, 'quality'
+            except Exception as e:
+                logger.warning(f'UCI 下载失败，使用备用数据生成: {e}')
+                np.random.seed(42)
+                n = 1599
+                df = pd.DataFrame({
+                    'fixed_acidity': np.random.uniform(4, 16, n),
+                    'volatile_acidity': np.random.uniform(0.1, 1.6, n),
+                    'citric_acid': np.random.uniform(0, 1, n),
+                    'residual_sugar': np.random.uniform(0.5, 16, n),
+                    'chlorides': np.random.uniform(0.01, 0.6, n),
+                    'free_sulfur_dioxide': np.random.uniform(1, 70, n),
+                    'total_sulfur_dioxide': np.random.uniform(6, 290, n),
+                    'density': np.random.uniform(0.99, 1.004, n),
+                    'pH': np.random.uniform(2.7, 4, n),
+                    'sulphates': np.random.uniform(0.3, 2, n),
+                    'alcohol': np.random.uniform(8, 15, n),
+                    'quality': np.random.randint(3, 9, n),
+                })
+                return df, 'quality'
+        return None, None
+
     @staticmethod
     def _load_dataset(key: str, info: dict) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
-        """从源加载数据集，返回 (DataFrame, target_column)"""
+        """从源加载数据集，返回 (DataFrame, target_column)
+
+        通过注册表模式分发: sklearn 内置/生成式/openml → _load_sklearn_dataset
+                          UCI 远程 → _load_uci_dataset
+        """
         loader = info['loader']
+        source = info.get('source', '')
 
-        # ---- sklearn 自带数据集 ----
-        if info['source'] == 'sklearn':
-            if loader == 'load_iris':
-                from sklearn.datasets import load_iris
-                data = load_iris()
-                df = pd.DataFrame(data.data, columns=data.feature_names)
-                df['target'] = data.target_names[data.target] if hasattr(data, 'target_names') else data.target
-                return df, 'target'
-
-            elif loader == 'load_wine':
-                from sklearn.datasets import load_wine
-                data = load_wine()
-                df = pd.DataFrame(data.data, columns=data.feature_names)
-                df['target'] = data.target_names[data.target] if hasattr(data, 'target_names') else data.target
-                return df, 'target'
-
-            elif loader == 'load_breast_cancer':
-                from sklearn.datasets import load_breast_cancer
-                data = load_breast_cancer()
-                df = pd.DataFrame(data.data, columns=data.feature_names)
-                df['target'] = data.target_names[data.target] if hasattr(data, 'target_names') else data.target
-                return df, 'target'
-
-            elif loader == 'load_digits':
-                from sklearn.datasets import load_digits
-                data = load_digits()
-                df = pd.DataFrame(data.data, columns=[f'pixel_{i}' for i in range(data.data.shape[1])])
-                df['target'] = data.target.astype(str)
-                return df, 'target'
-
-            elif loader == 'load_diabetes':
-                from sklearn.datasets import load_diabetes
-                data = load_diabetes()
-                df = pd.DataFrame(data.data, columns=data.feature_names)
-                df['target'] = data.target
-                return df, 'target'
-
-            elif loader == 'fetch_california_housing':
-                from sklearn.datasets import fetch_california_housing
-                data = fetch_california_housing()
-                df = pd.DataFrame(data.data, columns=data.feature_names)
-                df['target'] = data.target
-                return df, 'target'
-
-            # ---- 生成式数据集 ----
-            elif loader == 'make_classification_small':
-                from sklearn.datasets import make_classification
-                X, y = make_classification(
-                    n_samples=1000, n_features=20, n_informative=10,
-                    n_classes=2, random_state=42
-                )
-                df = pd.DataFrame(X, columns=[f'feature_{i}' for i in range(X.shape[1])])
-                df['target'] = y.astype(str)
-                return df, 'target'
-
-            elif loader == 'make_moons_noisy':
-                from sklearn.datasets import make_moons
-                X, y = make_moons(n_samples=500, noise=0.2, random_state=42)
-                df = pd.DataFrame(X, columns=['x1', 'x2'])
-                df['target'] = y.astype(str)
-                return df, 'target'
-
-            elif loader == 'make_blobs_multi':
-                from sklearn.datasets import make_blobs
-                X, y = make_blobs(
-                    n_samples=1000, n_features=5, centers=4,
-                    cluster_std=1.5, random_state=42
-                )
-                df = pd.DataFrame(X, columns=[f'feature_{i}' for i in range(X.shape[1])])
-                df['target'] = y.astype(str)
-                return df, 'target'
-
-            elif loader == 'make_classification_dl':
-                from sklearn.datasets import make_classification
-                X, y = make_classification(
-                    n_samples=50000, n_features=50, n_informative=30,
-                    n_redundant=10, n_repeated=5, n_classes=4,
-                    n_clusters_per_class=2, flip_y=0.03,
-                    class_sep=0.8, random_state=42
-                )
-                df = pd.DataFrame(X, columns=[f'feature_{i}' for i in range(X.shape[1])])
-                df['target'] = y.astype(str)
-                return df, 'target'
-
-            elif loader == 'make_regression_dl':
-                from sklearn.datasets import make_regression
-                X, y = make_regression(
-                    n_samples=30000, n_features=30, n_informative=20,
-                    noise=15.0, bias=3.0, effective_rank=25,
-                    tail_strength=0.5, random_state=42
-                )
-                df = pd.DataFrame(X, columns=[f'feature_{i}' for i in range(X.shape[1])])
-                df['target'] = y
-                return df, 'target'
-
-            elif loader == 'fetch_fashion_mnist':
-                try:
-                    from sklearn.datasets import fetch_openml
-                    fmnist = fetch_openml('Fashion-MNIST', version=1, as_frame=False, parser='auto')
-                    df = pd.DataFrame(fmnist.data, columns=[f'pixel_{i}' for i in range(fmnist.data.shape[1])])
-                    df['target'] = fmnist.target.astype(str)
-                    return df, 'target'
-                except Exception:
-                    # 备用: 从 keras 加载
-                    from tensorflow.keras.datasets import fashion_mnist
-                    (X_train, y_train), (X_test, y_test) = fashion_mnist.load_data()
-                    X_all = np.concatenate([X_train, X_test]).reshape(-1, 784)
-                    y_all = np.concatenate([y_train, y_test])
-                    df = pd.DataFrame(X_all, columns=[f'pixel_{i}' for i in range(784)])
-                    df['target'] = y_all.astype(str)
-                    return df, 'target'
-
-            elif loader == 'fetch_covertype':
-                from sklearn.datasets import fetch_covtype
-                data = fetch_covtype()
-                df = pd.DataFrame(data.data, columns=[f'feature_{i}' for i in range(data.data.shape[1])])
-                df['target'] = data.target.astype(str)
-                return df, 'target'
-
-            elif loader == 'fetch_adult':
-                try:
-                    from sklearn.datasets import fetch_openml
-                    adult = fetch_openml('adult', version=2, as_frame=True, parser='auto')
-                    df = adult.frame
-                    # 目标列改名方便使用
-                    df['target'] = df['class'].astype(str)
-                    df = df.drop(columns=['class'])
-                    return df, 'target'
-                except Exception:
-                    # 备用：生成模拟人口收入数据
-                    np.random.seed(42)
-                    n = 48842
-                    df = pd.DataFrame({
-                        'age': np.random.randint(17, 90, n),
-                        'workclass': np.random.choice(['Private', 'Self-emp', 'Gov', 'Unknown'], n),
-                        'education_num': np.random.randint(1, 16, n),
-                        'marital_status': np.random.choice(['Married', 'Single', 'Divorced', 'Widowed'], n),
-                        'occupation': np.random.choice(['Tech', 'Sales', 'Craft', 'Manager', 'Other'], n),
-                        'hours_per_week': np.random.randint(1, 99, n),
-                        'capital_gain': np.random.exponential(1000, n).astype(int),
-                        'capital_loss': np.random.exponential(500, n).astype(int),
-                    })
-                    # 收入与特征的相关性
-                    logit = (
-                        0.03 * df['age']
-                        + 0.5 * df['education_num']
-                        + 0.01 * df['hours_per_week']
-                        + 0.0001 * df['capital_gain']
-                        - 2 * np.random.randn(n)
-                    )
-                    df['target'] = (1 / (1 + np.exp(-logit)) > 0.5).astype(str)
-                    return df, 'target'
-
-        # ---- UCI 数据集 (通过 URL 下载) ----
-        elif info['source'] == 'uci':
-            if loader == 'fetch_wine_quality':
-                try:
-                    url = 'https://archive.ics.uci.edu/ml/machine-learning-databases/wine-quality/winequality-red.csv'
-                    df = pd.read_csv(url, sep=';')
-                    df.columns = [c.strip().replace(' ', '_') for c in df.columns]
-                    target_col = 'quality'
-                    return df, target_col
-                except Exception as e:
-                    logger.warning(f'UCI 下载失败，使用备用数据生成: {e}')
-                    # 备用: 生成模拟葡萄酒质量数据
-                    np.random.seed(42)
-                    n = 1599
-                    df = pd.DataFrame({
-                        'fixed_acidity': np.random.uniform(4, 16, n),
-                        'volatile_acidity': np.random.uniform(0.1, 1.6, n),
-                        'citric_acid': np.random.uniform(0, 1, n),
-                        'residual_sugar': np.random.uniform(0.5, 16, n),
-                        'chlorides': np.random.uniform(0.01, 0.6, n),
-                        'free_sulfur_dioxide': np.random.uniform(1, 70, n),
-                        'total_sulfur_dioxide': np.random.uniform(6, 290, n),
-                        'density': np.random.uniform(0.99, 1.004, n),
-                        'pH': np.random.uniform(2.7, 4, n),
-                        'sulphates': np.random.uniform(0.3, 2, n),
-                        'alcohol': np.random.uniform(8, 15, n),
-                        'quality': np.random.randint(3, 9, n),
-                    })
-                    return df, 'quality'
+        if source == 'sklearn':
+            return DatasetImportService._load_sklearn_dataset(loader)
+        elif source == 'uci':
+            return DatasetImportService._load_uci_dataset(loader)
 
         return None, None
 

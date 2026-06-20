@@ -154,9 +154,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \\
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 复制模型文件和推理脚本
-COPY model.pkl model.pt model.keras model.onnx serve.py ./
-COPY *_config.pkl ./
+# 复制所有模型文件和推理脚本 (动态生成)
+{copy_instructions}
 
 ENV PORT=8000
 ENV MODEL_PATH=./model
@@ -197,7 +196,7 @@ services:
         """
         from app.services.inference_service import ModelInferenceService
 
-        model_obj, metadata, error = ModelInferenceService.load_model(model)
+        model_obj, metadata, _, error = ModelInferenceService.load_model(model)
         if error:
             return False, f'无法加载模型: {error}', None
 
@@ -294,17 +293,10 @@ services:
             import tf2onnx
             import tensorflow as tf
 
-            # 加载 Keras 模型
-            if hasattr(model, 'model_file_path'):
-                keras_path = model.model_file_path
-            else:
-                # 从 experiments 目录查找
-                from app.services.inference_service import ModelInferenceService
-                model_obj, _, _ = ModelInferenceService.load_model(model)
-                # 重新从 .keras 文件导出
-                keras_path = (model.model_file_path or '').replace('.keras', '') + '.keras'
-                if not os.path.exists(keras_path):
-                    return False, 'Keras 模型文件不存在', None
+            # 加载 Keras 模型文件
+            keras_path = model.model_file_path
+            if not keras_path or not os.path.exists(keras_path):
+                return False, f'Keras 模型文件不存在: {keras_path}', None
 
             loaded_model = tf.keras.models.load_model(keras_path)
             spec = (tf.TensorSpec((None, feature_count), tf.float32, name='float_input'),)
@@ -319,16 +311,16 @@ services:
 
     @staticmethod
     def generate_deployment_package(model: ModelRecord) -> Tuple[bool, str, Optional[str]]:
-        """生成完整部署包 (Dockerfile + serve.py + requirements.txt + docker-compose.yml)
+        """生成完整部署包 (Dockerfile + serve.py + requirements.txt + docker-compose.yml + README.md)
 
-        将所有文件打包到一个目录，方便一键部署。
+        所有文件打包到一个目录，方便一键部署。
 
         Returns:
             (success, message, package_dir_path)
         """
         from app.services.inference_service import ModelInferenceService
 
-        model_obj, metadata, error = ModelInferenceService.load_model(model)
+        model_obj, metadata, _, error = ModelInferenceService.load_model(model)
         if error:
             return False, f'无法加载模型: {error}', None
 
@@ -349,46 +341,64 @@ services:
         with open(os.path.join(package_dir, 'serve.py'), 'w', encoding='utf-8') as f:
             f.write(serve_py)
 
-        # 2. 复制模型文件
+        # 2. 复制模型文件 (动态收集所有相关文件)
+        copied_files = ['serve.py']
         model_path = model.model_file_path
         if model_path and os.path.exists(model_path):
             ext = os.path.splitext(model_path)[1]
-            shutil.copy2(model_path, os.path.join(package_dir, f'model{ext}'))
+            model_dest = os.path.join(package_dir, f'model{ext}')
+            shutil.copy2(model_path, model_dest)
+            copied_files.append(f'model{ext}')
+
             # 复制配置文件
             config_path = model_path + '_config.pkl'
             if os.path.exists(config_path):
-                shutil.copy2(config_path, os.path.join(package_dir, f'model{ext}_config.pkl'))
+                dest = os.path.join(package_dir, f'model{ext}_config.pkl')
+                shutil.copy2(config_path, dest)
+                copied_files.append(f'model{ext}_config.pkl')
+
             # 复制 PyTorch .pt
             pt_path = model_path.replace('.pkl', '.pt')
             if os.path.exists(pt_path) and pt_path != model_path:
                 shutil.copy2(pt_path, os.path.join(package_dir, 'model.pt'))
+                copied_files.append('model.pt')
+
             # 复制 Keras .keras
             keras_path = model_path.replace('.pkl', '.keras')
             if os.path.exists(keras_path) and keras_path != model_path:
                 shutil.copy2(keras_path, os.path.join(package_dir, 'model.keras'))
+                copied_files.append('model.keras')
+
+            # 复制 .h5
+            h5_path = model_path.replace('.pkl', '.h5')
+            if os.path.exists(h5_path) and h5_path != model_path:
+                shutil.copy2(h5_path, os.path.join(package_dir, 'model.h5'))
+                copied_files.append('model.h5')
+
+            # 复制 ONNX (如果已导出)
+            onnx_path = model_path.replace('.pkl', '.onnx').replace('.pt', '.onnx')
+            if os.path.exists(onnx_path) and onnx_path != model_path:
+                shutil.copy2(onnx_path, os.path.join(package_dir, 'model.onnx'))
+                copied_files.append('model.onnx')
 
         # 3. requirements.txt (根据框架生成)
-        if framework in ('pytorch', 'tensorflow'):
-            reqs = 'fastapi>=0.100.0\nuvicorn>=0.23.0\nnumpy>=1.24.0\n'
-            if framework == 'pytorch':
-                reqs += 'torch>=2.0.0\n'
-            else:
-                reqs += 'tensorflow>=2.12.0\n'
-            reqs += 'scikit-learn>=1.3.0\npython-multipart>=0.0.6\n'
-        else:
-            # sklearn / ONNX / Other
-            reqs = 'fastapi>=0.100.0\nuvicorn>=0.23.0\nnumpy>=1.24.0\n'
-            reqs += 'scikit-learn>=1.3.0\npython-multipart>=0.0.6\n'
-            if framework == 'onnx':
-                reqs += 'onnxruntime>=1.15.0\n'
+        reqs = ModelExportService._generate_requirements(framework)
         with open(os.path.join(package_dir, 'requirements.txt'), 'w', encoding='utf-8') as f:
             f.write(reqs)
+        copied_files.append('requirements.txt')
 
-        # 4. Dockerfile
+        # 4. Dockerfile (动态生成 COPY 指令)
+        copy_lines = '\n'.join(f'COPY {f} ./' for f in sorted(copied_files))
+        # 若有 config 文件，通配符 COPY (零匹配时 Docker 不报错)
+        has_config = any(f.endswith('_config.pkl') for f in copied_files)
+        if has_config:
+            copy_lines += '\nCOPY *_config.pkl ./'
+
         dockerfile = ModelExportService.DOCKERFILE_TEMPLATE.format(
             model_name=model.name,
             framework=framework,
             task_type=task_type,
+            copy_instructions=copy_lines,
         )
         with open(os.path.join(package_dir, 'Dockerfile'), 'w', encoding='utf-8') as f:
             f.write(dockerfile)
@@ -402,8 +412,200 @@ services:
         with open(os.path.join(package_dir, 'docker-compose.yml'), 'w', encoding='utf-8') as f:
             f.write(compose)
 
-        logger.info(f"部署包已生成: {package_dir}")
-        return True, f'部署包已生成 (5个文件)', package_dir
+        # 6. README.md (Task 13)
+        readme = ModelExportService.generate_model_readme(
+            model, framework, task_type, metadata
+        )
+        with open(os.path.join(package_dir, 'README.md'), 'w', encoding='utf-8') as f:
+            f.write(readme)
+
+        file_count = len(os.listdir(package_dir))
+        logger.info(f"部署包已生成: {package_dir} ({file_count} 个文件)")
+        return True, f'部署包已生成 ({file_count} 个文件)', package_dir
+
+    @staticmethod
+    def _generate_requirements(framework: str) -> str:
+        """根据框架生成 requirements.txt"""
+        reqs = 'fastapi>=0.100.0\nuvicorn>=0.23.0\nnumpy>=1.24.0\n'
+        if framework == 'pytorch':
+            reqs += 'torch>=2.0.0\n'
+        elif framework in ('tensorflow', 'keras', 'tf'):
+            reqs += 'tensorflow>=2.12.0\n'
+        elif framework == 'transformers':
+            reqs += 'torch>=2.0.0\ntransformers>=4.30.0\n'
+        reqs += 'scikit-learn>=1.3.0\npython-multipart>=0.0.6\n'
+        if framework == 'onnx':
+            reqs += 'onnxruntime>=1.15.0\n'
+        return reqs
+
+    @staticmethod
+    def generate_model_readme(model: ModelRecord, framework: str = None,
+                              task_type: str = None, metadata: dict = None) -> str:
+        """生成模型部署 README.md (Task 13)
+
+        Args:
+            model: 模型记录
+            framework: 框架名 (sklearn/pytorch/tensorflow/onnx)
+            task_type: 任务类型 (classification/regression/clustering/nlp)
+            metadata: 模型元数据 (feature_names, label_encoders, etc.)
+
+        Returns:
+            README.md 内容字符串
+        """
+        framework = framework or model.framework or 'sklearn'
+        task_type = task_type or model.model_type
+        metadata = metadata or {}
+
+        feature_names = metadata.get('feature_names', [])
+        label_encoders = metadata.get('label_encoders', {})
+        target_le = label_encoders.get('__target__')
+
+        # API 端点示例
+        api_example = '''```bash
+# 健康检查
+curl http://localhost:8000/health
+
+# 单条预测
+curl -X POST http://localhost:8000/predict \\
+  -H "Content-Type: application/json" \\
+  -d '{"features": [[1.0, 2.5, 3.0]]}'
+
+# 批量预测
+curl -X POST http://localhost:8000/predict \\
+  -H "Content-Type: application/json" \\
+  -d '{"features": [[1.0, 2.5], [3.0, 4.5], [5.0, 6.5]]}'
+```'''
+
+        # 类别标签 (分类模型)
+        classes_section = ''
+        if target_le and hasattr(target_le, 'classes_'):
+            classes = list(target_le.classes_)
+            classes_section = f'''
+## 类别标签
+
+| 索引 | 类别 |
+|------|------|
+{chr(10).join(f'| {i} | `{c}` |' for i, c in enumerate(classes))}
+'''
+
+        # 特征列表
+        features_section = ''
+        if feature_names:
+            max_show = 20
+            shown = feature_names[:max_show]
+            features_section = f'''
+## 输入特征
+
+共 **{len(feature_names)}** 个特征:
+
+| # | 特征名 |
+|---|--------|
+{chr(10).join(f'| {i+1} | `{name}` |' for i, name in enumerate(shown))}
+'''
+            if len(feature_names) > max_show:
+                features_section += f'\n*... 还有 {len(feature_names) - max_show} 个特征未列出*\n'
+
+        readme = f'''# {model.name} — 模型部署包
+
+## 模型信息
+
+| 属性 | 值 |
+|------|-----|
+| 名称 | {model.name} |
+| 版本 | {model.version} |
+| 框架 | {framework} |
+| 任务类型 | {task_type} |
+| 描述 | {model.description or '-'} |
+| 生成时间 | {localnow().strftime('%Y-%m-%d %H:%M:%S')} |
+
+## 性能指标
+
+| 指标 | 值 |
+|------|-----|
+| Accuracy | {f"{model.accuracy * 100:.2f}%" if model.accuracy is not None else '-'} |
+| Precision | {f"{model.precision:.4f}" if model.precision is not None else '-'} |
+| Recall | {f"{model.recall:.4f}" if model.recall is not None else '-'} |
+| F1 Score | {f"{model.f1_score:.4f}" if model.f1_score is not None else '-'} |
+| R² | {f"{model.r2:.4f}" if model.r2 is not None else '-'} |
+| MSE | {f"{model.mse:.4f}" if model.mse is not None else '-'} |
+{features_section}
+{classes_section}
+## 快速部署
+
+### Docker (推荐)
+
+```bash
+# 构建并启动
+docker-compose up -d
+
+# 查看日志
+docker-compose logs -f
+
+# 停止
+docker-compose down
+```
+
+### 手动部署
+
+```bash
+# 安装依赖
+pip install -r requirements.txt
+
+# 启动服务
+python serve.py
+```
+
+服务默认监听 `http://0.0.0.0:8000`
+
+## API 文档
+
+### GET /health
+
+健康检查端点。
+
+**响应 200:**
+```json
+{{"status": "healthy", "model": "{model.name}"}}
+```
+
+### POST /predict
+
+模型推理端点。
+
+**请求体:**
+```json
+{{"features": [[1.0, 2.5, 3.0]]}}
+```
+
+**响应 200:**
+```json
+{{"predictions": ["class_a"], "task_type": "{task_type}"}}
+```
+
+### 示例
+
+{api_example}
+
+## 环境变量
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `PORT` | `8000` | 服务端口 |
+| `MODEL_PATH` | `./model` | 模型文件路径 (不含扩展名) |
+
+## 文件说明
+
+| 文件 | 说明 |
+|------|------|
+| `serve.py` | FastAPI 推理服务脚本 |
+| `Dockerfile` | Docker 镜像构建文件 |
+| `docker-compose.yml` | Docker Compose 编排文件 |
+| `requirements.txt` | Python 依赖清单 |
+| `model.*` | 模型权重文件 |
+| `README.md` | 本文件 |
+'''
+
+        return readme
 
     @staticmethod
     def get_export_info(model: ModelRecord) -> dict:
