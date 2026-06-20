@@ -10,12 +10,12 @@ from app.services.training_service import TrainingService
 class TestTrainingService:
     """训练服务测试"""
 
-    @pytest.mark.parametrize("name,expect_job_not_none", [
-        ("Test Training Job", True),
-        ("",                  True),   # 当前行为: 允许空名称
+    @pytest.mark.parametrize("name,expect_name", [
+        ("Test Training Job", "Test Training Job"),
+        ("",                  ""),  # 空名称: 允许创建 (服务端可能生成默认名)
     ])
-    def test_create_job(self, test_user, name, expect_job_not_none):
-        """参数化: 有效名称 / 空名称"""
+    def test_create_job(self, test_user, name, expect_name):
+        """参数化: 有效名称 / 空名称 — 均允许创建, 验证名称正确传递"""
         job, error = TrainingService.create_job(
             user=test_user,
             name=name,
@@ -23,12 +23,11 @@ class TestTrainingService:
             framework='scikit-learn',
             algorithm='randomforest',
         )
-        assert (job is not None) == expect_job_not_none
-        if expect_job_not_none:
-            assert error is None
-            assert job.name == name
-            assert job.status in ('queued', 'draft', 'created')
-            assert job.id is not None
+        assert job is not None, f'创建任务应成功: {error}'
+        assert error is None
+        assert job.name == expect_name, f'任务名应为 "{expect_name}", 实际: "{job.name}"'
+        assert job.status in ('queued', 'draft', 'created')
+        assert job.id is not None
 
     def test_list_jobs(self, test_user):
         """测试获取任务列表"""

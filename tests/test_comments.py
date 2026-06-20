@@ -112,7 +112,7 @@ class TestCommentService:
     def test_comments_sorted_by_newest(self, app, test_user, public_model):
         """测试评论按最新优先排序"""
         CommentService.add_comment(user=test_user, model_id=public_model.id, content='旧评论')
-        time.sleep(0.1)
+        time.sleep(1.0)  # SQLite 秒级精度, 确保时间戳不同
         CommentService.add_comment(user=test_user, model_id=public_model.id, content='新评论')
 
         result = CommentService.get_comments_for_model(

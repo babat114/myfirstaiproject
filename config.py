@@ -72,6 +72,12 @@ class Config:
         JWT_SECRET_KEY = _raw_jwt_secret
     elif os.environ.get('FLASK_ENV', 'development') == 'development':
         JWT_SECRET_KEY = secrets.token_hex(32)
+        import logging
+        logging.getLogger('app').warning(
+            'JWT_SECRET_KEY 未设置, 已自动生成随机密钥。'
+            '注意: 重启后所有已签发的 Token 将失效。'
+            '生产环境请在 .env 中设置 JWT_SECRET_KEY。'
+        )
     else:
         raise RuntimeError(
             '生产环境必须设置 JWT_SECRET_KEY 环境变量。'

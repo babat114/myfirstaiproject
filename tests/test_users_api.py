@@ -104,9 +104,9 @@ class TestAdminPages:
     """管理页面测试"""
 
     @pytest.mark.parametrize("client_fixture,endpoint,expect_status,follow", [
-        ("client",           "/dashboard/admin",       200, True),
+        ("client",           "/dashboard/admin",       302, False),
         ("admin_client",     "/dashboard/admin",       200, False),
-        ("logged_in_client", "/dashboard/admin",       200, True),
+        ("logged_in_client", "/dashboard/admin",       302, False),
         ("admin_client",     "/dashboard/admin/users", 200, False),
     ])
     def test_admin_page_access(self, request, client_fixture, endpoint,

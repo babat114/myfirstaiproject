@@ -376,7 +376,7 @@ class KerasTrainer(BaseTrainer):
 
         # 保存元数据
         meta = {
-            'epoch': self._current_epoch + 1,
+            'epoch': self._current_epoch,
             'input_dim': self._input_dim,
             'output_dim': self._output_dim,
             'hidden_layers': self.hidden_layers,

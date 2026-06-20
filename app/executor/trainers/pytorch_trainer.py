@@ -553,7 +553,7 @@ class PyTorchTrainer(BaseTrainer):
             'model_state': self._model.state_dict(),
             'optimizer_state': self._optimizer.state_dict(),
             'scheduler_state': self._lr_scheduler.state_dict(),
-            'epoch': self._current_epoch + 1,
+            'epoch': self._current_epoch,
             'best_val_loss': self._best_val_loss,
             'patience_counter': self._patience_counter,
             'best_model_state': self._best_model_state,

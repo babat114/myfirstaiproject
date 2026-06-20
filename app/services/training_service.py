@@ -227,9 +227,7 @@ class TrainingService:
         job.error_message = None
         job.started_at = None
         job.completed_at = None
-        job.created_at = localnow()  # 更新创建时间为重训练时间
-        if job.model:
-            job.model.created_at = localnow()  # 同步更新关联模型的创建时间
+        # created_at 保留原始创建时间, 不覆盖
 
     @staticmethod
     def retrain_job(job: TrainingJob, new_params: dict = None) -> Tuple[bool, Optional[str]]:

@@ -864,7 +864,7 @@ class SklearnTrainer(BaseTrainer):
         ckpt_path = os.path.join(self.output_dir, 'checkpoint.pkl')
         bundle = {
             'model': self._model,
-            'epoch': self._current_epoch + 1,
+            'epoch': self._current_epoch,
             'algorithm': self.algorithm,
             'task_type': self.task_type,
             'scaler': self._scaler,

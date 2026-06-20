@@ -67,39 +67,40 @@ class TestDatasetService:
             # 创建临时 CSV 文件
             import tempfile
             tmp = tempfile.NamedTemporaryFile(suffix='.csv', delete=False, mode='w')
-            tmp.write('col1,col2,col3\n1,2,3\n4,5,6\n')
-            tmp.close()
+            try:
+                tmp.write('col1,col2,col3\n1,2,3\n4,5,6\n')
+                tmp.close()
 
-            from werkzeug.datastructures import FileStorage
-            with open(tmp.name, 'rb') as f:
-                file = FileStorage(
-                    stream=io.BytesIO(f.read()),
-                    filename='test_data.csv',
-                    content_type='text/csv',
+                from werkzeug.datastructures import FileStorage
+                with open(tmp.name, 'rb') as f:
+                    file = FileStorage(
+                        stream=io.BytesIO(f.read()),
+                        filename='test_data.csv',
+                        content_type='text/csv',
+                    )
+
+                ds, error = DatasetService.create_dataset(
+                    user=test_user,
+                    name='Test Dataset',
+                    file=file,
+                    description='Test description',
+                    category='tabular',
+                    upload_folder=os.path.dirname(tmp.name),
                 )
 
-            ds, error = DatasetService.create_dataset(
-                user=test_user,
-                name='Test Dataset',
-                file=file,
-                description='Test description',
-                category='tabular',
-                upload_folder=os.path.dirname(tmp.name),
-            )
+                assert error is None
+                assert ds is not None
+                assert ds.name == 'Test Dataset'
+                assert ds.owner_id == test_user.id
+                assert ds.file_format == 'csv'
+                assert ds.status == 'ready'
 
-            assert error is None
-            assert ds is not None
-            assert ds.name == 'Test Dataset'
-            assert ds.owner_id == test_user.id
-            assert ds.file_format == 'csv'
-            assert ds.status == 'ready'
-
-            # 删除数据集
-            success, del_error = DatasetService.delete_dataset(ds)
-            assert success is True
-            assert del_error is None
-
-            os.unlink(tmp.name)
+                # 删除数据集
+                success, del_error = DatasetService.delete_dataset(ds)
+                assert success is True
+                assert del_error is None
+            finally:
+                os.unlink(tmp.name)
 
     def test_update_dataset(self, app, test_user):
         """更新数据集元数据"""
@@ -108,38 +109,40 @@ class TestDatasetService:
         with app.app_context():
             import tempfile
             tmp = tempfile.NamedTemporaryFile(suffix='.csv', delete=False, mode='w')
-            tmp.write('a,b\n1,2\n')
-            tmp.close()
+            try:
+                tmp.write('a,b\n1,2\n')
+                tmp.close()
 
-            from werkzeug.datastructures import FileStorage
-            with open(tmp.name, 'rb') as f:
-                file = FileStorage(
-                    stream=io.BytesIO(f.read()),
-                    filename='update_test.csv',
+                from werkzeug.datastructures import FileStorage
+                with open(tmp.name, 'rb') as f:
+                    file = FileStorage(
+                        stream=io.BytesIO(f.read()),
+                        filename='update_test.csv',
+                    )
+
+                ds, _ = DatasetService.create_dataset(
+                    user=test_user,
+                    name='Old Name',
+                    file=file,
+                    upload_folder=os.path.dirname(tmp.name),
                 )
 
-            ds, _ = DatasetService.create_dataset(
-                user=test_user,
-                name='Old Name',
-                file=file,
-                upload_folder=os.path.dirname(tmp.name),
-            )
+                # 更新
+                success, error = DatasetService.update_dataset(ds, {
+                    'name': 'New Name',
+                    'description': 'Updated desc',
+                    'is_public': True,
+                })
+                assert success is True
+                assert error is None
+                assert ds.name == 'New Name'
+                assert ds.description == 'Updated desc'
+                assert ds.is_public is True
 
-            # 更新
-            success, error = DatasetService.update_dataset(ds, {
-                'name': 'New Name',
-                'description': 'Updated desc',
-                'is_public': True,
-            })
-            assert success is True
-            assert error is None
-            assert ds.name == 'New Name'
-            assert ds.description == 'Updated desc'
-            assert ds.is_public is True
-
-            # 清理
-            DatasetService.delete_dataset(ds)
-            os.unlink(tmp.name)
+                # 清理
+                DatasetService.delete_dataset(ds)
+            finally:
+                os.unlink(tmp.name)
 
     def test_update_dataset_invalid_field_ignored(self, app, test_user):
         """更新时忽略非法字段"""
@@ -148,27 +151,29 @@ class TestDatasetService:
 
         with app.app_context():
             tmp = tempfile.NamedTemporaryFile(suffix='.csv', delete=False, mode='w')
-            tmp.write('a,b\n1,2\n')
-            tmp.close()
+            try:
+                tmp.write('a,b\n1,2\n')
+                tmp.close()
 
-            from werkzeug.datastructures import FileStorage
-            with open(tmp.name, 'rb') as f:
-                file = FileStorage(stream=io.BytesIO(f.read()), filename='inv_field.csv')
+                from werkzeug.datastructures import FileStorage
+                with open(tmp.name, 'rb') as f:
+                    file = FileStorage(stream=io.BytesIO(f.read()), filename='inv_field.csv')
 
-            ds, _ = DatasetService.create_dataset(
-                user=test_user, name='Test', file=file,
-                upload_folder=os.path.dirname(tmp.name),
-            )
+                ds, _ = DatasetService.create_dataset(
+                    user=test_user, name='Test', file=file,
+                    upload_folder=os.path.dirname(tmp.name),
+                )
 
-            success, error = DatasetService.update_dataset(ds, {
-                'name': 'Still Good',
-                'nonexistent_field': 'should_be_ignored',
-            })
-            assert success is True
-            assert ds.name == 'Still Good'
+                success, error = DatasetService.update_dataset(ds, {
+                    'name': 'Still Good',
+                    'nonexistent_field': 'should_be_ignored',
+                })
+                assert success is True
+                assert ds.name == 'Still Good'
 
-            DatasetService.delete_dataset(ds)
-            os.unlink(tmp.name)
+                DatasetService.delete_dataset(ds)
+            finally:
+                os.unlink(tmp.name)
 
     def test_list_datasets_with_filters(self, app, test_user):
         """列表查询 — 筛选/搜索/分页不抛异常"""
@@ -183,22 +188,24 @@ class TestDatasetService:
                 ('Beta Filter DS', 'nlp', False),
             ]):
                 tmp = tempfile.NamedTemporaryFile(suffix='.csv', delete=False, mode='w')
-                tmp.write('x,y\n1,2\n')
-                tmp.close()
+                try:
+                    tmp.write('x,y\n1,2\n')
+                    tmp.close()
 
-                from werkzeug.datastructures import FileStorage
-                with open(tmp.name, 'rb') as f:
-                    content = f.read()
-                file = FileStorage(stream=io.BytesIO(content), filename=f'ds{i}.csv')
+                    from werkzeug.datastructures import FileStorage
+                    with open(tmp.name, 'rb') as f:
+                        content = f.read()
+                    file = FileStorage(stream=io.BytesIO(content), filename=f'ds{i}.csv')
 
-                ds, error = DatasetService.create_dataset(
-                    user=test_user, name=name, file=file,
-                    category=cat, is_public=public,
-                    upload_folder=os.path.dirname(tmp.name),
-                )
-                if ds:
-                    dataset_ids.append(ds.id)
-                os.unlink(tmp.name)
+                    ds, error = DatasetService.create_dataset(
+                        user=test_user, name=name, file=file,
+                        category=cat, is_public=public,
+                        upload_folder=os.path.dirname(tmp.name),
+                    )
+                    if ds:
+                        dataset_ids.append(ds.id)
+                finally:
+                    os.unlink(tmp.name)
 
             # 验证各筛选方法不抛异常
             DatasetService.list_datasets(category='nlp', owner_id=test_user.id)
@@ -220,35 +227,37 @@ class TestDatasetService:
 
         with app.app_context():
             tmp = tempfile.NamedTemporaryFile(suffix='.csv', delete=False, mode='w')
-            tmp.write('x,y\n1,2\n3,4\n')
-            tmp.close()
+            try:
+                tmp.write('x,y\n1,2\n3,4\n')
+                tmp.close()
 
-            from werkzeug.datastructures import FileStorage
-            with open(tmp.name, 'rb') as f:
-                file = FileStorage(stream=io.BytesIO(f.read()), filename='source.csv')
+                from werkzeug.datastructures import FileStorage
+                with open(tmp.name, 'rb') as f:
+                    file = FileStorage(stream=io.BytesIO(f.read()), filename='source.csv')
 
-            ds, _ = DatasetService.create_dataset(
-                user=test_admin, name='Public Source', file=file,
-                is_public=True, upload_folder=os.path.dirname(tmp.name),
-            )
+                ds, _ = DatasetService.create_dataset(
+                    user=test_admin, name='Public Source', file=file,
+                    is_public=True, upload_folder=os.path.dirname(tmp.name),
+                )
 
-            # test_user 复制
-            copy, error = DatasetService.copy_dataset_to_user(ds, test_user)
-            assert error is None
-            assert copy is not None
-            assert copy.owner_id == test_user.id
-            assert copy.is_public is False  # 复制品默认私有
-            assert copy.name == ds.name
+                # test_user 复制
+                copy, error = DatasetService.copy_dataset_to_user(ds, test_user)
+                assert error is None
+                assert copy is not None
+                assert copy.owner_id == test_user.id
+                assert copy.is_public is False  # 复制品默认私有
+                assert copy.name == ds.name
 
-            # 再次复制同一数据集 → 返回已存在副本 (幂等)
-            copy2, error2 = DatasetService.copy_dataset_to_user(ds, test_user)
-            assert error2 is None
-            assert copy2.id == copy.id
+                # 再次复制同一数据集 → 返回已存在副本 (幂等)
+                copy2, error2 = DatasetService.copy_dataset_to_user(ds, test_user)
+                assert error2 is None
+                assert copy2.id == copy.id
 
-            # 清理
-            DatasetService.delete_dataset(copy)
-            DatasetService.delete_dataset(ds)
-            os.unlink(tmp.name)
+                # 清理
+                DatasetService.delete_dataset(copy)
+                DatasetService.delete_dataset(ds)
+            finally:
+                os.unlink(tmp.name)
 
     def test_statistics_with_data(self, app, test_user):
         """有数据时的统计"""
@@ -257,24 +266,26 @@ class TestDatasetService:
 
         with app.app_context():
             tmp = tempfile.NamedTemporaryFile(suffix='.csv', delete=False, mode='w')
-            tmp.write('col1,col2\n1,2\n3,4\n')
-            tmp.close()
+            try:
+                tmp.write('col1,col2\n1,2\n3,4\n')
+                tmp.close()
 
-            from werkzeug.datastructures import FileStorage
-            with open(tmp.name, 'rb') as f:
-                file = FileStorage(stream=io.BytesIO(f.read()), filename='stats.csv')
+                from werkzeug.datastructures import FileStorage
+                with open(tmp.name, 'rb') as f:
+                    file = FileStorage(stream=io.BytesIO(f.read()), filename='stats.csv')
 
-            ds, _ = DatasetService.create_dataset(
-                user=test_user, name='Stats DS', file=file,
-                upload_folder=os.path.dirname(tmp.name),
-            )
+                ds, _ = DatasetService.create_dataset(
+                    user=test_user, name='Stats DS', file=file,
+                    upload_folder=os.path.dirname(tmp.name),
+                )
 
-            stats = DatasetService.get_dataset_statistics(user_id=test_user.id)
-            assert stats['total_count'] >= 1
-            assert stats['categories']  # 有分类统计
+                stats = DatasetService.get_dataset_statistics(user_id=test_user.id)
+                assert stats['total_count'] >= 1
+                assert stats['categories']  # 有分类统计
 
-            DatasetService.delete_dataset(ds)
-            os.unlink(tmp.name)
+                DatasetService.delete_dataset(ds)
+            finally:
+                os.unlink(tmp.name)
 
 
 class TestCategoryInference:

@@ -133,6 +133,11 @@ def _run_engine_mode(app, admin, jobs: list, dry_run: bool = False):
             if job and job.is_finished:
                 break
 
+        if job is None:
+            print(f'  [ERROR] 训练任务丢失 (可能已被删除)')
+            results.append({'name': cfg['name'], 'result': '任务丢失'})
+            continue
+
         if job.is_finished:
             status = job.status
             metrics = json.loads(job.final_metrics_json) if job.final_metrics_json else {}

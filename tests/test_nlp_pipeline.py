@@ -170,23 +170,27 @@ class TestSMOTEBalancing:
         labels = [1, 1, 1, 1, 1, 1, 1, 1, 0, 0]  # 80% 正类
         return texts, labels
 
-    def test_smote_balances_classes(self, imbalanced_data):
-        """SMOTE 后类别分布均衡"""
+    @pytest.mark.parametrize("texts,labels,max_features,expected_majority", [
+        # 8正/2负 — 验证 SMOTE 均衡效果
+        (["很好", "不错", "推荐", "满意", "喜欢", "好吃", "方便", "干净",
+          "太差", "失望"],
+         [1, 1, 1, 1, 1, 1, 1, 1, 0, 0], 20, 8),
+        # 3正/2负 — 验证小样本 k_neighbors 兼容 + 样本数精确匹配多数类
+        (["很好很好", "很棒很棒", "非常赞", "太差了", "很烂啊"],
+         [1, 1, 1, 0, 0], 10, 3),
+    ])
+    def test_smote_balances_classes(self, texts, labels, max_features,
+                                     expected_majority):
+        """SMOTE 后类别分布均衡, 生成样本数 = 多数类样本数"""
         try:
             from imblearn.over_sampling import SMOTE
         except ImportError:
             pytest.skip("imbalanced-learn 未安装")
 
-        texts, labels = imbalanced_data
-
         # TF-IDF
-        vec = TfidfVectorizer(max_features=20)
+        vec = TfidfVectorizer(max_features=max_features)
         X = vec.fit_transform(texts)
         y = np.array(labels)
-
-        # 确认原始不均衡
-        unique_before, counts_before = np.unique(y, return_counts=True)
-        assert counts_before[0] != counts_before[1], "原始数据应不均衡"
 
         # SMOTE
         smote = SMOTE(random_state=42, k_neighbors=1)
@@ -195,6 +199,9 @@ class TestSMOTEBalancing:
         _, counts_after = np.unique(y_resampled, return_counts=True)
         assert counts_after[0] == counts_after[1], (
             f"SMOTE后应类别均衡, 实际: {counts_after}"
+        )
+        assert counts_after[0] == expected_majority, (
+            f"SMOTE后多数类应为 {expected_majority}, 实际: {counts_after[0]}"
         )
 
     def test_no_smote_when_disabled(self, imbalanced_data):
@@ -209,28 +216,6 @@ class TestSMOTEBalancing:
         assert original_count == len(texts)
         # 不做任何重采样，数据量不变
         assert X.shape[0] == original_count
-
-    def test_smote_preserves_samples(self):
-        """SMOTE 保持合理的样本生成 (k_neighbors 兼容性)"""
-        try:
-            from imblearn.over_sampling import SMOTE
-        except ImportError:
-            pytest.skip("imbalanced-learn 未安装")
-
-        # 3正 / 2负 (min class=2, k_neighbors=1 安全) — 使用多字符中文词避免 empty vocab
-        texts = ["很好很好", "很棒很棒", "非常赞", "太差了", "很烂啊"]
-        labels = [1, 1, 1, 0, 0]
-
-        vec = TfidfVectorizer(max_features=10)
-        X = vec.fit_transform(texts)
-
-        smote = SMOTE(random_state=42, k_neighbors=1)
-        X_res, y_res = smote.fit_resample(X, labels)
-
-        _, counts = np.unique(y_res, return_counts=True)
-        # 所有类别数应相等 (都=最多的那个)
-        assert counts[0] == counts[1]
-        assert counts[0] == 3  # max(3, 2) = 3
 
 
 # ═══════════════════════════════════════════════════════════════════

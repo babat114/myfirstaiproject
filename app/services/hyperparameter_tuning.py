@@ -404,8 +404,10 @@ def _detect_and_remove_inf(y) -> tuple:
     """检测并移除inf值, 返回 (cleaned_y, inf_count)
 
     同时支持 numpy array 和 pandas Series.
+    保留原始 dtype (分类任务整数标签不转为 float64).
     """
-    # 统一转为 numpy array 处理 (np.isfinite 原生支持两者)
+    from pandas.api.types import is_integer_dtype
+    is_int_like = hasattr(y, 'dtype') and is_integer_dtype(y)
     y_arr = np.asarray(y, dtype=np.float64)
     inf_mask = ~np.isfinite(y_arr)
     n_inf = inf_mask.sum()
@@ -415,8 +417,10 @@ def _detect_and_remove_inf(y) -> tuple:
         if hasattr(y, 'iloc'):
             return y.loc[~inf_mask], n_inf
         return y_arr[~inf_mask], n_inf
-    # 返回原始类型以保持一致性
+    # 无 inf: 返回原始类型以保持一致性
     if hasattr(y, 'iloc'):
+        return y, 0
+    if is_int_like:
         return y, 0
     return y_arr, 0
 

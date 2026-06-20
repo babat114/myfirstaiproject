@@ -21,9 +21,14 @@ def app():
     })
 
     with app.app_context():
+        # SQLite 默认不强制外键, 显式开启以匹配生产环境 MySQL 行为
+        from sqlalchemy import text
+        db.session.execute(text('PRAGMA foreign_keys = ON'))
         db.create_all()
         yield app
         db.session.remove()
+        # drop_all 前关闭 FK 约束, 否则无法删除被引用的表
+        db.session.execute(text('PRAGMA foreign_keys = OFF'))
         db.drop_all()
 
 
