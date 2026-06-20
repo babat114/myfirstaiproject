@@ -141,3 +141,128 @@ def chart_colors() -> list:
         '#e74a3b', '#858796', '#5a5c69', '#2e59d9',
         '#17a673', '#2c9faf',
     ]
+
+
+def parse_form_params(form_data: dict, int_fields: set = None, float_fields: set = None,
+                     str_fields: set = None) -> dict:
+    """解析表单参数为强类型 dict — 减少路由层重复的类型转换代码
+
+    Args:
+        form_data: request.form 字典 (ImmutableMultiDict.to_dict())
+        int_fields: 整数类型字段名集合
+        float_fields: 浮点类型字段名集合
+        str_fields: 字符串类型字段名集合 (显式列出的不会被自动推断)
+
+    Returns:
+        {field_name: typed_value} — 未识别的字段会尝试智能推断, 空值会被跳过
+    """
+    int_fields = int_fields or set()
+    float_fields = float_fields or set()
+    str_fields = str_fields or set()
+
+    result = {}
+    for key, val in form_data.items():
+        if val is None or val == '':
+            continue
+        key_lower = key.lower()
+        if key_lower in str_fields or key_lower == 'hidden_layers_str':
+            result[key] = val
+        elif key_lower in float_fields:
+            try:
+                result[key] = float(val)
+            except (ValueError, TypeError):
+                pass  # 跳过无效数值
+        elif key_lower in int_fields:
+            try:
+                result[key] = int(val)
+            except (ValueError, TypeError):
+                pass
+        else:
+            # 智能推断
+            try:
+                if '.' in val:
+                    result[key] = float(val)
+                else:
+                    result[key] = int(val)
+            except (ValueError, TypeError):
+                result[key] = val  # 保持字符串
+    return result
+
+
+def to_python_type(val, recurse: bool = False):
+    """将 numpy/pandas 标量转换为 Python 原生类型 (安全 JSON 序列化)
+
+    Args:
+        val: 任意值 (可能包含 numpy scalar / pandas Timestamp 等)
+        recurse: 是否递归转换 list/dict 中的值
+
+    Returns:
+        Python 原生类型值 (int/float/bool/str/list/dict/None)
+    """
+    if val is None:
+        return None
+    # numpy scalar (np.int64, np.float32, etc.) — 有 .item() 方法
+    try:
+        if hasattr(val, 'item'):
+            val = val.item()
+    except Exception:
+        pass
+    # pandas Timestamp
+    if hasattr(val, 'isoformat') and not isinstance(val, str):
+        return val.isoformat()
+    # 递归转换
+    if recurse:
+        if isinstance(val, list):
+            return [to_python_type(v, recurse=True) for v in val]
+        if isinstance(val, dict):
+            return {str(k): to_python_type(v, recurse=True) for k, v in val.items()}
+    # 基础类型
+    if isinstance(val, bool):
+        return bool(val)
+    if isinstance(val, (int, float)):
+        return val
+    return val
+
+
+def sanitize_error(error: Exception | str, fallback: str = '操作失败，请稍后重试。') -> str:
+    """安全错误消息: 生产环境返回通用消息, 开发环境返回详细信息
+
+    防止将数据库错误/文件路径/栈追踪泄露给客户端。
+
+    Args:
+        error: Exception 或 字符串错误消息
+        fallback: 生产环境返回的通用消息
+
+    Returns:
+        安全的错误消息字符串
+    """
+    try:
+        from flask import current_app
+        if current_app.config.get('DEBUG'):
+            return str(error)
+    except RuntimeError:
+        pass
+    return fallback
+
+
+def sanitize_service_error(error: Exception, log_message: str = None) -> str:
+    """Service 层专用: 记录详细错误到日志, 返回脱敏消息给客户端
+
+    用法:
+        except Exception as e:
+            return False, sanitize_service_error(e, '删除数据集失败')
+
+    Args:
+        error: 捕获的异常
+        log_message: 日志前缀 (可选)
+
+    Returns:
+        脱敏后的客户端消息
+    """
+    from app import logger as _logger
+    detail = str(error)
+    if log_message:
+        _logger.error(f'{log_message}: {detail}')
+    else:
+        _logger.error(detail)
+    return sanitize_error(error)

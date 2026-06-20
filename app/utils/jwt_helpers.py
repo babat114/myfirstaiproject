@@ -12,8 +12,13 @@ from app import logger
 
 
 def _get_jwt_secret() -> str:
-    """获取 JWT 签名密钥"""
-    return current_app.config.get('JWT_SECRET_KEY', 'jwt-secret-key')
+    """获取 JWT 签名密钥 — 生产环境必须显式配置, 无默认回退"""
+    secret = current_app.config.get('JWT_SECRET_KEY')
+    if not secret:
+        raise RuntimeError(
+            'JWT_SECRET_KEY 未配置。生产环境必须在 .env 中设置 JWT_SECRET_KEY。'
+        )
+    return secret
 
 
 def _get_access_expiry() -> timedelta:
@@ -51,13 +56,14 @@ def generate_access_token(user_id: int, username: str, role: str) -> str:
     return token
 
 
-def generate_refresh_token(user_id: int, username: str) -> str:
+def generate_refresh_token(user_id: int, username: str, token_version: int = 1) -> str:
     """
     生成 JWT Refresh Token (长有效期, 仅用于刷新)
 
     Args:
         user_id: 用户ID
         username: 用户名
+        token_version: Token 版本号 (改密码时递增, 使旧 Token 失效)
 
     Returns:
         编码后的 JWT 字符串
@@ -67,6 +73,7 @@ def generate_refresh_token(user_id: int, username: str) -> str:
         'sub': str(user_id),              # PyJWT 2.10+ 要求 sub 为字符串
         'username': username,
         'type': 'refresh',
+        'ver': token_version,             # Token 版本 — 改密码时递增以撤销旧 Token
         'iat': now,
         'exp': now + _get_refresh_expiry(),
     }
@@ -74,7 +81,8 @@ def generate_refresh_token(user_id: int, username: str) -> str:
     return token
 
 
-def generate_token_pair(user_id: int, username: str, role: str) -> Dict[str, str]:
+def generate_token_pair(user_id: int, username: str, role: str,
+                        token_version: int = 1) -> Dict[str, str]:
     """
     生成 Access + Refresh Token 对
 
@@ -83,7 +91,7 @@ def generate_token_pair(user_id: int, username: str, role: str) -> Dict[str, str
     """
     return {
         'access_token': generate_access_token(user_id, username, role),
-        'refresh_token': generate_refresh_token(user_id, username),
+        'refresh_token': generate_refresh_token(user_id, username, token_version),
         'token_type': 'Bearer',
         'expires_in': int(_get_access_expiry().total_seconds()),
     }
@@ -121,8 +129,23 @@ def decode_access_token(token: str) -> Tuple[Optional[Dict[str, Any]], Optional[
 
 
 def decode_refresh_token(token: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
-    """解码 Refresh Token (便捷方法)"""
-    return decode_token(token, expected_type='refresh')
+    """解码 Refresh Token (便捷方法, 额外验证 token_version)"""
+    payload, error = decode_token(token, expected_type='refresh')
+    if error:
+        return None, error
+
+    # 验证 token_version 与数据库一致 (改密码后旧 Token 自动失效)
+    token_ver = payload.get('ver')
+    if token_ver is not None:
+        user_id = payload.get('sub')
+        if user_id:
+            from app.models.user import User
+            from app import db as _db
+            user = _db.session.get(User, int(user_id))
+            if user and user.token_version != token_ver:
+                return None, 'Token 已失效 (密码已更改)，请重新登录。'
+
+    return payload, None
 
 
 def extract_token_from_header() -> Optional[str]:

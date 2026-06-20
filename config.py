@@ -5,6 +5,7 @@
 ============================================
 """
 import os
+import secrets
 from datetime import timedelta
 from dotenv import load_dotenv
 
@@ -18,17 +19,16 @@ class Config:
     if _raw_secret:
         SECRET_KEY = _raw_secret
     elif os.environ.get('FLASK_ENV', 'development') == 'development':
-        import secrets as _secrets
-        SECRET_KEY = _secrets.token_hex(32)
+        SECRET_KEY = secrets.token_hex(32)
     else:
         raise RuntimeError(
             '生产环境必须设置 SECRET_KEY 环境变量。'
             '请在 .env 中设置 SECRET_KEY=<your-secure-key>'
         )
 
-    # 数据库配置
+    # 数据库配置 — 所有环境必须显式设置密码 (无硬编码默认值)
     MYSQL_USER = os.environ.get('MYSQL_USER', 'root')
-    MYSQL_PASSWORD = os.environ.get('MYSQL_PASSWORD', 'your_password')
+    MYSQL_PASSWORD = os.environ.get('MYSQL_PASSWORD')  # None if not set; validated in get_config()
     MYSQL_HOST = os.environ.get('MYSQL_HOST', 'localhost')
     MYSQL_PORT = os.environ.get('MYSQL_PORT', '3306')
     MYSQL_DATABASE = os.environ.get('MYSQL_DATABASE', 'ai_platform')
@@ -41,6 +41,8 @@ class Config:
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ENGINE_OPTIONS = {
         'pool_size': 20,
+        'max_overflow': 10,      # 池满时允许额外临时连接
+        'pool_timeout': 30,      # 等待可用连接的超时秒数
         'pool_recycle': 3600,
         'pool_pre_ping': True,
         'echo': False,
@@ -69,8 +71,7 @@ class Config:
     if _raw_jwt_secret:
         JWT_SECRET_KEY = _raw_jwt_secret
     elif os.environ.get('FLASK_ENV', 'development') == 'development':
-        import secrets as _jwt_secrets
-        JWT_SECRET_KEY = _jwt_secrets.token_hex(32)
+        JWT_SECRET_KEY = secrets.token_hex(32)
     else:
         raise RuntimeError(
             '生产环境必须设置 JWT_SECRET_KEY 环境变量。'
@@ -82,13 +83,30 @@ class Config:
     # 日志配置
     LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO')
 
+    # CORS 配置 — 生产环境从环境变量读取允许的来源
+    CORS_ORIGINS = os.environ.get('CORS_ORIGINS', '*').split(',')
+
     # 训练执行引擎配置
     TRAINING_MAX_WORKERS = int(os.environ.get('TRAINING_MAX_WORKERS', '2'))
+
+    # 超参数调优配置
+    AUTO_ML_QUICK_N_ITER = int(os.environ.get('AUTO_ML_QUICK_N_ITER', '15'))       # AutoML 每算法采样数
+    CLUSTERING_MAX_SCORE_SAMPLES = int(os.environ.get('CLUSTERING_MAX_SCORE_SAMPLES', '3000'))  # 聚类评分子采样上限
+    TUNING_SESSION_CLEANUP_TTL = int(os.environ.get('TUNING_SESSION_CLEANUP_TTL', '3600'))      # 调优会话清理 TTL (秒)
+
+    # NLP 模型训练配置
+    NLP_DEFAULT_MAX_FEATURES = int(os.environ.get('NLP_DEFAULT_MAX_FEATURES', '2000'))
+    NLP_DEFAULT_MIN_DF = int(os.environ.get('NLP_DEFAULT_MIN_DF', '2'))
+    NLP_DEFAULT_MAX_DF = float(os.environ.get('NLP_DEFAULT_MAX_DF', '0.9'))
+    NLP_DEFAULT_BALANCE_MODE = os.environ.get('NLP_DEFAULT_BALANCE_MODE', 'smote')
+    NLP_DEFAULT_CV_FOLDS = int(os.environ.get('NLP_DEFAULT_CV_FOLDS', '5'))
+    NLP_MAX_TEST_SENTENCES = int(os.environ.get('NLP_MAX_TEST_SENTENCES', '10'))
 
 
 class DevelopmentConfig(Config):
     """开发环境配置"""
     DEBUG = True
+    TEMPLATES_AUTO_RELOAD = True  # 模板修改后自动重新加载
     SESSION_COOKIE_SECURE = False  # 本地开发无 HTTPS
     SQLALCHEMY_ENGINE_OPTIONS = {
         **Config.SQLALCHEMY_ENGINE_OPTIONS,
@@ -120,7 +138,16 @@ config_map = {
 
 
 def get_config(env: str = None):
-    """获取当前环境配置"""
+    """获取当前环境配置 — 生产/开发环境验证必填字段"""
     if env is None:
         env = os.environ.get('FLASK_ENV', 'development')
-    return config_map.get(env, config_map['default'])
+    config_class = config_map.get(env, config_map['default'])
+
+    # 非测试环境必须设置 MYSQL_PASSWORD (测试环境使用 SQLite 内存库, 不需要 MySQL 密码)
+    if not issubclass(config_class, TestingConfig) and not config_class.MYSQL_PASSWORD:
+        raise RuntimeError(
+            '未设置 MYSQL_PASSWORD 环境变量。'
+            '请在 .env 中设置 MYSQL_PASSWORD=<your-database-password>'
+        )
+
+    return config_class

@@ -19,12 +19,16 @@ if __name__ == '__main__':
     port = int(os.environ.get('FLASK_PORT', 5000))
     debug = config_name == 'development'
 
-    # 自动执行数据库迁移 (开发环境)
+    # 自动执行数据库迁移
     with app.app_context():
         try:
             upgrade()
             print('[OK] Database migration check completed')
         except Exception as e:
+            if config_name == 'production':
+                # 生产环境: 迁移失败必须阻止启动, 避免 schema 不一致导致数据损坏
+                print(f'[FATAL] Database migration failed: {e}')
+                raise
             print(f'[WARN] Database migration skipped: {e}')
 
     print(f"""

@@ -1,54 +1,64 @@
 # ============================================
 # AI Model & Dataset Management Platform
-# Python Dependencies
+# Python Dependencies (锁定版本)
+# 生成: pip freeze | grep -E "Flask|SQLAlchemy|torch|..."
+# 更新: pip install --upgrade <package> && 手动更新此文件
 # ============================================
 
 # Web Framework
-Flask==3.1.0
-Flask-SQLAlchemy==3.1.1
-Flask-Login==0.6.3
-Flask-Migrate==4.1.0
-Flask-WTF==1.2.2
+Flask~=3.1.0
+Flask-SQLAlchemy~=3.1.1
+Flask-Login~=0.6.3
+Flask-Migrate~=4.1.0
+Flask-WTF~=1.2.2
 
 # Database Driver
-PyMySQL==1.1.1
-SQLAlchemy==2.0.36
+PyMySQL~=1.1.1
+SQLAlchemy~=2.0.36
 
 # Password Hashing
-bcrypt==4.2.1
+bcrypt~=4.2.1
 
 # Form Validation
-WTForms==3.2.1
-email-validator==2.2.0
+WTForms~=3.2.1
+email-validator~=2.2.0
 
 # File Upload Processing
-Pillow==11.1.0
+Pillow~=11.1.0
 
 # Data Processing
-pandas==2.2.3
-numpy==2.2.3
+pandas~=2.2.3
+numpy~=2.2.3
 
 # Date/Time
-python-dateutil==2.9.0
+python-dateutil~=2.9.0
 
 # JSON Web Token (API Auth)
-PyJWT==2.10.1
+PyJWT~=2.10.1
 
 # CORS Support
-Flask-CORS==5.0.1
+Flask-CORS~=5.0.1
 
 # Environment Variables
-python-dotenv==1.1.0
+python-dotenv~=1.1.0
 
 # Logging
-colorlog==6.9.0
+colorlog~=6.9.0
 
-# Machine Learning
-scikit-learn==1.8.0
-torch>=2.0.0
-transformers>=4.30.0
-tensorflow>=2.12.0
+# Machine Learning (兼容版本 — 允许次版本更新)
+scikit-learn~=1.8.0
+torch>=2.0.0,<3.0.0
+transformers>=4.30.0,<5.0.0
+tensorflow>=2.12.0,<3.0.0
+
+# NLP / Chinese Text Processing
+jieba>=0.42.1,<1.0              # 中文分词 (sklearn_trainer, feature_extractor)
+imbalanced-learn>=0.12.0,<1.0   # SMOTE/undersample 重采样 (sklearn_trainer)
+
+# Computer Vision (optional, used by feature_extractor CV path)
+torchvision>=0.17.0,<1.0        # ResNet-18 CNN 特征提取
+scikit-image>=0.22.0,<1.0       # HOG + histogram CV 特征
 
 # Testing
-pytest==8.3.4
-pytest-cov==6.0.0
+pytest~=8.3.4
+pytest-cov~=6.0.0

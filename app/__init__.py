@@ -44,7 +44,9 @@ def create_app(config_name=None):
     db.init_app(app)
     login_manager.init_app(app)
     migrate.init_app(app, db)
-    cors.init_app(app, resources={r"/api/*": {"origins": "*"}})
+    # CORS 配置从环境变量读取
+    cors_origins = app.config.get('CORS_ORIGINS', '*')
+    cors.init_app(app, resources={r"/api/*": {"origins": cors_origins}})
     csrf.init_app(app)
 
     # 登录管理器配置
@@ -61,8 +63,14 @@ def create_app(config_name=None):
     # 配置日志
     configure_logging(app)
 
-    # 注册蓝图
+    # 注册蓝图 + CSRF 豁免
     register_blueprints(app)
+
+    # 注册根路由 (/)
+    register_home_route(app)
+
+    # 向后兼容: /api/* → /api/v1/*
+    setup_api_compat_middleware(app)
 
     # 注册错误处理器
     register_error_handlers(app)
@@ -101,12 +109,13 @@ def configure_logging(app):
 
 
 def register_blueprints(app):
-    """注册所有蓝图"""
+    """注册所有蓝图 + CSRF 豁免"""
     from app.routes.auth import auth_bp
     from app.routes.dashboard import dashboard_bp
     from app.routes.datasets import datasets_bp
     from app.routes.models import models_bp
     from app.routes.training import training_bp
+    from app.routes.comments import comments_bp
 
     # Web 页面路由
     app.register_blueprint(auth_bp, url_prefix='/auth')
@@ -114,15 +123,7 @@ def register_blueprints(app):
     app.register_blueprint(datasets_bp, url_prefix='/datasets')
     app.register_blueprint(models_bp, url_prefix='/models')
     app.register_blueprint(training_bp, url_prefix='/training')
-
-    # 根路由: 已登录 → 仪表盘, 未登录 → 欢迎首页
-    from flask import redirect, url_for, render_template
-    from flask_login import current_user
-    @app.route('/')
-    def root():
-        if current_user.is_authenticated:
-            return redirect(url_for('dashboard.index'))
-        return render_template('index.html')
+    app.register_blueprint(comments_bp, url_prefix='/comments')
 
     # RESTful API 路由
     from app.routes.api.auth import auth_api_bp
@@ -131,6 +132,7 @@ def register_blueprints(app):
     from app.routes.api.training import training_api_bp
     from app.routes.api.stream import stream_bp
     from app.routes.api.users import users_api_bp
+    from app.routes.api.comments import comments_api_bp
 
     # API v1 (当前版本)
     app.register_blueprint(auth_api_bp, url_prefix='/api/v1/auth')
@@ -139,19 +141,44 @@ def register_blueprints(app):
     app.register_blueprint(training_api_bp, url_prefix='/api/v1/training')
     app.register_blueprint(stream_bp, url_prefix='/api/v1/stream')
     app.register_blueprint(users_api_bp, url_prefix='/api/v1/users')
+    app.register_blueprint(comments_api_bp, url_prefix='/api/v1')
 
-    # 向后兼容: /api/* 内部重写为 /api/v1/* (在URL匹配前通过WSGI中间件)
+    # API 路由豁免 CSRF (使用 JWT/API Key 认证, 非 Session Cookie)
+    csrf.exempt(auth_api_bp)
+    csrf.exempt(datasets_api_bp)
+    csrf.exempt(models_api_bp)
+    csrf.exempt(training_api_bp)
+    csrf.exempt(stream_bp)
+    csrf.exempt(users_api_bp)
+    csrf.exempt(comments_api_bp)
+
+
+def register_home_route(app):
+    """注册根路由: 已登录 → 仪表盘, 未登录 → 欢迎首页"""
+    from flask import redirect, url_for, render_template
+    from flask_login import current_user
+
+    @app.route('/')
+    def root():
+        if current_user.is_authenticated:
+            return redirect(url_for('dashboard.index'))
+        return render_template('index.html')
+
+
+def setup_api_compat_middleware(app):
+    """向后兼容: /api/* 内部重写为 /api/v1/*, 并附加 deprecation header"""
     _original_wsgi = app.wsgi_app
+
     def _api_v1_compat_middleware(environ, start_response):
         path = environ.get('PATH_INFO', '')
         if path.startswith('/api/') and not path.startswith('/api/v1/'):
-            # 保存原始路径, 供 after_request 判断是否为旧版API调用
+            environ = dict(environ)
             environ['HTTP_X_API_ORIGINAL_PATH'] = path
             environ['PATH_INFO'] = path.replace('/api/', '/api/v1/', 1)
         return _original_wsgi(environ, start_response)
+
     app.wsgi_app = _api_v1_compat_middleware
 
-    # 向后兼容路由上的 deprecation header
     @app.after_request
     def _api_deprecation_header(response):
         from flask import request as req
@@ -160,15 +187,6 @@ def register_blueprints(app):
             response.headers['X-API-Deprecated'] = 'Use /api/v1/ instead. Will be removed in v2.0'
             response.headers['Sunset'] = 'Sat, 01 Jan 2027 00:00:00 GMT'
         return response
-
-    # API 路由豁免 CSRF (使用 JWT/API Key 认证, 非 Session Cookie)
-    # Web 页面蓝图不豁免 — 所有 POST 表单自动注入 CSRF token (见 base.html)
-    csrf.exempt(auth_api_bp)
-    csrf.exempt(datasets_api_bp)
-    csrf.exempt(models_api_bp)
-    csrf.exempt(training_api_bp)
-    csrf.exempt(stream_bp)
-    csrf.exempt(users_api_bp)
 
 
 def register_error_handlers(app):
@@ -201,10 +219,7 @@ def register_error_handlers(app):
                 'message': '请求的资源不存在。',
                 'error': 'Not Found',
             }), 404
-        return render_template('errors/error.html',
-            error_code=404, error_title='页面未找到',
-            error_message='您要查找的页面不存在或已被移动。',
-            error_color='text-muted'), 404
+        return render_template('errors/404.html'), 404
 
     @app.errorhandler(500)
     def internal_error(e):
@@ -216,10 +231,7 @@ def register_error_handlers(app):
                 'message': '服务器内部错误，请稍后重试。',
                 'error': 'Internal Server Error',
             }), 500
-        return render_template('errors/error.html',
-            error_code=500, error_title='服务器内部错误',
-            error_message='抱歉，服务器遇到了问题，请稍后重试。',
-            error_color='text-danger'), 500
+        return render_template('errors/500.html'), 500
 
     @app.errorhandler(HTTPException)
     def handle_http_exception(e):

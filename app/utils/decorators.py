@@ -99,11 +99,27 @@ def rate_limit(max_calls: int = 60, period: int = 60):
         max_calls: 在周期内允许的最大请求数
         period: 限流周期 (秒)
 
-    注意: 测试环境 (TESTING=True) 自动跳过限流
+    注意: 测试环境 (TESTING=True) 自动跳过限流。
+          每 100 次请求触发一次惰性清理, 移除超过 2*period 未活动的 IP 记录。
     """
     import threading
     _store = {}
     _lock = threading.Lock()
+    _cleanup_counter = [0]  # 可变容器: 请求计数器, 每100次触发清理
+
+    def _cleanup_expired(now_ts: float, horizon: float):
+        """移除超过 horizon 秒未活动的 IP 记录"""
+        stale = [ip for ip, calls in _store.items()
+                 if not calls or max(calls) < now_ts - horizon]
+        for ip in stale:
+            del _store[ip]
+        if stale:
+            # 安全获取 logger (不在应用上下文时静默跳过)
+            try:
+                from flask import current_app
+                current_app.logger.debug(f'rate_limit: 清理 {len(stale)} 个过期 IP 记录')
+            except RuntimeError:
+                pass
 
     def decorator(func):
         @wraps(func)
@@ -120,15 +136,29 @@ def rate_limit(max_calls: int = 60, period: int = 60):
             now = time.time()
             window_start = now - period
 
+            exceeded = False
+            retry_after = 0
+
             with _lock:
                 calls = _store.get(identifier, [])
                 calls = [t for t in calls if t > window_start]
                 _store[identifier] = calls
 
+                # 惰性清理: 每 100 次请求清理超过 2*period 未活动的记录
+                _cleanup_counter[0] += 1
+                if _cleanup_counter[0] >= 100:
+                    _cleanup_counter[0] = 0
+                    _cleanup_expired(now, period * 2)
+
+                # 原子检查+追加, 避免锁外门控的竞态条件
                 if len(calls) >= max_calls:
                     retry_after = int(calls[0] + period - now) + 1
+                    exceeded = True
+                else:
+                    calls.append(now)
+                    _store[identifier] = calls
 
-            if len(calls) >= max_calls:
+            if exceeded:
                 # API 请求返回 JSON, Web 请求返回 HTML 错误页
                 if request.path.startswith('/api/'):
                     return jsonify({
@@ -141,9 +171,6 @@ def rate_limit(max_calls: int = 60, period: int = 60):
                     flash(f'请求过于频繁，请在 {retry_after} 秒后重试。', 'warning')
                     return redirect(request.referrer or request.url)
 
-            with _lock:
-                calls.append(now)
-                _store[identifier] = calls
             return func(*args, **kwargs)
 
         return decorated
