@@ -41,7 +41,7 @@ instance/
 # 数据库
 *.db
 *.sqlite3
-migrations/versions/
+# migrations/versions/ 中的 __pycache__ 忽略，但迁移文件需追踪
 
 # 测试
 .coverage

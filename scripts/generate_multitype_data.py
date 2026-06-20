@@ -396,7 +396,7 @@ def train_sklearn_model(X_train, y_train, X_test, y_test, algorithm, task_type):
             metrics['precision'] = round(float(precision_score(y_test_enc, y_pred, average='weighted', zero_division=0)), 4)
             metrics['recall'] = round(float(recall_score(y_test_enc, y_pred, average='weighted', zero_division=0)), 4)
             metrics['f1_score'] = round(float(f1_score(y_test_enc, y_pred, average='weighted', zero_division=0)), 4)
-        except:
+        except Exception:
             pass
     else:
         metrics['mse'] = round(float(mean_squared_error(y_test_enc, y_pred)), 4)
@@ -452,7 +452,7 @@ def train_pytorch_model(X_train, y_train, X_test, y_test, task_type, epochs=20):
                 metrics['precision'] = round(float(precision_score(le.transform(y_test.astype(str)), y_pred, average='weighted', zero_division=0)), 4)
                 metrics['recall'] = round(float(recall_score(le.transform(y_test.astype(str)), y_pred, average='weighted', zero_division=0)), 4)
                 metrics['f1_score'] = round(float(f1_score(le.transform(y_test.astype(str)), y_pred, average='weighted', zero_division=0)), 4)
-            except:
+            except Exception:
                 pass
             bundle = {'model': model, 'scaler': scaler, 'label_encoders': {'__target__': le},
                       'feature_names': list(X_train.columns), 'task_type': task_type, 'algorithm': 'mlp_sklearn'}
@@ -549,7 +549,7 @@ def train_pytorch_model(X_train, y_train, X_test, y_test, task_type, epochs=20):
                 metrics['precision'] = round(float(precision_score(y_true, y_pred, average='weighted', zero_division=0)), 4)
                 metrics['recall'] = round(float(recall_score(y_true, y_pred, average='weighted', zero_division=0)), 4)
                 metrics['f1_score'] = round(float(f1_score(y_true, y_pred, average='weighted', zero_division=0)), 4)
-            except:
+            except Exception:
                 pass
         else:
             y_pred = outputs.numpy().flatten()

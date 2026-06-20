@@ -13,9 +13,9 @@ cd ~/Desktop/myfirstaiproject && python run.py
 
 - **认证**: Session(Web) → JWT Bearer(API) → API Key(兼容)
 - **训练器**: sklearn / PyTorch / TensorFlow.Keras / Transformers (BERT NLP)
-- **测试**: 77个pytest, `python -m pytest tests/ -v`
+- **测试**: 162个pytest, `python -m pytest tests/ -v`
 - **数据集**: 100个, 支持15个公开数据集导入, 11种类别感知
-- **模型**: 113个已训练, 5种框架
+- **模型**: 208个已训练 (含117个NLP模型), 5种框架
 
 ## GPU 环境
 
@@ -24,7 +24,7 @@ cd ~/Desktop/myfirstaiproject && python run.py
 - **TensorFlow**: 2.20.0 (Windows CPU-only, GPU 需 WSL2)
 - 训练器自动检测 GPU, 无需手动配置
 
-## 超参数调优 (v8)
+## 超参数调优 (v9)
 
 | 模式 | 方法 | 适用场景 |
 |------|------|---------|
@@ -35,6 +35,7 @@ cd ~/Desktop/myfirstaiproject && python run.py
 - 聚类不用 CV: 改用手动 ParameterGrid 遍历 + 全量 fit + 子采样 silhouette_score
 - SSE 实时进度: `TuningProgressTracker` 单例, 500ms 推送
 - KMeans `algorithm` 参数冲突三重防护 (lloyd/elkan vs kmeans)
+- **random_state**: 所有调优方法默认 `None` (真随机), 传入 `int` 种子可复现 (v9 修复)
 
 ## AI 智能优化面板
 
@@ -42,6 +43,12 @@ cd ~/Desktop/myfirstaiproject && python run.py
 - **AI 诊断**: 自动分析训练结果 (健康度评分/问题检测/参数建议)
 - **GridSearchCV 单算法调优**: SSE 实时进度 + 一键应用最佳参数
 - **AutoML 全算法对比**: 遍历所有算法排名, 可选用任一算法
+
+## NLP 质量修复 (v12, Batch A-F 全部完成)
+
+- 80个过拟合模型已清理 (clean_overfit_models.py), 117个NLP模型重训练完成
+- 162测试通过, 质量分级: A级62 / B级46 / C级9
+- 新增: argparse并行训练 / 交叉验证 / 数据增强 / 推理健壮性修复
 
 ## 重要约定
 
@@ -54,6 +61,9 @@ cd ~/Desktop/myfirstaiproject && python run.py
 - **数据集类别感知**: auto-config API 会检查 dataset.category 并发出警告
 - **聚类调优**: 不应对无监督学习使用 CV; 用 `_manual_clustering_search()`
 - **best_params 合并**: 必须跳过 `algorithm`, `ml_task_type`, `task_type`, `framework` 等冲突键
+- **TTL 缓存**: `app/utils/cache.py` v2.0 — 后台定期清理 + max_size LRU驱逐 + hit/miss统计
+- **表单解析**: `parse_form_params()` 统一路由层参数类型转换，减少重复代码
+- **前端美化 v4.0**: `beautify.css/js` — Canvas粒子网络 + 滚动揭示 + 3D卡片倾斜 + 涟漪按钮
 
 ## 自动 Skill 调度
 

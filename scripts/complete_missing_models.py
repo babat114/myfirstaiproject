@@ -110,7 +110,7 @@ def train_one_model(app, admin, config, algo, idx):
             if job.model and job.model.hyperparameters_json:
                 try:
                     hyperparams = json.loads(job.model.hyperparameters_json)
-                except:
+                except Exception:
                     pass
 
             from app.executor.trainers.sklearn_trainer import SklearnTrainer
