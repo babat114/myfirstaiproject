@@ -20,7 +20,22 @@ models_api_bp = Blueprint('models_api', __name__)
 @models_api_bp.route('/', methods=['GET'])
 @api_login_required
 def list_models():
-    """GET /api/models - 获取模型列表 (支持排序: ?sort_by=accuracy&sort_order=desc)"""
+    """获取模型列表
+    ---
+    tags: [Models]; summary: 获取模型列表
+    parameters:
+      - in: query; name: page; schema: {type: integer, default: 1}
+      - in: query; name: per_page; schema: {type: integer, default: 15}
+      - in: query; name: model_type; schema: {type: string}; description: classification/regression/clustering/nlp/...
+      - in: query; name: framework; schema: {type: string}; description: sklearn/pytorch/tensorflow/transformers/onnx
+      - in: query; name: status; schema: {type: string}; description: trained/training/queued/failed/...
+      - in: query; name: search; schema: {type: string}
+      - in: query; name: sort_by; schema: {type: string, default: created_at}
+      - in: query; name: sort_order; schema: {type: string, default: desc}
+      - in: query; name: is_public; schema: {type: string}; description: true 仅公开模型
+      - in: query; name: owner_id; schema: {type: integer}; description: 筛选指定用户的模型
+    responses: {200: {description: 模型列表}}
+    """
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 15, type=int)
     model_type = request.args.get('model_type')
@@ -53,7 +68,13 @@ def list_models():
 @models_api_bp.route('/<string:model_uuid>', methods=['GET'])
 @api_login_required
 def get_model(model_uuid):
-    """GET /api/models/<uuid> - 获取模型详情"""
+    """获取模型详情
+    ---
+    tags: [Models]; summary: 获取模型详情
+    parameters:
+      - in: path; name: model_uuid; required: true; schema: {type: string}
+    responses: {200: {description: 模型完整信息}, 404: {description: 模型不存在}}
+    """
     model = ModelService.get_model_by_uuid(model_uuid)
     if not model:
         return jsonify({'success': False, 'message': '模型不存在。'}), 404
@@ -67,7 +88,25 @@ def get_model(model_uuid):
 @models_api_bp.route('/', methods=['POST'])
 @api_login_required
 def create_model():
-    """POST /api/models - 注册新模型"""
+    """注册新模型
+    ---
+    tags: [Models]; summary: 注册模型
+    requestBody:
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [name]
+            properties:
+              name: {type: string}
+              model_type: {type: string}
+              framework: {type: string}
+              description: {type: string}
+              version: {type: string}
+              hyperparameters: {type: object}
+              is_public: {type: boolean}
+    responses: {201: {description: 注册成功}, 400: {description: 缺少名称}}
+    """
     user = get_current_user()
     data = request.get_json(silent=True) or {}
 
@@ -100,7 +139,23 @@ def create_model():
 @models_api_bp.route('/<string:model_uuid>', methods=['PUT'])
 @api_login_required
 def update_model(model_uuid):
-    """PUT /api/models/<uuid> - 更新模型"""
+    """更新模型信息
+    ---
+    tags: [Models]; summary: 更新模型
+    parameters:
+      - in: path; name: model_uuid; required: true; schema: {type: string}
+    requestBody:
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              name: {type: string}
+              description: {type: string}
+              is_public: {type: boolean}
+              status: {type: string}
+    responses: {200: {description: 更新成功}, 403: {description: 权限不足}, 404: {description: 模型不存在}}
+    """
     model = ModelService.get_model_by_uuid(model_uuid)
     if not model:
         return jsonify({'success': False, 'message': '模型不存在。'}), 404
@@ -125,7 +180,21 @@ def update_model(model_uuid):
 @models_api_bp.route('/<string:model_uuid>/upload', methods=['POST'])
 @api_login_required
 def upload_model_file(model_uuid):
-    """POST /api/models/<uuid>/upload - 上传模型文件"""
+    """上传模型文件
+    ---
+    tags: [Models]; summary: 上传模型文件
+    parameters:
+      - in: path; name: model_uuid; required: true; schema: {type: string}
+    requestBody:
+      content:
+        multipart/form-data:
+          schema:
+            type: object
+            required: [model_file]
+            properties:
+              model_file: {type: string, format: binary, description: .pkl/.pt/.keras/.h5 文件}
+    responses: {200: {description: 上传成功}, 403: {description: 权限不足}, 404: {description: 模型不存在}}
+    """
     model = ModelService.get_model_by_uuid(model_uuid)
     if not model:
         return jsonify({'success': False, 'message': '模型不存在。'}), 404
@@ -151,7 +220,24 @@ def upload_model_file(model_uuid):
 @models_api_bp.route('/<string:model_uuid>/metrics', methods=['PUT'])
 @api_login_required
 def update_metrics(model_uuid):
-    """PUT /api/models/<uuid>/metrics - 更新模型指标"""
+    """更新模型指标
+    ---
+    tags: [Models]; summary: 更新模型指标
+    parameters:
+      - in: path; name: model_uuid; required: true; schema: {type: string}
+    requestBody:
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              accuracy: {type: number}
+              precision: {type: number}
+              recall: {type: number}
+              f1_score: {type: number}
+              r2: {type: number}
+    responses: {200: {description: 指标已更新}, 403: {description: 权限不足}}
+    """
     model = ModelService.get_model_by_uuid(model_uuid)
     if not model:
         return jsonify({'success': False, 'message': '模型不存在。'}), 404
@@ -172,7 +258,13 @@ def update_metrics(model_uuid):
 @models_api_bp.route('/<string:model_uuid>', methods=['DELETE'])
 @api_login_required
 def delete_model(model_uuid):
-    """DELETE /api/models/<uuid> - 删除模型"""
+    """删除模型
+    ---
+    tags: [Models]; summary: 删除模型
+    parameters:
+      - in: path; name: model_uuid; required: true; schema: {type: string}
+    responses: {200: {description: 删除成功}, 403: {description: 权限不足}, 404: {description: 模型不存在}}
+    """
     model = ModelService.get_model_by_uuid(model_uuid)
     if not model:
         return jsonify({'success': False, 'message': '模型不存在。'}), 404
@@ -191,7 +283,14 @@ def delete_model(model_uuid):
 @models_api_bp.route('/leaderboard', methods=['GET'])
 @api_login_required
 def leaderboard():
-    """GET /api/models/leaderboard - 模型排行榜"""
+    """模型排行榜
+    ---
+    tags: [Models]; summary: 模型排行榜
+    parameters:
+      - in: query; name: limit; schema: {type: integer}; description: 返回前N名
+      - in: query; name: metric; schema: {type: string, default: accuracy}; description: 排序指标 (accuracy/precision/recall/f1/r2)
+    responses: {200: {description: 排行榜列表}}
+    """
     limit = request.args.get('limit', 10, type=int)
     metric = request.args.get('metric', 'accuracy')
     top = ModelService.get_top_models(limit=limit, metric=metric)
@@ -201,7 +300,29 @@ def leaderboard():
 @models_api_bp.route('/<string:model_uuid>/predict', methods=['POST'])
 @api_login_required
 def predict(model_uuid):
-    """POST /api/models/<uuid>/predict - 使用模型进行预测"""
+    """使用模型进行批量预测
+    ---
+    tags: [Models]; summary: 批量预测
+    description: 支持 JSON 特征数组、CSV/Excel/JSON 文件上传、图像文件上传 (自动CNN特征提取)。
+    parameters:
+      - in: path; name: model_uuid; required: true; schema: {type: string}
+    requestBody:
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              features: {type: array, description: "[[...], ...] 或 [{k:v}, ...]"}
+        multipart/form-data:
+          schema:
+            type: object
+            properties:
+              file: {type: string, format: binary, description: CSV/Excel/JSON/Image 文件}
+    responses:
+      200: {description: {predictions, probabilities, task_type, num_samples}}
+      400: {description: 模型文件缺失 / 无输入}
+      404: {description: 模型不存在}
+    """
     import pandas as pd
 
     model = ModelService.get_model_by_uuid(model_uuid)
@@ -299,9 +420,10 @@ def predict(model_uuid):
 @models_api_bp.route('/<string:model_uuid>/predict-template', methods=['GET'])
 @api_login_required
 def predict_template(model_uuid):
-    """GET /api/models/<uuid>/predict-template — 下载 CSV 预测模板
-
-    从模型元数据获取特征名列, 生成 utf-8-sig (BOM) CSV:
+    """下载 CSV 预测模板
+    ---
+    tags: [Models]; summary: 下载预测模板
+    description: 从模型元数据获取特征名列, 生成 utf-8-sig (BOM) CSV 文件供用户填写预测数据。
       - 第 1 行: 特征列名 header
       - 第 2-4 行: 空行 (供用户填写数据)
 
@@ -387,9 +509,10 @@ def predict_template(model_uuid):
 @models_api_bp.route('/<string:model_uuid>/predict-export', methods=['POST'])
 @api_login_required
 def predict_export(model_uuid):
-    """POST /api/models/<uuid>/predict-export — 批量预测并导出结果
-
-    上传 CSV/Excel/JSON 数据文件, 运行批量预测, 返回带预测结果的文件下载。
+    """批量预测并导出结果
+    ---
+    tags: [Models]; summary: 预测+导出
+    description: 上传 CSV/Excel/JSON 数据文件, 运行批量预测, 返回带预测结果的文件下载。支持 ?format=csv|json。
 
     Query params:
       ?format=csv  返回 CSV (默认, 原始列 + prediction 列)
@@ -508,7 +631,14 @@ def predict_export(model_uuid):
 @models_api_bp.route('/<string:model_uuid>/evaluate', methods=['POST'])
 @api_login_required
 def evaluate(model_uuid):
-    """POST /api/models/<uuid>/evaluate - 完整评估模型"""
+    """完整评估模型
+    ---
+    tags: [Models]; summary: 评估模型
+    description: 使用 train/test split 重新评估模型, 返回完整指标 (accuracy, precision, recall, f1, r2, confusion_matrix 等)。
+    parameters:
+      - in: path; name: model_uuid; required: true; schema: {type: string}
+    responses: {200: {description: 评估结果}, 500: {description: 评估失败}}
+    """
     model = ModelService.get_model_by_uuid(model_uuid)
     if not model:
         return jsonify({'success': False, 'message': '模型不存在。'}), 404
@@ -529,7 +659,13 @@ def evaluate(model_uuid):
 @models_api_bp.route('/<string:model_uuid>/feature-importance', methods=['GET'])
 @api_login_required
 def feature_importance(model_uuid):
-    """GET /api/models/<uuid>/feature-importance - 获取特征重要性"""
+    """获取特征重要性
+    ---
+    tags: [Models]; summary: 特征重要性分析
+    parameters:
+      - in: path; name: model_uuid; required: true; schema: {type: string}
+    responses: {200: {description: 特征重要性排名}, 404: {description: 模型不存在或不可用}}
+    """
     model = ModelService.get_model_by_uuid(model_uuid)
     if not model:
         return jsonify({'success': False, 'message': '模型不存在。'}), 404
@@ -542,17 +678,22 @@ def feature_importance(model_uuid):
 @models_api_bp.route('/<string:model_uuid>/quick-predict', methods=['POST'])
 @api_login_required
 def quick_predict(model_uuid):
-    """POST /api/models/<uuid>/quick-predict — 交互式快速预测
-
-    支持两种输入模式:
-      1. 文本输入 (NLP/情感分析):
-         {"text": "这部电影太棒了！"}
-      2. 特征值输入 (表格数据):
-         {"features": {"age": 35, "income": 50000}}
-
-    返回:
-      {success, prediction, confidence, probabilities, model_type, input_mode}
-    """
+    """交互式快速预测
+    ---
+    tags: [Models]; summary: 快速预测
+    description: 支持两种模式: (1) 文本输入: {"text": "..."} — NLP模型自动TF-IDF处理, (2) 特征值输入: {"features": {...}} — 表格模型。
+    parameters:
+      - in: path; name: model_uuid; required: true; schema: {type: string}
+    requestBody:
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              text: {type: string, description: NLP文本输入}
+              features: {type: object, description: 特征键值对}
+    responses: {200: {description: {prediction, confidence, probabilities, model_type, input_mode}}}
+"""
     import pandas as pd
     import numpy as np
 
@@ -873,9 +1014,13 @@ def _handle_features_prediction(model, features_input, input_mode):
 @models_api_bp.route('/<string:model_uuid>/download', methods=['GET'])
 @api_login_required
 def download_model_file(model_uuid):
-    """GET /api/models/<uuid>/download — 下载原始模型文件
-
-    支持 ?file=model.pkl 指定文件名 (默认下载主模型文件)。
+    """下载原始模型文件
+    ---
+    tags: [Models]; summary: 下载模型文件
+    parameters:
+      - in: path; name: model_uuid; required: true; schema: {type: string}
+      - in: query; name: file; schema: {type: string}; description: 可选指定文件名 (sklearn: *.pkl, pytorch: *.pt, keras: *.keras)
+    responses: {200: {description: 文件下载}, 404: {description: 模型文件不存在}}
     """
     from flask import send_file, abort
 
@@ -916,7 +1061,13 @@ def download_model_file(model_uuid):
 @models_api_bp.route('/<string:model_uuid>/export/info', methods=['GET'])
 @api_login_required
 def export_info(model_uuid):
-    """GET /api/models/<uuid>/export/info - 获取模型导出状态"""
+    """获取模型导出状态
+    ---
+    tags: [Models]; summary: 导出状态
+    parameters:
+      - in: path; name: model_uuid; required: true; schema: {type: string}
+    responses: {200: {description: ONNX/Docker 导出状态 + 可下载文件列表}}
+    """
     model = ModelService.get_model_by_uuid(model_uuid)
     if not model:
         return jsonify({'success': False, 'message': '模型不存在。'}), 404
@@ -929,7 +1080,14 @@ def export_info(model_uuid):
 @models_api_bp.route('/<string:model_uuid>/export/onnx', methods=['POST'])
 @api_login_required
 def export_onnx(model_uuid):
-    """POST /api/models/<uuid>/export/onnx - 导出模型为 ONNX 格式"""
+    """导出模型为 ONNX 格式
+    ---
+    tags: [Models]; summary: ONNX导出
+    description: 将 sklearn/PyTorch 模型转换为 ONNX 格式 (同步, 限时90s)。
+    parameters:
+      - in: path; name: model_uuid; required: true; schema: {type: string}
+    responses: {200: {description: ONNX 导出成功}, 202: {description: 任务已启动 (异步)}, 400: {description: 不支持ONNX的模型类型}}
+    """
     model = ModelService.get_model_by_uuid(model_uuid)
     if not model:
         return jsonify({'success': False, 'message': '模型不存在。'}), 404
@@ -957,7 +1115,14 @@ def export_onnx(model_uuid):
 @models_api_bp.route('/<string:model_uuid>/export/deploy', methods=['POST'])
 @api_login_required
 def export_deploy(model_uuid):
-    """POST /api/models/<uuid>/export/deploy - 生成 Docker 部署包"""
+    """生成 Docker 部署包
+    ---
+    tags: [Models]; summary: Docker部署包
+    description: 生成包含 serve.py + Dockerfile + docker-compose.yml + requirements.txt + 模型权重的完整部署包 (zip)。
+    parameters:
+      - in: path; name: model_uuid; required: true; schema: {type: string}
+    responses: {200: {description: 部署包已生成}, 400: {description: 生成失败}}
+    """
     model = ModelService.get_model_by_uuid(model_uuid)
     if not model:
         return jsonify({'success': False, 'message': '模型不存在。'}), 404
@@ -993,7 +1158,14 @@ def export_deploy(model_uuid):
 @models_api_bp.route('/<string:model_uuid>/export/download/<path:filename>', methods=['GET'])
 @api_login_required
 def export_download(model_uuid, filename):
-    """GET /api/models/<uuid>/export/download/<filename> - 下载导出文件"""
+    """下载导出文件
+    ---
+    tags: [Models]; summary: 下载导出文件
+    parameters:
+      - in: path; name: model_uuid; required: true; schema: {type: string}
+      - in: path; name: filename; required: true; schema: {type: string}; description: 导出文件名 (.onnx / .zip)
+    responses: {200: {description: 文件下载}, 404: {description: 文件不存在}}
+    """
     from flask import send_file
 
     model = ModelService.get_model_by_uuid(model_uuid)
@@ -1018,9 +1190,14 @@ def export_download(model_uuid, filename):
 @models_api_bp.route('/<string:model_uuid>/export/async/<string:export_type>', methods=['POST'])
 @api_login_required
 def export_async(model_uuid, export_type):
-    """POST /api/models/<uuid>/export/async/<onnx|deploy> — 启动异步导出任务
-
-    返回 task_id 供前端轮询进度。
+    """启动异步导出任务
+    ---
+    tags: [Models]; summary: 异步导出
+    description: 后台执行 ONNX 转换或 Docker 部署包生成, 返回 task_id 供 GET /export/status 轮询进度。
+    parameters:
+      - in: path; name: model_uuid; required: true; schema: {type: string}
+      - in: path; name: export_type; required: true; schema: {type: string, enum: [onnx, deploy]}
+    responses: {202: {description: 任务已启动, 返回 task_id}, 400: {description: 无效的导出类型}}
     """
     if export_type not in ('onnx', 'deploy'):
         return jsonify({'success': False, 'message': 'export_type 仅支持 onnx 或 deploy。'}), 400
@@ -1058,20 +1235,14 @@ def export_async(model_uuid, export_type):
 @models_api_bp.route('/<string:model_uuid>/model-card', methods=['GET'])
 @api_login_required
 def model_card(model_uuid):
-    """GET /api/v1/models/<uuid>/model-card — 获取 HuggingFace 风格模型卡片
-
-    Query params:
-        ?format=markdown  返回纯 Markdown 文本 (默认)
-        ?format=json      返回 JSON: {success, data: {markdown, model_name, ...}}
-
-    返回的模型卡片包含:
-        - YAML 元数据头
-        - 模型描述与用途
-        - 训练过程与超参数
-        - 评估指标
-        - 使用方法 (Python/curl/Docker)
-        - 局限性声明
-        - BibTeX 引用
+    """获取 HuggingFace 风格模型卡片
+    ---
+    tags: [Models]; summary: 模型卡片
+    description: 返回完整的 HuggingFace 风格模型卡片: YAML 元数据头 / 模型描述 / 训练过程 / 评估结果 / 使用方法 / BibTeX 引用。
+    parameters:
+      - in: path; name: model_uuid; required: true; schema: {type: string}
+      - in: query; name: format; schema: {type: string, enum: [markdown, json], default: markdown}; description: 输出格式
+    responses: {200: {description: 模型卡片 (Markdown 或 JSON)}}
     """
     from flask import Response
 
@@ -1116,20 +1287,24 @@ def model_card(model_uuid):
 @models_api_bp.route('/<string:model_uuid>/serve', methods=['POST'])
 @api_login_required
 def serve_model(model_uuid):
-    """POST /api/v1/models/<uuid>/serve — 直接模型推理端点
-
-    镜像 Docker 部署容器中 serve.py 的 /predict 契约, 方便在部署前本地测试。
-
-    请求体:
-        {"features": [[1.0, 2.5, 3.0], [4.0, 5.5, 6.0]]}
-
-    响应 200:
-        {"predictions": ["class_a", "class_b"], "task_type": "classification"}
-
-    错误响应:
-        400 — 输入格式错误
-        404 — 模型不存在
-        503 — 模型文件未加载
+    """直接模型推理端点 (本地)
+    ---
+    tags: [Models]; summary: 本地推理
+    description: 镜像 Docker serve.py 的 /predict 契约, 本地加载模型并推理。非 dict JSON body 或加载失败返回 503。
+    parameters:
+      - in: path; name: model_uuid; required: true; schema: {type: string}
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [features]
+            properties:
+              features: {type: array, description: "[[...], ...] 特征数组"}
+    responses:
+      200: {description: {predictions: [...], task_type: "classification"}}
+      503: {description: 模型加载失败 / JSON 格式错误}
     """
     import pandas as pd
 
@@ -1264,20 +1439,13 @@ def _validate_deployment_url(url: str) -> bool:
 @models_api_bp.route('/<string:model_uuid>/deploy/health', methods=['GET'])
 @api_login_required
 def deploy_health(model_uuid):
-    """GET /api/v1/models/<uuid>/deploy/health — 检查 Docker 部署健康状态
-
-    检查逻辑:
-        1. 验证部署包是否存在 (experiments/exports/<uuid>/deploy/)
-        2. 尝试 GET <deployment_url>/health 或 http://localhost:8000/health
-        3. 返回容器健康状态和元信息
-
-    返回:
-        {success, data: {status, deploy_exists, container_info, checked_at}}
-
-    status 取值:
-        - "healthy"      容器响应正常
-        - "unreachable"  部署包存在但容器无响应
-        - "not_deployed" 尚未生成部署包
+    """检查 Docker 部署健康状态
+    ---
+    tags: [Models]; summary: 部署健康检查
+    description: 验证部署包是否存在, 尝试连接部署容器 /health 端点 (SSRF防护: 仅公网IP/域名)。
+    parameters:
+      - in: path; name: model_uuid; required: true; schema: {type: string}
+    responses: {200: {description: {status: healthy|unreachable|not_deployed, deploy_exists, container_info}}}
     """
     import urllib.request
     import urllib.error
@@ -1367,10 +1535,14 @@ def deploy_health(model_uuid):
 @models_api_bp.route('/<string:model_uuid>/export/status', methods=['GET'])
 @api_login_required
 def export_status(model_uuid):
-    """GET /api/models/<uuid>/export/status?task_id=xxx — 查询导出任务进度
-
-    返回:
-        {success, data: {task_id, status, progress, message, result, error}}
+    """查询导出任务进度
+    ---
+    tags: [Models]; summary: 导出进度
+    description: 轮询异步导出任务的实时进度 (配合 POST /export/async 使用)。
+    parameters:
+      - in: path; name: model_uuid; required: true; schema: {type: string}
+      - in: query; name: task_id; required: true; schema: {type: string}; description: 异步导出返回的 task_id
+    responses: {200: {description: {task_id, status: pending|running|completed|failed, progress, message, result}}}
     """
     task_id = request.args.get('task_id', '').strip()
     if not task_id:

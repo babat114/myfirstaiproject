@@ -19,7 +19,18 @@ datasets_api_bp = Blueprint('datasets_api', __name__)
 @datasets_api_bp.route('/', methods=['GET'])
 @api_login_required
 def list_datasets():
-    """GET /api/datasets - 获取数据集列表"""
+    """获取数据集列表
+    ---
+    tags: [Datasets]
+    summary: 获取数据集列表
+    parameters:
+      - in: query; name: page; schema: {type: integer, default: 1}
+      - in: query; name: per_page; schema: {type: integer, default: 15}
+      - in: query; name: category; schema: {type: string}; description: 类别筛选
+      - in: query; name: search; schema: {type: string}; description: 搜索关键词
+    responses:
+      200: {description: 数据集列表}
+    """
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 15, type=int)
     category = request.args.get('category')
@@ -41,7 +52,15 @@ def list_datasets():
 @datasets_api_bp.route('/<string:dataset_uuid>', methods=['GET'])
 @api_login_required
 def get_dataset(dataset_uuid):
-    """GET /api/datasets/<uuid> - 获取数据集详情"""
+    """获取数据集详情
+    ---
+    tags: [Datasets]; summary: 获取数据集详情
+    parameters:
+      - in: path; name: dataset_uuid; required: true; schema: {type: string}
+    responses:
+      200: {description: 数据集详情}
+      404: {description: 数据集不存在}
+    """
     dataset = DatasetService.get_dataset_by_uuid(dataset_uuid)
     if not dataset:
         return jsonify({'success': False, 'message': '数据集不存在。'}), 404
@@ -55,7 +74,26 @@ def get_dataset(dataset_uuid):
 @datasets_api_bp.route('/', methods=['POST'])
 @api_login_required
 def create_dataset():
-    """POST /api/datasets - 创建新数据集"""
+    """创建新数据集 (multipart/form-data)
+    ---
+    tags: [Datasets]; summary: 创建数据集
+    requestBody:
+      content:
+        multipart/form-data:
+          schema:
+            type: object
+            required: [name, file]
+            properties:
+              name: {type: string, description: 数据集名称}
+              file: {type: string, format: binary, description: CSV/Excel/JSON/Parquet 文件}
+              description: {type: string}
+              category: {type: string, default: other}
+              is_public: {type: string, default: 'false'}
+    responses:
+      201: {description: 创建成功}
+      400: {description: 缺少必要字段}
+      403: {description: 无上传权限}
+    """
     user = get_current_user()
     if not user.can_upload:
         return jsonify({'success': False, 'message': '没有上传权限。'}), 403
@@ -89,7 +127,26 @@ def create_dataset():
 @datasets_api_bp.route('/<string:dataset_uuid>', methods=['PUT'])
 @api_login_required
 def update_dataset(dataset_uuid):
-    """PUT /api/datasets/<uuid> - 更新数据集"""
+    """更新数据集元数据
+    ---
+    tags: [Datasets]; summary: 更新数据集
+    parameters:
+      - in: path; name: dataset_uuid; required: true; schema: {type: string}
+    requestBody:
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              name: {type: string}
+              description: {type: string}
+              category: {type: string}
+              is_public: {type: boolean}
+    responses:
+      200: {description: 更新成功}
+      403: {description: 权限不足 (仅所有者或管理员)}
+      404: {description: 数据集不存在}
+    """
     dataset = DatasetService.get_dataset_by_uuid(dataset_uuid)
     if not dataset:
         return jsonify({'success': False, 'message': '数据集不存在。'}), 404
@@ -114,7 +171,16 @@ def update_dataset(dataset_uuid):
 @datasets_api_bp.route('/<string:dataset_uuid>', methods=['DELETE'])
 @api_login_required
 def delete_dataset(dataset_uuid):
-    """DELETE /api/datasets/<uuid> - 删除数据集"""
+    """删除数据集
+    ---
+    tags: [Datasets]; summary: 删除数据集
+    parameters:
+      - in: path; name: dataset_uuid; required: true; schema: {type: string}
+    responses:
+      200: {description: 删除成功}
+      403: {description: 权限不足}
+      404: {description: 数据集不存在}
+    """
     dataset = DatasetService.get_dataset_by_uuid(dataset_uuid)
     if not dataset:
         return jsonify({'success': False, 'message': '数据集不存在。'}), 404
@@ -135,7 +201,16 @@ def delete_dataset(dataset_uuid):
 @datasets_api_bp.route('/<string:dataset_uuid>/analyze', methods=['GET'])
 @api_login_required
 def analyze_dataset(dataset_uuid):
-    """GET /api/datasets/<uuid>/analyze - 分析数据集并返回推荐"""
+    """分析数据集并返回推荐
+    ---
+    tags: [Datasets]; summary: 分析数据集 (UUID)
+    parameters:
+      - in: path; name: dataset_uuid; required: true; schema: {type: string}
+    responses:
+      200: {description: 分析结果 + 推荐算法}
+      400: {description: 分析失败}
+      404: {description: 数据集不存在}
+    """
     dataset = DatasetService.get_dataset_by_uuid(dataset_uuid)
     if not dataset:
         return jsonify({'success': False, 'message': '数据集不存在。'}), 404
@@ -152,7 +227,16 @@ def analyze_dataset(dataset_uuid):
 @datasets_api_bp.route('/<int:dataset_id>/analyze', methods=['GET'])
 @api_login_required
 def analyze_dataset_by_id(dataset_id):
-    """GET /api/datasets/<id>/analyze - 按ID分析数据集"""
+    """按ID分析数据集
+    ---
+    tags: [Datasets]; summary: 分析数据集 (ID)
+    parameters:
+      - in: path; name: dataset_id; required: true; schema: {type: integer}
+    responses:
+      200: {description: 分析结果 + 推荐算法}
+      400: {description: 分析失败}
+      404: {description: 数据集不存在}
+    """
     dataset = DatasetService.get_dataset_by_id(dataset_id)
     if not dataset:
         return jsonify({'success': False, 'message': '数据集不存在。'}), 404
@@ -211,17 +295,16 @@ _ALGO_MAP = {
 @datasets_api_bp.route('/<int:dataset_id>/auto-config', methods=['GET'])
 @api_login_required
 def auto_config(dataset_id):
-    """GET /api/datasets/<id>/auto-config — 分析数据集并返回表单就绪的训练配置
-
-    返回字段:
-        ml_task_type:  推荐的任务类型 (classification/regression)
-        algorithm:     推荐的算法 (表单可用值)
-        target_column: 自动检测的目标列名
-        framework:     推荐的框架 (sklearn/pytorch)
-        test_size:     推荐的测试集比例
-        total_epochs:  推荐的训练轮数
-        reason:        推荐理由 (简短说明)
-        alternative_algorithms: 备选算法列表
+    """分析数据集并返回训练配置 (表单就绪)
+    ---
+    tags: [Datasets]; summary: 自动配置训练参数
+    description: 分析数据集, 返回推荐的算法/框架/目标列/超参数等训练表单预填值。支持15种数据集类别感知。
+    parameters:
+      - in: path; name: dataset_id; required: true; schema: {type: integer}
+    responses:
+      200: {description: 训练配置 (ml_task_type, algorithm, framework, target_column, test_size, total_epochs, param_presets 等)}
+      400: {description: 分析失败}
+      404: {description: 数据集不存在}
     """
     dataset = DatasetService.get_dataset_by_id(dataset_id)
     if not dataset:
@@ -483,7 +566,14 @@ def auto_config(dataset_id):
 @datasets_api_bp.route('/public', methods=['GET'])
 @api_login_required
 def list_public_datasets():
-    """GET /api/datasets/public - 获取可导入的公开数据集列表"""
+    """获取可导入的公开数据集列表
+    ---
+    tags: [Datasets]; summary: 列出公开数据集
+    parameters:
+      - in: query; name: category; schema: {type: string}; description: 按类别筛选
+    responses:
+      200: {description: 公开数据集列表 + 类别}
+    """
     from app.services.dataset_import_service import DatasetImportService
     category = request.args.get('category')
     datasets = DatasetImportService.get_available_datasets(category=category)
@@ -498,7 +588,22 @@ def list_public_datasets():
 @datasets_api_bp.route('/import/<dataset_key>', methods=['POST'])
 @api_login_required
 def import_public_dataset(dataset_key):
-    """POST /api/datasets/import/<key> - 导入公开数据集"""
+    """导入公开数据集
+    ---
+    tags: [Datasets]; summary: 导入公开数据集
+    parameters:
+      - in: path; name: dataset_key; required: true; schema: {type: string}; description: 数据集标识符
+    requestBody:
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              name: {type: string, description: 导入后的名称}
+    responses:
+      201: {description: 导入成功}
+      400: {description: 导入失败}
+    """
     from app.services.dataset_import_service import DatasetImportService
     user = get_current_user()
     data = request.get_json(silent=True) or {}
@@ -516,7 +621,25 @@ def import_public_dataset(dataset_key):
 @datasets_api_bp.route('/import/url', methods=['POST'])
 @api_login_required
 def import_from_url():
-    """POST /api/datasets/import/url - 从URL导入数据集"""
+    """从URL导入数据集
+    ---
+    tags: [Datasets]; summary: 从URL导入
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [url, name]
+            properties:
+              url: {type: string, format: uri, description: 数据文件URL}
+              name: {type: string, description: 数据集名称}
+              target_column: {type: string}
+              description: {type: string}
+    responses:
+      201: {description: 导入成功}
+      400: {description: 缺少url或name / 下载失败}
+    """
     from app.services.dataset_import_service import DatasetImportService
     user = get_current_user()
     data = request.get_json(silent=True) or {}
@@ -541,20 +664,18 @@ def import_from_url():
 @datasets_api_bp.route('/<int:dataset_id>/smart-params', methods=['GET'])
 @api_login_required
 def smart_params(dataset_id):
-    """GET /api/datasets/<id>/smart-params — AI智能推荐高级超参数
-
-    Query params:
-        algorithm:     算法名称 (必填)
-        ml_task_type:  任务类型 (默认 classification)
-        framework:     框架 (默认 sklearn)
-
-    返回:
-        params:     推荐参数键值对 (可直接填入表单)
-        reason:     推荐理由
-        confidence: 置信度
-        tips:       使用提示
-        gridsearch_suggestion: 是否建议使用GridSearchCV
-        gridsearch_reason:     推荐GridSearchCV的理由
+    """AI智能推荐高级超参数
+    ---
+    tags: [Datasets]; summary: 智能参数推荐
+    parameters:
+      - in: path; name: dataset_id; required: true; schema: {type: integer}
+      - in: query; name: algorithm; schema: {type: string}; description: 算法名称; required: true
+      - in: query; name: ml_task_type; schema: {type: string, default: classification}
+      - in: query; name: framework; schema: {type: string, default: sklearn}
+    responses:
+      200: {description: 推荐参数 (params, reason, confidence, tips, gridsearch_suggestion 等)}
+      400: {description: 分析失败}
+      404: {description: 数据集不存在}
     """
     from app.services.dataset_recommendation_service import DatasetAnalyzer
     from app.services.parameter_guidance_service import ParameterGuidanceService
@@ -616,17 +737,26 @@ def smart_params(dataset_id):
 @datasets_api_bp.route('/<int:dataset_id>/smart-retry', methods=['POST'])
 @api_login_required
 def smart_retry(dataset_id):
-    """POST /api/datasets/<id>/smart-retry — 反馈学习: 基于上次训练结果生成改进参数
-
-    JSON body:
-        algorithm:           算法名称 (必填)
-        ml_task_type:        任务类型
-        framework:           框架
-        previous_metrics:    上次训练的 final_metrics (如 {test_accuracy: 0.65, ...})
-        previous_params:     上次使用的超参数 (用于避免重复推荐)
-
-    Returns:
-        与 smart-params 相同结构 + diagnosis (诊断结论 + 改进理由)
+    """反馈学习: 基于上次训练结果生成改进参数
+    ---
+    tags: [Datasets]; summary: 反馈学习重试参数
+    parameters:
+      - in: path; name: dataset_id; required: true; schema: {type: integer}
+    requestBody:
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              algorithm: {type: string}
+              ml_task_type: {type: string}
+              framework: {type: string}
+              previous_metrics: {type: object, description: 上次训练的 final_metrics}
+              previous_params: {type: object, description: 上次使用的超参数}
+    responses:
+      200: {description: 改进参数 + diagnosis}
+      400: {description: 分析失败}
+      404: {description: 数据集不存在}
     """
     from app.services.dataset_recommendation_service import DatasetAnalyzer
     from app.services.parameter_guidance_service import ParameterGuidanceService
@@ -694,15 +824,24 @@ def smart_retry(dataset_id):
 @datasets_api_bp.route('/<int:dataset_id>/diagnose', methods=['POST'])
 @api_login_required
 def diagnose_low_score(dataset_id):
-    """POST /api/datasets/<id>/diagnose — 诊断低分根因
-
-    JSON body:
-        algorithm:      算法名称
-        ml_task_type:   任务类型
-        metrics:        训练指标 (如 {test_accuracy: 0.55, train_accuracy: 0.70})
-
-    Returns:
-        {root_cause, confidence, explanation, suggested_actions, signal_quality}
+    """诊断低分根因
+    ---
+    tags: [Datasets]; summary: 诊断低分原因
+    parameters:
+      - in: path; name: dataset_id; required: true; schema: {type: integer}
+    requestBody:
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              algorithm: {type: string}
+              ml_task_type: {type: string}
+              metrics: {type: object, description: 训练指标 (如 {test_accuracy: 0.55})}
+    responses:
+      200: {description: 诊断结果 (root_cause, confidence, explanation, suggested_actions)}
+      400: {description: 分析失败}
+      404: {description: 数据集不存在}
     """
     from app.services.dataset_recommendation_service import DatasetAnalyzer
     from app.services.parameter_guidance_service import ParameterGuidanceService
@@ -750,7 +889,12 @@ def diagnose_low_score(dataset_id):
 @datasets_api_bp.route('/stats', methods=['GET'])
 @api_login_required
 def dataset_stats():
-    """GET /api/datasets/stats - 获取数据集统计"""
+    """获取数据集统计
+    ---
+    tags: [Datasets]; summary: 数据集统计
+    responses:
+      200: {description: 用户数据集统计 (总数, 类别分布等)}
+    """
     user = get_current_user()
     stats = DatasetService.get_dataset_statistics(user_id=user.id)
     return jsonify({'success': True, 'data': stats})

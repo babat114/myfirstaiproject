@@ -36,6 +36,9 @@ python-dateutil~=2.9.0
 # JSON Web Token (API Auth)
 PyJWT~=2.10.1
 
+# API Documentation
+flasgger>=0.9.7,<1.0
+
 # CORS Support
 Flask-CORS~=5.0.1
 

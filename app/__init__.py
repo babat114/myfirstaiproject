@@ -81,6 +81,9 @@ def create_app(config_name=None):
     # 注册健康检查端点
     register_health_check(app)
 
+    # 注册 Swagger/OpenAPI 文档
+    configure_swagger(app)
+
     # 注意: 数据库表通过 Flask-Migrate 管理
     # 首次部署运行: flask db upgrade
     # 生成迁移: flask db migrate -m "描述"
@@ -305,3 +308,93 @@ def register_context_processors(app):
             'model_type_labels': model_type_labels,
             'category_labels': CATEGORY_LABELS,
         }
+
+
+def configure_swagger(app):
+    """配置 Swagger/OpenAPI 文档 — 使用 flasgger
+
+    Swagger UI:  GET /api/docs
+    OpenAPI JSON: GET /api/docs/swagger.json
+
+    端点文档通过 YAML docstring 定义在每个路由函数中,
+    无需额外装饰器。flasgger 自动扫描已注册蓝图中包含
+    YAML 文档字符串的路由。
+    """
+    try:
+        from flasgger import Swagger
+    except ImportError:
+        logger.warning('flasgger 未安装, Swagger UI 不可用。安装: pip install flasgger')
+        return
+
+    swagger_config = {
+        'headers': [],
+        'specs': [
+            {
+                'endpoint': 'swagger',
+                'route': '/api/docs/swagger.json',
+                'rule_filter': lambda rule: True,
+                'model_filter': lambda tag: True,
+            }
+        ],
+        'static_url_path': '/api/docs/flasgger_static',
+        'swagger_ui': True,
+        'specs_route': '/api/docs/',
+    }
+
+    template = {
+        'openapi': '3.0.3',
+        'info': {
+            'title': 'AI Model Training Platform API',
+            'description': (
+                'AI 模型训练管理平台 REST API — 支持数据集管理、'
+                '多框架模型训练 (sklearn/PyTorch/TensorFlow/ONNX)、'
+                '模型注册/测试/对比/导出、超参数自动调优。\n\n'
+                '## 认证方式\n'
+                '| 方式 | Header | 适用场景 |\n'
+                '|------|--------|----------|\n'
+                '| JWT Bearer | `Authorization: Bearer <token>` | API 调用 |\n'
+                '| API Key | `X-API-Key: <key>` | 第三方集成 |\n'
+                '| Session | Cookie (自动) | Web UI |\n\n'
+                '## 响应格式\n'
+                '所有成功响应: `{"success": true, "data": ...}`\n'
+                '所有错误响应: `{"success": false, "message": "...", "error": "..."}`\n\n'
+                '## 向后兼容\n'
+                '`/api/*` 自动重写为 `/api/v1/*` (附带 deprecation header)。'
+            ),
+            'version': '1.0.0',
+            'contact': {
+                'name': 'AI Platform Team',
+            },
+        },
+        'components': {
+            'securitySchemes': {
+                'BearerAuth': {
+                    'type': 'http',
+                    'scheme': 'bearer',
+                    'bearerFormat': 'JWT',
+                    'description': 'JWT Access Token (POST /api/v1/auth/login 获取)',
+                },
+                'ApiKeyAuth': {
+                    'type': 'apiKey',
+                    'in': 'header',
+                    'name': 'X-API-Key',
+                    'description': '用户 API Key (用户设置页获取)',
+                },
+            },
+        },
+        'security': [
+            {'BearerAuth': []},
+            {'ApiKeyAuth': []},
+        ],
+        'tags': [
+            {'name': 'Auth', 'description': '认证 — 登录/Token刷新/当前用户'},
+            {'name': 'Users', 'description': '用户管理 — 仅管理员'},
+            {'name': 'Datasets', 'description': '数据集 — 上传/分析/导入/智能参数推荐'},
+            {'name': 'Models', 'description': '模型 — 注册/预测/评估/导出/部署'},
+            {'name': 'Training', 'description': '训练 — 任务管理/超参数调优/AI诊断'},
+            {'name': 'Stream', 'description': '实时流 — SSE进度推送 (仅Session认证)'},
+            {'name': 'Comments', 'description': '评论 — 模型评论/审核/回复'},
+        ],
+    }
+
+    Swagger(app, config=swagger_config, template=template)

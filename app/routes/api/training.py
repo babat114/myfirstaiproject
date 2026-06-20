@@ -17,7 +17,15 @@ training_api_bp = Blueprint('training_api', __name__)
 @training_api_bp.route('/', methods=['GET'])
 @api_login_required
 def list_jobs():
-    """GET /api/training - 获取训练任务列表"""
+    """获取训练任务列表
+    ---
+    tags: [Training]; summary: 获取训练列表
+    parameters:
+      - in: query; name: page; schema: {type: integer, default: 1}
+      - in: query; name: per_page; schema: {type: integer, default: 15}
+      - in: query; name: status; schema: {type: string}; description: queued/running/paused/completed/failed/cancelled
+      - in: query; name: search; schema: {type: string}
+    """
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 15, type=int)
     status = request.args.get('status')
@@ -36,7 +44,13 @@ def list_jobs():
 @training_api_bp.route('/<string:job_uuid>', methods=['GET'])
 @api_login_required
 def get_job(job_uuid):
-    """GET /api/training/<uuid> - 获取训练详情"""
+    """获取训练详情
+    ---
+    tags: [Training]; summary: 获取训练详情
+    parameters:
+      - in: path; name: job_uuid; required: true; schema: {type: string}
+    responses: {200: {description: 完整训练任务信息}, 404: {description: 任务不存在}}
+    """
     job = TrainingService.get_job_by_uuid(job_uuid)
     if not job:
         return jsonify({'success': False, 'message': '训练任务不存在。'}), 404
@@ -48,7 +62,30 @@ def get_job(job_uuid):
 @api_login_required
 @rate_limit(max_calls=30, period=60)  # 训练创建是耗时操作，限制调用频率
 def create_job():
-    """POST /api/training - 创建训练任务"""
+    """创建训练任务
+    ---
+    tags: [Training]; summary: 创建训练任务
+    description: 频率限制 30次/分钟。
+    requestBody:
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [name]
+            properties:
+              name: {type: string}
+              dataset_id: {type: integer}
+              description: {type: string}
+              task_type: {type: string}
+              framework: {type: string}
+              ml_task_type: {type: string}
+              algorithm: {type: string}
+              target_column: {type: string}
+              test_size: {type: number}
+              total_epochs: {type: integer}
+              batch_size: {type: integer}
+    responses: {201: {description: 创建成功}, 400: {description: 缺少名称}, 429: {description: 频率超限}}
+    """
     user = get_current_user()
     data = request.get_json(silent=True) or {}
 
@@ -87,7 +124,12 @@ def create_job():
 @training_api_bp.route('/<string:job_uuid>/start', methods=['POST'])
 @api_login_required
 def start_job(job_uuid):
-    """POST /api/training/<uuid>/start - 启动训练"""
+    """启动训练
+    ---
+    tags: [Training]; summary: 启动训练
+    parameters: [{in: path; name: job_uuid; required: true; schema: {type: string}}]
+    responses: {200: {description: 已提交到训练引擎}, 403: {description: 非所有者}}
+    """
     job = TrainingService.get_job_by_uuid(job_uuid)
     if not job:
         return jsonify({'success': False, 'message': '任务不存在。'}), 404
@@ -106,7 +148,12 @@ def start_job(job_uuid):
 @training_api_bp.route('/<string:job_uuid>/pause', methods=['POST'])
 @api_login_required
 def pause_job(job_uuid):
-    """POST /api/training/<uuid>/pause - 暂停训练"""
+    """暂停训练
+    ---
+    tags: [Training]; summary: 暂停训练
+    parameters: [{in: path; name: job_uuid; required: true; schema: {type: string}}]
+    responses: {200: {description: 暂停信号已发送}, 403: {description: 非所有者}}
+    """
     job = TrainingService.get_job_by_uuid(job_uuid)
     if not job:
         return jsonify({'success': False, 'message': '任务不存在。'}), 404
@@ -125,7 +172,12 @@ def pause_job(job_uuid):
 @training_api_bp.route('/<string:job_uuid>/resume', methods=['POST'])
 @api_login_required
 def resume_job(job_uuid):
-    """POST /api/training/<uuid>/resume - 恢复训练"""
+    """恢复训练
+    ---
+    tags: [Training]; summary: 恢复训练
+    parameters: [{in: path; name: job_uuid; required: true; schema: {type: string}}]
+    responses: {200: {description: 恢复信号已发送}, 403: {description: 非所有者}}
+    """
     job = TrainingService.get_job_by_uuid(job_uuid)
     if not job:
         return jsonify({'success': False, 'message': '任务不存在。'}), 404
@@ -144,7 +196,12 @@ def resume_job(job_uuid):
 @training_api_bp.route('/<string:job_uuid>/status', methods=['GET'])
 @api_login_required
 def job_status(job_uuid):
-    """GET /api/training/<uuid>/status - 获取实时状态"""
+    """获取实时训练状态
+    ---
+    tags: [Training]; summary: 训练实时状态
+    parameters: [{in: path; name: job_uuid; required: true; schema: {type: string}}]
+    responses: {200: {description: 实时状态 (epoch_progress, current_loss, memory_usage)}, 404: {description: 任务不存在}}
+    """
     job = TrainingService.get_job_by_uuid(job_uuid)
     if not job:
         return jsonify({'success': False, 'message': '任务不存在。'}), 404
@@ -159,7 +216,18 @@ def job_status(job_uuid):
 @training_api_bp.route('/<string:job_uuid>/progress', methods=['PUT'])
 @api_login_required
 def update_progress(job_uuid):
-    """PUT /api/training/<uuid>/progress - 更新训练进度"""
+    """更新训练进度
+    ---
+    tags: [Training]; summary: 更新训练进度
+    parameters: [{in: path; name: job_uuid; required: true; schema: {type: string}}]
+    requestBody:
+      content:
+        application/json:
+          schema:
+            type: object
+            properties: {epoch: {type: integer}, step: {type: integer}, metrics: {type: object}}
+    responses: {200: {description: 进度已更新}, 403: {description: 非所有者}}
+    """
     job = TrainingService.get_job_by_uuid(job_uuid)
     if not job:
         return jsonify({'success': False, 'message': '任务不存在。'}), 404
@@ -183,7 +251,12 @@ def update_progress(job_uuid):
 @training_api_bp.route('/<string:job_uuid>/complete', methods=['POST'])
 @api_login_required
 def complete_job(job_uuid):
-    """POST /api/training/<uuid>/complete - 完成训练"""
+    """完成训练
+    ---
+    tags: [Training]; summary: 标记完成
+    parameters: [{in: path; name: job_uuid; required: true; schema: {type: string}}]
+    responses: {200: {description: 训练已完成}, 403: {description: 非所有者}}
+    """
     job = TrainingService.get_job_by_uuid(job_uuid)
     if not job:
         return jsonify({'success': False, 'message': '任务不存在。'}), 404
@@ -202,7 +275,19 @@ def complete_job(job_uuid):
 @training_api_bp.route('/<string:job_uuid>/fail', methods=['POST'])
 @api_login_required
 def fail_job(job_uuid):
-    """POST /api/training/<uuid>/fail - 标记训练失败 (仅限 running/paused 状态)"""
+    """标记训练失败
+    ---
+    tags: [Training]; summary: 标记失败
+    parameters: [{in: path; name: job_uuid; required: true; schema: {type: string}}]
+    requestBody:
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error: {type: string, description: 错误详情}
+    responses: {200: {description: 已标记失败}, 400: {description: 状态不允许}}
+    """
     job = TrainingService.get_job_by_uuid(job_uuid)
     if not job:
         return jsonify({'success': False, 'message': '任务不存在。'}), 404
@@ -229,7 +314,12 @@ def fail_job(job_uuid):
 @training_api_bp.route('/<string:job_uuid>/cancel', methods=['POST'])
 @api_login_required
 def cancel_job(job_uuid):
-    """POST /api/training/<uuid>/cancel - 取消训练"""
+    """取消训练
+    ---
+    tags: [Training]; summary: 取消训练
+    parameters: [{in: path; name: job_uuid; required: true; schema: {type: string}}]
+    responses: {200: {description: 已取消}, 403: {description: 非所有者}}
+    """
     job = TrainingService.get_job_by_uuid(job_uuid)
     if not job:
         return jsonify({'success': False, 'message': '任务不存在。'}), 404
@@ -248,7 +338,12 @@ def cancel_job(job_uuid):
 @training_api_bp.route('/<string:job_uuid>/retrain', methods=['POST'])
 @api_login_required
 def retrain_job(job_uuid):
-    """POST /api/training/<uuid>/retrain - 重新训练 (重置并启动)"""
+    """重新训练 (使用原参数)
+    ---
+    tags: [Training]; summary: 重新训练
+    parameters: [{in: path; name: job_uuid; required: true; schema: {type: string}}]
+    responses: {200: {description: 已重置并提交}, 403: {description: 非所有者}}
+    """
     job = TrainingService.get_job_by_uuid(job_uuid)
     if not job:
         return jsonify({'success': False, 'message': '任务不存在。'}), 404
@@ -267,7 +362,18 @@ def retrain_job(job_uuid):
 @training_api_bp.route('/<string:job_uuid>/retrain-with-params', methods=['POST'])
 @api_login_required
 def retrain_with_params(job_uuid):
-    """POST /api/training/<uuid>/retrain-with-params - 使用新参数重新训练"""
+    """使用新参数重新训练
+    ---
+    tags: [Training]; summary: 换参重训
+    parameters: [{in: path; name: job_uuid; required: true; schema: {type: string}}]
+    requestBody:
+      content:
+        application/json:
+          schema:
+            type: object
+            description: 完整超参数字典 (算法/框架/ML任务类型 + 所有训练参数)
+    responses: {200: {description: 已用新参数重置并提交}, 403: {description: 非所有者}}
+    """
     job = TrainingService.get_job_by_uuid(job_uuid)
     if not job:
         return jsonify({'success': False, 'message': '任务不存在。'}), 404
@@ -345,7 +451,12 @@ def retrain_with_params(job_uuid):
 @training_api_bp.route('/<string:job_uuid>/guidance', methods=['GET'])
 @api_login_required
 def training_guidance(job_uuid):
-    """GET /api/training/<uuid>/guidance - 获取训练参数调整建议"""
+    """获取训练参数调整建议 (AI 诊断)
+    ---
+    tags: [Training]; summary: AI训练诊断
+    parameters: [{in: path; name: job_uuid; required: true; schema: {type: string}}]
+    responses: {200: {description: 参数优化建议 (健康度评分/问题检测/参数建议)}}
+    """
     job = TrainingService.get_job_by_uuid(job_uuid)
     if not job:
         return jsonify({'success': False, 'message': '任务不存在。'}), 404
@@ -380,7 +491,12 @@ def training_guidance(job_uuid):
 @training_api_bp.route('/<string:job_uuid>', methods=['DELETE'])
 @api_login_required
 def delete_job(job_uuid):
-    """DELETE /api/training/<uuid> - 删除训练任务"""
+    """删除训练任务
+    ---
+    tags: [Training]; summary: 删除训练
+    parameters: [{in: path; name: job_uuid; required: true; schema: {type: string}}]
+    responses: {200: {description: 已删除}, 403: {description: 非所有者或管理员}}
+    """
     job = TrainingService.get_job_by_uuid(job_uuid)
     if not job:
         return jsonify({'success': False, 'message': '任务不存在。'}), 404
@@ -399,7 +515,12 @@ def delete_job(job_uuid):
 @training_api_bp.route('/tuning/search-space', methods=['GET'])
 @api_login_required
 def get_search_space():
-    """GET /api/training/tuning/search-space - 获取算法的搜索空间"""
+    """获取算法搜索空间
+    ---
+    tags: [Training]; summary: 调优搜索空间
+    parameters: [{in: query; name: algorithm; required: true; schema: {type: string}}; {in: query; name: framework; schema: {type: string}}]
+    responses: {200: {description: 搜索空间 (param_grid 参数网格)}}
+    """
     from app.services.hyperparameter_tuning import HyperparameterTuningService
     algorithm = request.args.get('algorithm', 'random_forest')
     framework = request.args.get('framework', 'sklearn')
@@ -410,7 +531,27 @@ def get_search_space():
 @training_api_bp.route('/tuning/run', methods=['POST'])
 @api_login_required
 def run_tuning():
-    """POST /api/training/tuning/run - 运行超参数调优"""
+    """运行超参数调优
+    ---
+    tags: [Training]; summary: 运行调优
+    description: GridSearchCV / RandomSearchCV / AutoML 三种模式。聚类特殊处理 (全量fit+子采样score)。SSE进度通过 /stream/tuning/<id>/stream 推送。
+    requestBody:
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [dataset_id]
+            properties:
+              dataset_id: {type: integer}
+              algorithm: {type: string}
+              ml_task_type: {type: string}
+              target_column: {type: string}
+              tuning_method: {type: string, enum: [grid, random, auto], default: random}
+              n_iter: {type: integer}
+              cv: {type: integer, default: 5}
+              start_training: {type: boolean}
+    responses: {201: {description: 调优完成 (含 best_params + tuning_result)}, 400: {description: 参数无效}}
+    """
     from app.services.hyperparameter_tuning import HyperparameterTuningService
     from app.services.dataset_service import DatasetService
 

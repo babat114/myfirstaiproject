@@ -15,25 +15,60 @@ auth_api_bp = Blueprint('auth_api', __name__)
 @auth_api_bp.route('/login', methods=['POST'])
 @rate_limit(max_calls=10, period=60)  # 每IP每分钟最多10次登录尝试
 def login():
-    """
-    用户登录 — 返回 JWT Token 对
-
-    Request JSON:
-        {
-            "login_id": "用户名或邮箱",
-            "password": "密码"
-        }
-
-    Response 200:
-        {
-            "success": true,
-            "data": {
-                "access_token": "eyJ...",
-                "refresh_token": "eyJ...",
-                "token_type": "Bearer",
-                "expires_in": 7200
-            }
-        }
+    """用户登录 — 返回 JWT Token 对
+    ---
+    tags:
+      - Auth
+    summary: 用户登录
+    description: 使用用户名/邮箱+密码登录, 返回 JWT access token 和 refresh token。
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [login_id, password]
+            properties:
+              login_id:
+                type: string
+                description: 用户名或邮箱
+                example: admin
+              password:
+                type: string
+                format: password
+                description: 密码
+                example: Admin123456
+    responses:
+      200:
+        description: 登录成功
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  example: true
+                data:
+                  type: object
+                  properties:
+                    access_token:
+                      type: string
+                    refresh_token:
+                      type: string
+                    token_type:
+                      type: string
+                      example: Bearer
+                    expires_in:
+                      type: integer
+                      example: 7200
+      400:
+        description: 缺少 login_id 或 password
+      401:
+        description: 登录失败 (用户名/密码错误或账户未激活)
+      429:
+        description: 登录频率超限 (每IP 10次/分钟)
+    security: []
     """
     data = request.get_json(silent=True) or {}
     login_id = data.get('login_id', '').strip()
@@ -59,24 +94,33 @@ def login():
 @auth_api_bp.route('/refresh', methods=['POST'])
 @rate_limit(max_calls=30, period=60)  # 每IP每分钟最多30次刷新
 def refresh():
-    """
-    刷新 Access Token
-
-    Request JSON:
-        {
-            "refresh_token": "eyJ..."
-        }
-
-    Response 200:
-        {
-            "success": true,
-            "data": {
-                "access_token": "eyJ...",
-                "refresh_token": "eyJ...",
-                "token_type": "Bearer",
-                "expires_in": 7200
-            }
-        }
+    """刷新 Access Token
+    ---
+    tags:
+      - Auth
+    summary: 刷新 JWT Token
+    description: 使用 refresh token 获取新的 access token 对。旧 refresh token 同时轮换。
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [refresh_token]
+            properties:
+              refresh_token:
+                type: string
+                description: 之前登录获取的 refresh_token
+    responses:
+      200:
+        description: Token 刷新成功
+      400:
+        description: 缺少 refresh_token
+      401:
+        description: refresh_token 无效或已过期
+      429:
+        description: 刷新频率超限 (每IP 30次/分钟)
+    security: []
     """
     data = request.get_json(silent=True) or {}
     refresh_token = data.get('refresh_token', '').strip()
@@ -101,25 +145,20 @@ def refresh():
 @auth_api_bp.route('/me', methods=['GET'])
 @api_login_required
 def me():
-    """
-    获取当前认证用户信息
-
-    Headers:
-        Authorization: Bearer <access_token>
-        或
-        X-API-Key: <api_key>
-
-    Response 200:
-        {
-            "success": true,
-            "data": {
-                "id": 1,
-                "username": "admin",
-                "email": "...",
-                "role": "admin",
-                ...
-            }
-        }
+    """获取当前认证用户信息
+    ---
+    tags:
+      - Auth
+    summary: 获取当前用户信息
+    description: 返回当前认证用户的完整档案 (需 JWT Bearer Token 或 API Key)。
+    responses:
+      200:
+        description: 用户信息
+      401:
+        description: 未认证或 Token 无效
+    security:
+      - BearerAuth: []
+      - ApiKeyAuth: []
     """
     user = get_current_user()
     if not user:
