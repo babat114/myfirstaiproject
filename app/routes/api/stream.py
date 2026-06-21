@@ -51,14 +51,22 @@ def _release_sse_slot():
 def tuning_stream(tuning_id):
     """SSE — 超参数调优实时进度
     ---
-    tags: [Stream]
+    tags:
+      - Stream
     summary: 超参数调优 SSE 流
     description: Server-Sent Events — GridSearchCV/RandomSearch/AutoML 实时进度推送 (500ms 间隔)。仅支持 Session Cookie 认证。
     parameters:
-      - in: path; name: tuning_id; required: true; schema: {type: string}; description: 调优会话ID
+      - in: path
+        name: tuning_id
+        required: true
+        schema:
+          type: string
+        description: 调优会话ID
     responses:
-      200: {description: text/event-stream SSE 流, 每 500ms 推送进度JSON}
-      503: {description: SSE 连接数已达上限}
+      200:
+        description: text/event-stream SSE 流
+      503:
+        description: SSE 连接数已达上限
     """
     # 先获取 tracker (可能抛异常), 成功后再占用 slot (避免 slot 泄漏)
     from app.services.hyperparameter_tuning import get_tuning_tracker
@@ -111,15 +119,24 @@ def tuning_stream(tuning_id):
 def training_stream(job_id):
     """SSE — 训练进度实时推送
     ---
-    tags: [Stream]
+    tags:
+      - Stream
     summary: 训练任务 SSE 流
     description: 事件驱动 SSE — TrainingCallback 推送训练进度/日志/指标变化，无数据库轮询。首次连接发送完整状态快照。15s 心跳保活。
     parameters:
-      - in: path; name: job_id; required: true; schema: {type: integer}; description: 训练任务ID
+      - in: path
+        name: job_id
+        required: true
+        schema:
+          type: integer
+        description: 训练任务ID
     responses:
-      200: {description: text/event-stream SSE 流}
-      404: {description: 任务不存在}
-      503: {description: SSE 连接数已达上限}
+      200:
+        description: text/event-stream SSE 流
+      404:
+        description: 任务不存在
+      503:
+        description: SSE 连接数已达上限
     """
     if not _acquire_sse_slot():
         return Response(
@@ -187,14 +204,21 @@ def training_stream(job_id):
 def training_status(job_id):
     """AJAX 轮询训练状态
     ---
-    tags: [Stream]
+    tags:
+      - Stream
     summary: 训练状态 JSON 查询
     description: SSE 的 AJAX 备选方案 — 用于页面初始加载和训练结束后查看最终状态。
     parameters:
-      - in: path; name: job_id; required: true; schema: {type: integer}
+      - in: path
+        name: job_id
+        required: true
+        schema:
+          type: integer
     responses:
-      200: {description: 训练任务完整状态JSON}
-      404: {description: 任务不存在}
+      200:
+        description: 训练任务完整状态JSON
+      404:
+        description: 任务不存在
     """
     job = TrainingService.get_job_by_id(job_id)
     if not job:

@@ -172,9 +172,13 @@ def setup_api_compat_middleware(app):
     """向后兼容: /api/* 内部重写为 /api/v1/*, 并附加 deprecation header"""
     _original_wsgi = app.wsgi_app
 
+    _SWAGGER_PREFIXES = ('/api/docs',)
+
     def _api_v1_compat_middleware(environ, start_response):
         path = environ.get('PATH_INFO', '')
-        if path.startswith('/api/') and not path.startswith('/api/v1/'):
+        if (path.startswith('/api/')
+                and not path.startswith('/api/v1/')
+                and not path.startswith(_SWAGGER_PREFIXES)):
             environ = dict(environ)
             environ['HTTP_X_API_ORIGINAL_PATH'] = path
             environ['PATH_INFO'] = path.replace('/api/', '/api/v1/', 1)
@@ -186,7 +190,9 @@ def setup_api_compat_middleware(app):
     def _api_deprecation_header(response):
         from flask import request as req
         original = req.environ.get('HTTP_X_API_ORIGINAL_PATH', '')
-        if original.startswith('/api/') and not original.startswith('/api/v1/'):
+        if (original.startswith('/api/')
+                and not original.startswith('/api/v1/')
+                and not original.startswith(_SWAGGER_PREFIXES)):
             response.headers['X-API-Deprecated'] = 'Use /api/v1/ instead. Will be removed in v2.0'
             response.headers['Sunset'] = 'Sat, 01 Jan 2027 00:00:00 GMT'
         return response
@@ -252,11 +258,12 @@ def register_error_handlers(app):
 
 
 def register_health_check(app):
-    """注册健康检查端点 /health"""
+    """注册健康检查端点 /health 和 /healthz (Kubernetes 兼容)"""
     from flask import jsonify
     from datetime import datetime, timezone
 
     @app.route('/health')
+    @app.route('/healthz')
     def health_check():
         db_ok = True
         db_error = None
@@ -308,6 +315,7 @@ def register_context_processors(app):
             'model_type_labels': model_type_labels,
             'category_labels': CATEGORY_LABELS,
         }
+
 
 
 def configure_swagger(app):

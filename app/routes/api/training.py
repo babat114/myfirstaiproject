@@ -19,12 +19,29 @@ training_api_bp = Blueprint('training_api', __name__)
 def list_jobs():
     """获取训练任务列表
     ---
-    tags: [Training]; summary: 获取训练列表
+    tags:
+      - Training
+    summary: 获取训练列表
     parameters:
-      - in: query; name: page; schema: {type: integer, default: 1}
-      - in: query; name: per_page; schema: {type: integer, default: 15}
-      - in: query; name: status; schema: {type: string}; description: queued/running/paused/completed/failed/cancelled
-      - in: query; name: search; schema: {type: string}
+      - in: query
+        name: page
+        schema:
+          type: integer
+          default: 1
+      - in: query
+        name: per_page
+        schema:
+          type: integer
+          default: 15
+      - in: query
+        name: status
+        schema:
+          type: string
+        description: queued/running/paused/completed/failed/cancelled
+      - in: query
+        name: search
+        schema:
+          type: string
     """
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 15, type=int)
@@ -46,10 +63,20 @@ def list_jobs():
 def get_job(job_uuid):
     """获取训练详情
     ---
-    tags: [Training]; summary: 获取训练详情
+    tags:
+      - Training
+    summary: 获取训练详情
     parameters:
-      - in: path; name: job_uuid; required: true; schema: {type: string}
-    responses: {200: {description: 完整训练任务信息}, 404: {description: 任务不存在}}
+      - in: path
+        name: job_uuid
+        required: true
+        schema:
+          type: string
+    responses:
+      200:
+        description: 完整训练任务信息
+      404:
+        description: 任务不存在
     """
     job = TrainingService.get_job_by_uuid(job_uuid)
     if not job:
@@ -64,7 +91,9 @@ def get_job(job_uuid):
 def create_job():
     """创建训练任务
     ---
-    tags: [Training]; summary: 创建训练任务
+    tags:
+      - Training
+    summary: 创建训练任务
     description: 频率限制 30次/分钟。
     requestBody:
       content:
@@ -73,18 +102,34 @@ def create_job():
             type: object
             required: [name]
             properties:
-              name: {type: string}
-              dataset_id: {type: integer}
+              name:
+                type: string
+              dataset_id:
+                type: integer
               description: {type: string}
-              task_type: {type: string}
-              framework: {type: string}
-              ml_task_type: {type: string}
-              algorithm: {type: string}
-              target_column: {type: string}
-              test_size: {type: number}
-              total_epochs: {type: integer}
-              batch_size: {type: integer}
-    responses: {201: {description: 创建成功}, 400: {description: 缺少名称}, 429: {description: 频率超限}}
+              task_type:
+                type: string
+              framework:
+                type: string
+              ml_task_type:
+                type: string
+              algorithm:
+                type: string
+              target_column:
+                type: string
+              test_size:
+                type: number
+              total_epochs:
+                type: integer
+              batch_size:
+                type: integer
+    responses:
+      201:
+        description: 创建成功
+      400:
+        description: 缺少名称
+      429:
+        description: 频率超限
     """
     user = get_current_user()
     data = request.get_json(silent=True) or {}
@@ -126,9 +171,20 @@ def create_job():
 def start_job(job_uuid):
     """启动训练
     ---
-    tags: [Training]; summary: 启动训练
-    parameters: [{in: path; name: job_uuid; required: true; schema: {type: string}}]
-    responses: {200: {description: 已提交到训练引擎}, 403: {description: 非所有者}}
+    tags:
+      - Training
+    summary: 启动训练
+    parameters:
+      - in: path
+        name: job_uuid
+        required: true
+        schema:
+          type: string
+    responses:
+      200:
+        description: 已提交到训练引擎
+      403:
+        description: 非所有者
     """
     job = TrainingService.get_job_by_uuid(job_uuid)
     if not job:
@@ -150,9 +206,20 @@ def start_job(job_uuid):
 def pause_job(job_uuid):
     """暂停训练
     ---
-    tags: [Training]; summary: 暂停训练
-    parameters: [{in: path; name: job_uuid; required: true; schema: {type: string}}]
-    responses: {200: {description: 暂停信号已发送}, 403: {description: 非所有者}}
+    tags:
+      - Training
+    summary: 暂停训练
+    parameters:
+      - in: path
+        name: job_uuid
+        required: true
+        schema:
+          type: string
+    responses:
+      200:
+        description: 暂停信号已发送
+      403:
+        description: 非所有者
     """
     job = TrainingService.get_job_by_uuid(job_uuid)
     if not job:
@@ -174,9 +241,20 @@ def pause_job(job_uuid):
 def resume_job(job_uuid):
     """恢复训练
     ---
-    tags: [Training]; summary: 恢复训练
-    parameters: [{in: path; name: job_uuid; required: true; schema: {type: string}}]
-    responses: {200: {description: 恢复信号已发送}, 403: {description: 非所有者}}
+    tags:
+      - Training
+    summary: 恢复训练
+    parameters:
+      - in: path
+        name: job_uuid
+        required: true
+        schema:
+          type: string
+    responses:
+      200:
+        description: 恢复信号已发送
+      403:
+        description: 非所有者
     """
     job = TrainingService.get_job_by_uuid(job_uuid)
     if not job:
@@ -198,9 +276,20 @@ def resume_job(job_uuid):
 def job_status(job_uuid):
     """获取实时训练状态
     ---
-    tags: [Training]; summary: 训练实时状态
-    parameters: [{in: path; name: job_uuid; required: true; schema: {type: string}}]
-    responses: {200: {description: 实时状态 (epoch_progress, current_loss, memory_usage)}, 404: {description: 任务不存在}}
+    tags:
+      - Training
+    summary: 训练实时状态
+    parameters:
+      - in: path
+        name: job_uuid
+        required: true
+        schema:
+          type: string
+    responses:
+      200:
+        description: 实时状态 (epoch_progress, current_loss, memory_usage)
+      404:
+        description: 任务不存在
     """
     job = TrainingService.get_job_by_uuid(job_uuid)
     if not job:
@@ -218,15 +307,26 @@ def job_status(job_uuid):
 def update_progress(job_uuid):
     """更新训练进度
     ---
-    tags: [Training]; summary: 更新训练进度
-    parameters: [{in: path; name: job_uuid; required: true; schema: {type: string}}]
+    tags:
+      - Training
+    summary: 更新训练进度
+    parameters:
+      - in: path
+        name: job_uuid
+        required: true
+        schema:
+          type: string
     requestBody:
       content:
         application/json:
           schema:
             type: object
             properties: {epoch: {type: integer}, step: {type: integer}, metrics: {type: object}}
-    responses: {200: {description: 进度已更新}, 403: {description: 非所有者}}
+    responses:
+      200:
+        description: 进度已更新
+      403:
+        description: 非所有者
     """
     job = TrainingService.get_job_by_uuid(job_uuid)
     if not job:
@@ -253,9 +353,20 @@ def update_progress(job_uuid):
 def complete_job(job_uuid):
     """完成训练
     ---
-    tags: [Training]; summary: 标记完成
-    parameters: [{in: path; name: job_uuid; required: true; schema: {type: string}}]
-    responses: {200: {description: 训练已完成}, 403: {description: 非所有者}}
+    tags:
+      - Training
+    summary: 标记完成
+    parameters:
+      - in: path
+        name: job_uuid
+        required: true
+        schema:
+          type: string
+    responses:
+      200:
+        description: 训练已完成
+      403:
+        description: 非所有者
     """
     job = TrainingService.get_job_by_uuid(job_uuid)
     if not job:
@@ -277,16 +388,29 @@ def complete_job(job_uuid):
 def fail_job(job_uuid):
     """标记训练失败
     ---
-    tags: [Training]; summary: 标记失败
-    parameters: [{in: path; name: job_uuid; required: true; schema: {type: string}}]
+    tags:
+      - Training
+    summary: 标记失败
+    parameters:
+      - in: path
+        name: job_uuid
+        required: true
+        schema:
+          type: string
     requestBody:
       content:
         application/json:
           schema:
             type: object
             properties:
-              error: {type: string, description: 错误详情}
-    responses: {200: {description: 已标记失败}, 400: {description: 状态不允许}}
+              error:
+                type: string
+                description: 错误详情
+    responses:
+      200:
+        description: 已标记失败
+      400:
+        description: 状态不允许
     """
     job = TrainingService.get_job_by_uuid(job_uuid)
     if not job:
@@ -316,9 +440,20 @@ def fail_job(job_uuid):
 def cancel_job(job_uuid):
     """取消训练
     ---
-    tags: [Training]; summary: 取消训练
-    parameters: [{in: path; name: job_uuid; required: true; schema: {type: string}}]
-    responses: {200: {description: 已取消}, 403: {description: 非所有者}}
+    tags:
+      - Training
+    summary: 取消训练
+    parameters:
+      - in: path
+        name: job_uuid
+        required: true
+        schema:
+          type: string
+    responses:
+      200:
+        description: 已取消
+      403:
+        description: 非所有者
     """
     job = TrainingService.get_job_by_uuid(job_uuid)
     if not job:
@@ -340,9 +475,20 @@ def cancel_job(job_uuid):
 def retrain_job(job_uuid):
     """重新训练 (使用原参数)
     ---
-    tags: [Training]; summary: 重新训练
-    parameters: [{in: path; name: job_uuid; required: true; schema: {type: string}}]
-    responses: {200: {description: 已重置并提交}, 403: {description: 非所有者}}
+    tags:
+      - Training
+    summary: 重新训练
+    parameters:
+      - in: path
+        name: job_uuid
+        required: true
+        schema:
+          type: string
+    responses:
+      200:
+        description: 已重置并提交
+      403:
+        description: 非所有者
     """
     job = TrainingService.get_job_by_uuid(job_uuid)
     if not job:
@@ -364,15 +510,26 @@ def retrain_job(job_uuid):
 def retrain_with_params(job_uuid):
     """使用新参数重新训练
     ---
-    tags: [Training]; summary: 换参重训
-    parameters: [{in: path; name: job_uuid; required: true; schema: {type: string}}]
+    tags:
+      - Training
+    summary: 换参重训
+    parameters:
+      - in: path
+        name: job_uuid
+        required: true
+        schema:
+          type: string
     requestBody:
       content:
         application/json:
           schema:
             type: object
             description: 完整超参数字典 (算法/框架/ML任务类型 + 所有训练参数)
-    responses: {200: {description: 已用新参数重置并提交}, 403: {description: 非所有者}}
+    responses:
+      200:
+        description: 已用新参数重置并提交
+      403:
+        description: 非所有者
     """
     job = TrainingService.get_job_by_uuid(job_uuid)
     if not job:
@@ -453,9 +610,18 @@ def retrain_with_params(job_uuid):
 def training_guidance(job_uuid):
     """获取训练参数调整建议 (AI 诊断)
     ---
-    tags: [Training]; summary: AI训练诊断
-    parameters: [{in: path; name: job_uuid; required: true; schema: {type: string}}]
-    responses: {200: {description: 参数优化建议 (健康度评分/问题检测/参数建议)}}
+    tags:
+      - Training
+    summary: AI训练诊断
+    parameters:
+      - in: path
+        name: job_uuid
+        required: true
+        schema:
+          type: string
+    responses:
+      200:
+        description: 参数优化建议 (健康度评分/问题检测/参数建议)
     """
     job = TrainingService.get_job_by_uuid(job_uuid)
     if not job:
@@ -493,9 +659,20 @@ def training_guidance(job_uuid):
 def delete_job(job_uuid):
     """删除训练任务
     ---
-    tags: [Training]; summary: 删除训练
-    parameters: [{in: path; name: job_uuid; required: true; schema: {type: string}}]
-    responses: {200: {description: 已删除}, 403: {description: 非所有者或管理员}}
+    tags:
+      - Training
+    summary: 删除训练
+    parameters:
+      - in: path
+        name: job_uuid
+        required: true
+        schema:
+          type: string
+    responses:
+      200:
+        description: 已删除
+      403:
+        description: 非所有者或管理员
     """
     job = TrainingService.get_job_by_uuid(job_uuid)
     if not job:
@@ -517,9 +694,22 @@ def delete_job(job_uuid):
 def get_search_space():
     """获取算法搜索空间
     ---
-    tags: [Training]; summary: 调优搜索空间
-    parameters: [{in: query; name: algorithm; required: true; schema: {type: string}}; {in: query; name: framework; schema: {type: string}}]
-    responses: {200: {description: 搜索空间 (param_grid 参数网格)}}
+    tags:
+      - Training
+    summary: 调优搜索空间
+    parameters:
+      - in: query
+        name: algorithm
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: framework
+        schema:
+          type: string
+    responses:
+      200:
+        description: 搜索空间 (param_grid 参数网格)
     """
     from app.services.hyperparameter_tuning import HyperparameterTuningService
     algorithm = request.args.get('algorithm', 'random_forest')
@@ -533,7 +723,9 @@ def get_search_space():
 def run_tuning():
     """运行超参数调优
     ---
-    tags: [Training]; summary: 运行调优
+    tags:
+      - Training
+    summary: 运行调优
     description: GridSearchCV / RandomSearchCV / AutoML 三种模式。聚类特殊处理 (全量fit+子采样score)。SSE进度通过 /stream/tuning/<id>/stream 推送。
     requestBody:
       content:
@@ -542,15 +734,33 @@ def run_tuning():
             type: object
             required: [dataset_id]
             properties:
-              dataset_id: {type: integer}
-              algorithm: {type: string}
-              ml_task_type: {type: string}
-              target_column: {type: string}
-              tuning_method: {type: string, enum: [grid, random, auto], default: random}
-              n_iter: {type: integer}
-              cv: {type: integer, default: 5}
-              start_training: {type: boolean}
-    responses: {201: {description: 调优完成 (含 best_params + tuning_result)}, 400: {description: 参数无效}}
+              dataset_id:
+                type: integer
+              algorithm:
+                type: string
+              ml_task_type:
+                type: string
+              target_column:
+                type: string
+              tuning_method:
+                type: string
+                enum:
+                  - grid
+                  - random
+                  - auto
+                default: random
+              n_iter:
+                type: integer
+              cv:
+                type: integer
+                default: 5
+              start_training:
+                type: boolean
+    responses:
+      201:
+        description: 调优完成 (含 best_params + tuning_result)
+      400:
+        description: 参数无效
     """
     from app.services.hyperparameter_tuning import HyperparameterTuningService
     from app.services.dataset_service import DatasetService

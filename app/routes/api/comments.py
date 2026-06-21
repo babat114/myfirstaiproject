@@ -17,13 +17,33 @@ comments_api_bp = Blueprint('comments_api', __name__)
 def list_comments(model_id):
     """获取模型评论列表
     ---
-    tags: [Comments]; summary: 获取评论
+    tags:
+      - Comments
+    summary: 获取评论
     parameters:
-      - in: path; name: model_id; required: true; schema: {type: integer}
-      - in: query; name: page; schema: {type: integer, default: 1}
-      - in: query; name: per_page; schema: {type: integer, default: 20}
-      - in: query; name: include_hidden; schema: {type: string}; description: 管理员可查看被屏蔽评论
-    responses: {200: {description: 评论列表 (按最新优先)}}
+      - in: path
+        name: model_id
+        required: true
+        schema:
+          type: integer
+      - in: query
+        name: page
+        schema:
+          type: integer
+          default: 1
+      - in: query
+        name: per_page
+        schema:
+          type: integer
+          default: 20
+      - in: query
+        name: include_hidden
+        schema:
+          type: string
+        description: 管理员可查看被屏蔽评论
+    responses:
+      200:
+        description: 评论列表 (按最新优先)
     """
     user = get_current_user()
     page = request.args.get('page', 1, type=int)
@@ -46,9 +66,15 @@ def list_comments(model_id):
 def add_comment(model_id):
     """发表评论
     ---
-    tags: [Comments]; summary: 发表评论
+    tags:
+      - Comments
+    summary: 发表评论
     parameters:
-      - in: path; name: model_id; required: true; schema: {type: integer}
+      - in: path
+        name: model_id
+        required: true
+        schema:
+          type: integer
     requestBody:
       content:
         application/json:
@@ -57,10 +83,14 @@ def add_comment(model_id):
             required: [content]
             properties:
               content: {type: string, description: 评论内容}
-              parent_id: {type: integer, description: 父评论ID (回复时使用)}
+              parent_id:
+                type: integer
+                description: 父评论ID (回复时使用)
     responses:
-      201: {description: 发表成功 (可能被自动屏蔽返回 flagged=true)}
-      400: {description: 内容为空 / 模型不存在}
+      201:
+        description: 发表成功 (可能被自动屏蔽返回 flagged=true)
+      400:
+        description: 内容为空 / 模型不存在
     """
     user = get_current_user()
     data = request.get_json(silent=True) or {}
@@ -99,13 +129,25 @@ def add_comment(model_id):
 def delete_comment(comment_id):
     """删除评论
     ---
-    tags: [Comments]; summary: 删除评论
+    tags:
+      - Comments
+    summary: 删除评论
     parameters:
-      - in: path; name: comment_id; required: true; schema: {type: integer}
-      - in: query; name: permanent; schema: {type: string}; description: 管理员传 true 可物理删除
+      - in: path
+        name: comment_id
+        required: true
+        schema:
+          type: integer
+      - in: query
+        name: permanent
+        schema:
+          type: string
+        description: 管理员传 true 可物理删除
     responses:
-      200: {description: 软删除成功}
-      403: {description: 权限不足 (非作者或非管理员)}
+      200:
+        description: 软删除成功
+      403:
+        description: 权限不足 (非作者或非管理员)
     """
     user = get_current_user()
     permanent = request.args.get('permanent', '').lower() == 'true'
@@ -127,12 +169,20 @@ def delete_comment(comment_id):
 def restore_comment(comment_id):
     """恢复评论 (管理员)
     ---
-    tags: [Comments]; summary: 恢复评论
+    tags:
+      - Comments
+    summary: 恢复评论
     parameters:
-      - in: path; name: comment_id; required: true; schema: {type: integer}
+      - in: path
+        name: comment_id
+        required: true
+        schema:
+          type: integer
     responses:
-      200: {description: 恢复成功}
-      403: {description: 权限不足}
+      200:
+        description: 恢复成功
+      403:
+        description: 权限不足
     """
     user = get_current_user()
 
@@ -152,10 +202,18 @@ def restore_comment(comment_id):
 def get_replies(comment_id):
     """获取评论回复
     ---
-    tags: [Comments]; summary: 获取回复列表
+    tags:
+      - Comments
+    summary: 获取回复列表
     parameters:
-      - in: path; name: comment_id; required: true; schema: {type: integer}
-    responses: {200: {description: 回复列表}}
+      - in: path
+        name: comment_id
+        required: true
+        schema:
+          type: integer
+    responses:
+      200:
+        description: 回复列表
     """
     user = get_current_user()
 
