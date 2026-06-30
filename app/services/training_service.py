@@ -14,7 +14,7 @@ from app.models.dataset import Dataset
 from app.models.model_record import ModelRecord
 from app.models.user import User
 from app.utils.cache import dashboard_cache
-from app.utils.helpers import sanitize_service_error
+from app.utils.helpers import paginate_query, sanitize_service_error
 from sqlalchemy.orm import joinedload
 
 
@@ -322,8 +322,17 @@ class TrainingService:
 
     @staticmethod
     def get_job_by_id(job_id: int) -> Optional[TrainingJob]:
-        """根据 ID 获取任务"""
-        return db.session.get(TrainingJob, job_id)
+        """根据 ID 获取任务 (预加载关联对象, 避免模板中 DetachedInstanceError)"""
+        from sqlalchemy.orm import joinedload
+        return db.session.execute(
+            db.select(TrainingJob)
+            .filter_by(id=job_id)
+            .options(
+                joinedload(TrainingJob.owner),
+                joinedload(TrainingJob.dataset),
+                joinedload(TrainingJob.model)
+            )
+        ).scalar_one_or_none()
 
     @staticmethod
     def get_job_by_uuid(job_uuid: str) -> Optional[TrainingJob]:
@@ -367,6 +376,7 @@ class TrainingService:
         query = TrainingJob.query.options(
             joinedload(TrainingJob.owner),
             joinedload(TrainingJob.dataset),
+            joinedload(TrainingJob.model),  # 预加载模型信息, 避免 N+1
         )
 
         if status:
@@ -388,21 +398,34 @@ class TrainingService:
 
         query = query.order_by(TrainingJob.created_at.desc())
 
-        pagination = query.paginate(
-            page=page, per_page=per_page, error_out=False
-        )
-
-        return {
-            'items': [j.to_dict() for j in pagination.items],
-            'total': pagination.total,
-            'pages': pagination.pages,
-            'current_page': page,
-            'has_next': pagination.has_next,
-            'has_prev': pagination.has_prev,
-        }
+        return paginate_query(query, page, per_page, transform_fn=lambda x: x.to_dict())
 
     # 超参数键名冲突集合 — 合并 best_params 时必须跳过 (如 KMeans 的 algorithm=lloyd 覆盖 algorithm=kmeans)
     _TUNING_CONFLICT_KEYS = {'algorithm', 'ml_task_type', 'task_type', 'framework'}
+
+    @staticmethod
+    def apply_tuning_hyperparameters(job: TrainingJob, best_params: dict,
+                                     best_score: float, search_time: float = None) -> bool:
+        """将调优结果写入训练任务关联模型 (封装 DB 写入, 供路由层调用)
+
+        Returns:
+            是否成功
+        """
+        try:
+            if job.model:
+                hp = job.model.hyperparameters_dict
+                hp['tuning_result'] = {
+                    'best_params': best_params,
+                    'best_cv_score': best_score,
+                    'search_time': search_time,
+                }
+                job.model.set_hyperparameters(hp)
+                db.session.commit()
+            return True
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f'应用调优结果失败: {e}')
+            return False
 
     @staticmethod
     def parse_extra_hyperparams(form_data: dict) -> dict:

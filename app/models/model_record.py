@@ -6,12 +6,13 @@ AI模型注册模型
 """
 import json
 import uuid
-from datetime import datetime
 from app import db
 from app._timezone import localnow
+from app.models.mixins import AccessControlMixin
+from sqlalchemy import CheckConstraint
 
 
-class ModelRecord(db.Model):
+class ModelRecord(AccessControlMixin, db.Model):
     """AI模型注册表 — 存储模型版本元数据和性能指标
 
     模型类型 (model_type):
@@ -112,6 +113,26 @@ class ModelRecord(db.Model):
         default=lambda: localnow(),
         onupdate=lambda: localnow(),
         nullable=False
+    )
+
+    # 表级约束: 指标值域检查
+    __table_args__ = (
+        CheckConstraint('accuracy IS NULL OR (accuracy >= 0.0 AND accuracy <= 1.0)',
+                        name='ck_accuracy_range'),
+        CheckConstraint('precision IS NULL OR (precision >= 0.0 AND precision <= 1.0)',
+                        name='ck_precision_range'),
+        CheckConstraint('recall IS NULL OR (recall >= 0.0 AND recall <= 1.0)',
+                        name='ck_recall_range'),
+        CheckConstraint('f1_score IS NULL OR (f1_score >= 0.0 AND f1_score <= 1.0)',
+                        name='ck_f1_score_range'),
+        CheckConstraint('loss IS NULL OR loss >= 0.0',
+                        name='ck_loss_nonnegative'),
+        CheckConstraint('mse IS NULL OR mse >= 0.0',
+                        name='ck_mse_nonnegative'),
+        CheckConstraint('mae IS NULL OR mae >= 0.0',
+                        name='ck_mae_nonnegative'),
+        CheckConstraint('r2 IS NULL OR r2 <= 1.0',
+                        name='ck_r2_upper'),
     )
 
     # 关联关系
@@ -271,14 +292,5 @@ class ModelRecord(db.Model):
     def __repr__(self):
         return f'<ModelRecord {self.name} v{self.version} ({self.status})>'
 
-    # ============ 权限检查 ============
-
-    def is_viewable_by(self, user) -> bool:
-        if user is None:
-            return self.is_public
-        return self.is_public or self.owner_id == user.id or user.is_admin
-
-    def is_editable_by(self, user) -> bool:
-        if user is None:
-            return False
-        return self.owner_id == user.id or user.is_admin
+    # ============ 权限检查 (继承自 AccessControlMixin) ============
+    # is_viewable_by / is_editable_by 由 AccessControlMixin 提供

@@ -4,6 +4,7 @@
 处理用户注册、登录、API密钥管理
 ============================================
 """
+import hashlib
 import secrets
 from datetime import datetime
 from typing import Optional, Tuple
@@ -79,7 +80,8 @@ class AuthService:
                 full_name=full_name,
             )
             user.set_password(password)
-            user.api_key = AuthService._generate_api_key()
+            raw_key = AuthService._generate_api_key()
+            user.api_key = AuthService._hash_api_key(raw_key)
 
             db.session.add(user)
             db.session.commit()
@@ -112,15 +114,27 @@ class AuthService:
         ).scalar_one_or_none()
 
         if not user:
-            return None, '用户名或邮箱不存在。'
+            return None, '用户名或密码错误。'
 
         if not user.is_active:
             return None, '账户已被禁用，请联系管理员。'
 
-        if not user.check_password(password):
-            return None, '密码错误。'
+        # 账号锁定检查 (≥5次失败后锁定15分钟)
+        if user.is_locked:
+            remaining = int((user.locked_until - localnow()).total_seconds() / 60) + 1
+            return None, f'账号已被临时锁定，请在 {remaining} 分钟后重试。'
 
-        # 更新最后登录时间
+        if not user.check_password(password):
+            # 记录失败尝试, 超过阈值自动锁定
+            user.record_failed_attempt()
+            db.session.commit()
+            if user.is_locked:
+                logger.warning(f'账号 {user.username} 已被锁定 ({user.failed_login_attempts} 次失败)')
+                return None, f'登录失败次数过多，账号已被锁定 {User.LOCKOUT_DURATION} 分钟。'
+            return None, '用户名或密码错误。'
+
+        # 登录成功 — 重置失败计数 + 更新最后登录时间
+        user.reset_lockout()
         user.last_login_at = localnow()
         db.session.commit()
 
@@ -181,25 +195,29 @@ class AuthService:
     @staticmethod
     def regenerate_api_key(user: User) -> str:
         """
-        重新生成 API 密钥
+        重新生成 API 密钥 (仅此时返回原始密钥, 之后无法再次获取)
 
         Returns:
-            新的 API 密钥
+            新的 API 密钥 (原始值, 非哈希)
         """
-        user.api_key = AuthService._generate_api_key()
+        raw_key = AuthService._generate_api_key()
+        user.api_key = AuthService._hash_api_key(raw_key)
         db.session.commit()
-        return user.api_key
+        return raw_key
 
     @staticmethod
     def get_user_by_api_key(api_key: str) -> Optional[User]:
         """
         通过 API 密钥获取用户 (用于 API 认证)
 
+        密钥在数据库中哈希存储, 查找时先哈希再匹配。
+
         Returns:
             User 或 None
         """
+        key_hash = AuthService._hash_api_key(api_key)
         return db.session.execute(
-            db.select(User).filter_by(api_key=api_key, is_active=True)
+            db.select(User).filter_by(api_key=key_hash, is_active=True)
         ).scalar_one_or_none()
 
     @staticmethod
@@ -211,6 +229,8 @@ class AuthService:
         Returns:
             分页用户数据
         """
+        from app.utils.helpers import paginate_query  # 延迟导入避免循环依赖
+
         stmt = db.select(User).order_by(User.created_at.desc())
 
         if role:
@@ -226,15 +246,7 @@ class AuthService:
                 )
             )
 
-        pagination = db.paginate(stmt, page=page, per_page=per_page, error_out=False)
-        return {
-            'users': [u.to_dict() for u in pagination.items],
-            'total': pagination.total,
-            'pages': pagination.pages,
-            'current_page': page,
-            'has_next': pagination.has_next,
-            'has_prev': pagination.has_prev,
-        }
+        return paginate_query(stmt, page, per_page, item_key='users', transform_fn=lambda x: x.to_dict())
 
     @staticmethod
     def login_jwt(login_id: str, password: str) -> Tuple[Optional[dict], Optional[str], int]:
@@ -270,7 +282,7 @@ class AuthService:
         Returns:
             (new_token_pair, error_message, status_code)
         """
-        from app.utils.jwt_helpers import decode_refresh_token, generate_token_pair
+        from app.utils.jwt_helpers import decode_refresh_token, generate_token_pair, revoke_token
         from app.models.user import User
 
         payload, error = decode_refresh_token(refresh_token)
@@ -285,6 +297,12 @@ class AuthService:
         if not user.is_active:
             return None, '账户已被禁用。', 401
 
+        # 轮换: 撤销旧 refresh token (防止重放攻击)
+        old_jti = payload.get('jti')
+        old_exp = payload.get('exp')
+        if old_jti and old_exp:
+            revoke_token(old_jti, old_exp)
+
         tokens = generate_token_pair(user.id, user.username, user.role, user.token_version)
         return tokens, None, 200
 
@@ -292,6 +310,11 @@ class AuthService:
     def _generate_api_key() -> str:
         """生成唯一的 API 密钥"""
         return f"ak_{secrets.token_hex(24)}"
+
+    @staticmethod
+    def _hash_api_key(key: str) -> str:
+        """对 API 密钥进行 SHA256 哈希 (数据库存储哈希值, 非明文)"""
+        return hashlib.sha256(key.encode()).hexdigest()
 
     @staticmethod
     def delete_user(user: User) -> bool:

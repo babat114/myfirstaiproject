@@ -16,7 +16,7 @@ from app import db, logger
 from app.models.dataset import Dataset
 from app.models.user import User
 from app.utils.cache import dashboard_cache
-from app.utils.helpers import sanitize_service_error
+from app.utils.helpers import paginate_query, sanitize_service_error
 from sqlalchemy.orm import joinedload
 
 
@@ -105,11 +105,47 @@ class DatasetService:
 
     ALLOWED_EXTENSIONS = {'csv', 'json', 'txt', 'xlsx', 'parquet', 'jpg', 'png', 'npy'}
 
+    # MIME 类型白名单 (与允许的扩展名对应)
+    ALLOWED_MIMETYPES = {
+        'text/csv', 'application/csv', 'text/plain',
+        'application/json',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/vnd.ms-excel',
+        'application/octet-stream',  # parquet
+        'image/jpeg', 'image/png',
+        'application/x-npy',
+    }
+
     @staticmethod
-    def allowed_file(filename: str) -> bool:
-        """检查文件扩展名是否允许"""
-        return '.' in filename and \
-               filename.rsplit('.', 1)[1].lower() in DatasetService.ALLOWED_EXTENSIONS
+    def allowed_file(filename: str, file_storage=None) -> bool:
+        """检查文件扩展名和 MIME 类型是否允许
+
+        Args:
+            filename: 文件名
+            file_storage: (可选) Flask FileStorage 对象, 传入时同时校验 MIME 类型
+
+        Returns:
+            是否允许上传
+        """
+        # 1. 扩展名检查
+        ext_ok = '.' in filename and \
+                 filename.rsplit('.', 1)[1].lower() in DatasetService.ALLOWED_EXTENSIONS
+        if not ext_ok:
+            return False
+
+        # 2. MIME 类型检查 (如提供 file_storage)
+        if file_storage is not None:
+            mime = (getattr(file_storage, 'content_type', '') or '').lower()
+            if not mime:
+                # Content-Type 为空 — 无法验证 MIME, 但扩展名已通过检查
+                # 在调试模式下记录警告, 生产模式下允许通过 (保守策略)
+                pass
+            elif mime not in DatasetService.ALLOWED_MIMETYPES:
+                # 部分 CSV 文件可能被识别为 application/csv
+                if not mime.startswith('text/') and mime != 'application/json':
+                    return False
+
+        return True
 
     @staticmethod
     def create_dataset(user: User, name: str, file: FileStorage,
@@ -125,7 +161,7 @@ class DatasetService:
         if not file or not file.filename:
             return None, '请选择要上传的文件。'
 
-        if not DatasetService.allowed_file(file.filename):
+        if not DatasetService.allowed_file(file.filename, file_storage=file):
             return None, f'不支持的文件格式。允许的格式: {", ".join(DatasetService.ALLOWED_EXTENSIONS)}'
 
         # 生成安全文件名
@@ -374,18 +410,7 @@ class DatasetService:
 
         query = query.order_by(Dataset.created_at.desc())
 
-        pagination = query.paginate(
-            page=page, per_page=per_page, error_out=False
-        )
-
-        return {
-            'items': [ds.to_dict() for ds in pagination.items],
-            'total': pagination.total,
-            'pages': pagination.pages,
-            'current_page': page,
-            'has_next': pagination.has_next,
-            'has_prev': pagination.has_prev,
-        }
+        return paginate_query(query, page, per_page, transform_fn=lambda x: x.to_dict())
 
     @staticmethod
     def get_dataset_statistics(user_id: int = None) -> dict:

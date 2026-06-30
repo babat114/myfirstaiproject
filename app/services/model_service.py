@@ -16,7 +16,7 @@ from app import db, logger
 from app.models.model_record import ModelRecord
 from app.models.user import User
 from app.utils.cache import dashboard_cache, leaderboard_cache
-from app.utils.helpers import sanitize_service_error
+from app.utils.helpers import paginate_query, sanitize_service_error
 from sqlalchemy.orm import joinedload
 
 
@@ -52,11 +52,43 @@ class ModelService:
 
     ALLOWED_EXTENSIONS = {'pt', 'pth', 'h5', 'pb', 'onnx', 'pkl', 'joblib', 'json', 'yaml'}
 
+    # MIME 类型白名单 (与允许的扩展名对应, 防御文件伪装攻击)
+    ALLOWED_MIMETYPES = {
+        'application/octet-stream',
+        'application/x-python-code',
+        'application/zip',
+        'application/x-zip-compressed',
+        'application/gzip',
+        'application/x-tar',
+        'application/json',
+    }
+
     @staticmethod
-    def allowed_file(filename: str) -> bool:
-        """检查模型文件扩展名"""
-        return '.' in filename and \
-               filename.rsplit('.', 1)[1].lower() in ModelService.ALLOWED_EXTENSIONS
+    def allowed_file(filename: str, file_storage=None) -> bool:
+        """检查模型文件扩展名和 MIME 类型是否允许
+
+        Args:
+            filename: 文件名
+            file_storage: (可选) Flask FileStorage 对象, 传入时同时校验 MIME 类型
+
+        Returns:
+            是否允许上传
+        """
+        # 1. 扩展名检查
+        ext_ok = '.' in filename and \
+                 filename.rsplit('.', 1)[1].lower() in ModelService.ALLOWED_EXTENSIONS
+        if not ext_ok:
+            return False
+
+        # 2. MIME 类型检查 (如提供 file_storage)
+        if file_storage is not None:
+            mime = (getattr(file_storage, 'content_type', '') or '').lower()
+            if mime and mime not in ModelService.ALLOWED_MIMETYPES:
+                # 允许以 text/ 开头的类型 (某些 JSON/YAML 文件)
+                if not mime.startswith('text/'):
+                    return False
+
+        return True
 
     @staticmethod
     def create_model(user: User, name: str, model_type: str = 'other',
@@ -105,7 +137,7 @@ class ModelService:
         Returns:
             (success, error_message)
         """
-        if not ModelService.allowed_file(file.filename):
+        if not ModelService.allowed_file(file.filename, file_storage=file):
             return False, f'不支持的模型文件格式。'
 
         if upload_folder is None:
@@ -292,18 +324,7 @@ class ModelService:
         else:
             query = query.order_by(sort_column.is_(None), sort_column.desc())
 
-        pagination = query.paginate(
-            page=page, per_page=per_page, error_out=False
-        )
-
-        return {
-            'items': [m.to_dict() for m in pagination.items],
-            'total': pagination.total,
-            'pages': pagination.pages,
-            'current_page': page,
-            'has_next': pagination.has_next,
-            'has_prev': pagination.has_prev,
-        }
+        return paginate_query(query, page, per_page, transform_fn=lambda x: x.to_dict())
 
     @staticmethod
     def get_top_models(limit: int = 5, metric: str = 'accuracy') -> list:

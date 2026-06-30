@@ -6,7 +6,9 @@
 """
 import re
 from typing import Optional, Tuple, List
+from sqlalchemy.orm import joinedload
 from app import db, logger
+from app.utils.helpers import paginate_query
 from app.models.comment import Comment
 from app.models.model_record import ModelRecord
 from app.models.user import User
@@ -253,7 +255,9 @@ class CommentService:
         Returns:
             分页结果字典
         """
-        query = Comment.query.filter_by(
+        query = Comment.query.options(
+            joinedload(Comment.user),  # 预加载用户信息, 避免 N+1
+        ).filter_by(
             model_id=model_id,
             parent_id=None,  # 仅顶级评论
         )
@@ -272,18 +276,7 @@ class CommentService:
 
         query = query.order_by(Comment.created_at.desc())
 
-        pagination = query.paginate(
-            page=page, per_page=per_page, error_out=False
-        )
-
-        return {
-            'comments': [c.to_dict() for c in pagination.items],
-            'total': pagination.total,
-            'pages': pagination.pages,
-            'current_page': page,
-            'has_next': pagination.has_next,
-            'has_prev': pagination.has_prev,
-        }
+        return paginate_query(query, page, per_page, item_key='comments', transform_fn=lambda x: x.to_dict())
 
     @staticmethod
     def get_replies_for_comment(

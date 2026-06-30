@@ -6,12 +6,13 @@
 """
 import json
 import uuid
-from datetime import datetime
 from app import db
 from app._timezone import localnow
+from app.models.mixins import AccessControlMixin
+from sqlalchemy import CheckConstraint
 
 
-class TrainingJob(db.Model):
+class TrainingJob(AccessControlMixin, db.Model):
     """训练任务模型 — 追踪AI模型训练的全生命周期
 
     任务生命周期 (status):
@@ -104,6 +105,15 @@ class TrainingJob(db.Model):
         default=lambda: localnow(),
         onupdate=lambda: localnow(),
         nullable=False
+    )
+
+    # 表级约束: 进度值域检查 + 复合索引
+    __table_args__ = (
+        CheckConstraint(
+            'progress_percent IS NULL OR (progress_percent >= 0.0 AND progress_percent <= 100.0)',
+            name='ck_progress_range'
+        ),
+        db.Index('ix_training_jobs_owner_status', 'owner_id', 'status'),  # 复合索引优化列表查询
     )
 
     # 关联关系
@@ -244,14 +254,5 @@ class TrainingJob(db.Model):
     def __repr__(self):
         return f'<TrainingJob {self.name} ({self.status}) {self.progress_percent}%>'
 
-    # ============ 权限检查 ============
-
-    def is_viewable_by(self, user) -> bool:
-        if user is None:
-            return False
-        return self.owner_id == user.id or user.is_admin
-
-    def is_editable_by(self, user) -> bool:
-        if user is None:
-            return False
-        return self.owner_id == user.id or user.is_admin
+    # ============ 权限检查 (继承自 AccessControlMixin) ============
+    # is_viewable_by / is_editable_by 由 AccessControlMixin 提供
