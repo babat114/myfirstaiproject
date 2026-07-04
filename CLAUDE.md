@@ -75,6 +75,11 @@ cd ~/Desktop/myfirstaiproject && python run.py
 编辑代码后自动调用 `/code-review-expert` (SOLID/安全/性能审查)。
 涉及以下场景时主动调用对应 Skill 后再回答:
 
+## 自动 Git 提交约定
+
+每次修改代码后自动执行 `git add -A && git commit -m "描述"`，确保每个变更都可回退。
+异常关机/强制重启后按 `git log --oneline -5` 查看最近版本，用 `git reset --hard <hash>` 回滚。
+
 | 场景 | 自动调用的 Skill |
 |------|-----------------|
 | 代码审查/PR | code-review-expert, pr-reviewer |
