@@ -1,5 +1,14 @@
 {% extends "base.html" %}
 {% block title %}模型对比{% endblock %}
+{% block vue_scripts %}
+<script src="https://cdn.jsdelivr.net/npm/vue@3.5.13/dist/vue.global.prod.js"></script>
+<link href="https://cdn.jsdelivr.net/npm/element-plus@2.9.1/dist/index.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/element-plus@2.9.1/dist/index.full.min.js"></script>
+<script src="{{ url_for('static', filename='js/el-enhance.js') }}"></script>
+{% endblock %}
+{% block chartjs %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+{% endblock %}
 
 {% block content %}
 <nav aria-label="breadcrumb">

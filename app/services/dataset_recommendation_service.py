@@ -58,6 +58,7 @@ class DatasetAnalyzer:
                         if df[c].dtype == 'object' and df[c].nunique() > len(df) * 0.1]
             result['text_column_count'] = len(text_cols)
             result['text_heavy'] = len(text_cols) >= max(1, len(df.columns) * 0.2)
+            result['text_columns'] = text_cols
 
             # 特征相关性 (仅数值列)
             num_df = df.select_dtypes(include=[np.number])

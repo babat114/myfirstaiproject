@@ -13,9 +13,10 @@ cd ~/Desktop/myfirstaiproject && python run.py
 
 - **认证**: Session(Web) → JWT Bearer(API) → API Key(兼容)
 - **训练器**: sklearn / PyTorch / TensorFlow.Keras / Transformers (BERT NLP)
-- **测试**: 162个pytest, `python -m pytest tests/ -v`
-- **数据集**: 100个, 支持15个公开数据集导入, 11种类别感知
-- **模型**: 208个已训练 (含117个NLP模型), 5种框架
+- **测试**: 375个pytest, `python -m pytest tests/ -q`
+- **数据集**: 55个 (全真实数据集, 合成已清理), 支持多来源自动采集
+- **模型**: 138个 (all trained, 0 draft), sklearn:133, pytorch:5
+- **质量看门狗**: `scripts/quality_watchdog.py` — 定期自动扫描质量, `diagnose_model_quality.py` Tier 1/2/3分级
 
 ## GPU 环境
 
@@ -64,6 +65,10 @@ cd ~/Desktop/myfirstaiproject && python run.py
 - **TTL 缓存**: `app/utils/cache.py` v2.0 — 后台定期清理 + max_size LRU驱逐 + hit/miss统计
 - **表单解析**: `parse_form_params()` 统一路由层参数类型转换，减少重复代码
 - **前端美化 v4.0**: `beautify.css/js` — Canvas粒子网络 + 滚动揭示 + 3D卡片倾斜 + 涟漪按钮
+- **TF-IDF 特征保护**: StandardScaler 不可应用于 `tfidf_*` 列 — TfidfVectorizer 已做 L2 归一化, 叠加会破坏稀疏性导致常数预测器
+- **合并分词器**: `nlp_preprocessing.combined_tokenize()` — jieba词分割 + 中文字符unigram, 确保短文本 nnz>0
+- **TF .keras 推理**: `inference_service.py` 支持 `.keras`/`.h5` 加载, config 从 `model_config.pkl` 读取; predict() 使用 `model.predict()` 路径 (softmax 已在末层)
+- **模型质量治理**: `quality_watchdog.py` (扫描/守护/自动清理) + `diagnose_model_quality.py` (7维诊断) + `clean_overfit_models.py` (批量安全删除, `--dedup`去重) — Tier 1/2/3 分级
 
 ## 自动 Skill 调度
 

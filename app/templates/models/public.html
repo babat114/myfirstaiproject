@@ -69,6 +69,11 @@
             <div class="mb-2">
                 <span class="badge bg-secondary">{{ model_type_labels.get(m.model_type, m.model_type) }}</span>
                 {% if m.framework %}<span class="badge bg-dark">{{ m.framework }}</span>{% endif %}
+                {% set hp = m.hyperparameters or {} %}
+                {% set algo_key = hp.get('algorithm', '') %}
+                {% if algo_key and algorithm_info.get(algo_key) %}
+                <span class="badge bg-info">{{ algorithm_info[algo_key].name }}</span>
+                {% endif %}
                 <span class="badge bg-{{ 'success' if m.status == 'deployed' else 'info' }}">{{ m.status }}</span>
             </div>
             <!-- 指标条 -->

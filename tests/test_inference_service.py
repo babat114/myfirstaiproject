@@ -451,3 +451,289 @@ class TestInferenceEdgeCases:
             df = pd.DataFrame({'any_col1': [1, 3], 'any_col2': [2, 4]})
             result = ModelInferenceService.predict(mock_model, df)
             assert result['success'] is True
+
+
+class TestTensorFlowLoader:
+    """TensorFlow .keras/.h5 模型加载测试"""
+
+    def test_load_keras_model(self, app, tmp_path):
+        """加载 .keras 格式 TensorFlow 模型"""
+        with app.app_context():
+            try:
+                import tensorflow as tf
+            except ImportError:
+                pytest.skip('TensorFlow 未安装')
+
+            from app.models.model_record import ModelRecord
+
+            # 创建简易 TF 模型
+            model_tf = tf.keras.Sequential([
+                tf.keras.layers.Input(shape=(4,)),
+                tf.keras.layers.Dense(8, activation='relu'),
+                tf.keras.layers.Dense(3, activation='softmax'),
+            ])
+            model_tf.compile(optimizer='adam', loss='sparse_categorical_crossentropy')
+
+            model_file = tmp_path / 'model.keras'
+            model_tf.save(str(model_file))
+
+            # 保存 config
+            config = {
+                'model_class': 'MLPClassifier',
+                'input_dim': 4,
+                'output_dim': 3,
+                'hidden_layers': [8],
+                'dropout': 0.3,
+                'task_type': 'classification',
+                'feature_names': ['f1', 'f2', 'f3', 'f4'],
+                'scaler': None,
+                'label_encoders': {},
+                'framework': 'TensorFlow',
+            }
+            config_path = tmp_path / 'model_config.pkl'
+            with open(config_path, 'wb') as f:
+                pickle.dump(config, f)
+
+            mock_model = MagicMock(spec=ModelRecord)
+            mock_model.model_file_path = str(model_file)
+            mock_model.training_job = None
+            mock_model.name = 'test_tf'
+
+            model_obj, metadata, tokenizer, error = ModelInferenceService.load_model(mock_model)
+            assert error is None, f'Load failed: {error}'
+            assert model_obj is not None
+            assert metadata is not None
+            assert metadata['framework'] == 'tensorflow'
+            assert metadata['task_type'] == 'classification'
+            assert metadata['input_dim'] == 4
+            assert metadata['feature_names'] == ['f1', 'f2', 'f3', 'f4']
+            assert tokenizer is None  # TF 表格模型无 tokenizer
+
+    def test_load_h5_model(self, app, tmp_path):
+        """加载 .h5 (HDF5) 格式 — 向后兼容"""
+        with app.app_context():
+            try:
+                import tensorflow as tf
+            except ImportError:
+                pytest.skip('TensorFlow 未安装')
+
+            from app.models.model_record import ModelRecord
+
+            model_tf = tf.keras.Sequential([
+                tf.keras.layers.Input(shape=(3,)),
+                tf.keras.layers.Dense(6, activation='relu'),
+                tf.keras.layers.Dense(2, activation='softmax'),
+            ])
+            model_tf.compile(optimizer='adam', loss='sparse_categorical_crossentropy')
+
+            model_file = tmp_path / 'model.h5'
+            model_tf.save(str(model_file))
+
+            config_path = tmp_path / 'model_config.pkl'
+            with open(config_path, 'wb') as f:
+                pickle.dump({
+                    'task_type': 'classification',
+                    'input_dim': 3,
+                    'output_dim': 2,
+                    'feature_names': ['a', 'b', 'c'],
+                    'framework': 'TensorFlow',
+                }, f)
+
+            mock_model = MagicMock(spec=ModelRecord)
+            mock_model.model_file_path = str(model_file)
+            mock_model.training_job = None
+            mock_model.name = 'test_h5'
+
+            model_obj, metadata, tokenizer, error = ModelInferenceService.load_model(mock_model)
+            assert error is None, f'.h5 load failed: {error}'
+            assert model_obj is not None
+            assert metadata['framework'] == 'tensorflow'
+
+    def test_load_keras_no_config(self, app, tmp_path):
+        """TF 模型无 model_config.pkl — 应优雅降级"""
+        with app.app_context():
+            try:
+                import tensorflow as tf
+            except ImportError:
+                pytest.skip('TensorFlow 未安装')
+
+            from app.models.model_record import ModelRecord
+
+            model_tf = tf.keras.Sequential([
+                tf.keras.layers.Input(shape=(2,)),
+                tf.keras.layers.Dense(1),
+            ])
+            model_tf.compile(optimizer='adam', loss='mse')
+
+            model_file = tmp_path / 'model.keras'
+            model_tf.save(str(model_file))
+            # 不创建 config
+
+            mock_model = MagicMock(spec=ModelRecord)
+            mock_model.model_file_path = str(model_file)
+            mock_model.training_job = None
+            mock_model.model_type = 'regression'
+            mock_model.name = 'no_config_tf'
+
+            model_obj, metadata, tokenizer, error = ModelInferenceService.load_model(mock_model)
+            assert error is None
+            assert model_obj is not None
+            assert metadata['framework'] == 'tensorflow'
+            assert metadata['task_type'] == 'regression'  # fallback to model.model_type
+
+
+class TestTensorFlowPredict:
+    """TensorFlow 模型预测测试"""
+
+    def test_predict_tf_classification(self, app, tmp_path):
+        """TF 分类模型预测"""
+        with app.app_context():
+            try:
+                import tensorflow as tf
+            except ImportError:
+                pytest.skip('TensorFlow 未安装')
+
+            from app.models.model_record import ModelRecord
+
+            # 训练 TF 分类模型
+            X = np.array([[1, 2], [3, 4], [5, 6], [7, 8]], dtype='float32')
+            y = np.array([0, 1, 0, 1], dtype='int32')
+
+            model_tf = tf.keras.Sequential([
+                tf.keras.layers.Input(shape=(2,)),
+                tf.keras.layers.Dense(4, activation='relu'),
+                tf.keras.layers.Dense(2, activation='softmax'),
+            ])
+            model_tf.compile(optimizer='adam', loss='sparse_categorical_crossentropy')
+            model_tf.fit(X, y, epochs=5, verbose=0)
+
+            model_file = tmp_path / 'model.keras'
+            model_tf.save(str(model_file))
+
+            config_path = tmp_path / 'model_config.pkl'
+            with open(config_path, 'wb') as f:
+                pickle.dump({
+                    'task_type': 'classification',
+                    'input_dim': 2,
+                    'output_dim': 2,
+                    'feature_names': ['f1', 'f2'],
+                    'scaler': None,
+                    'label_encoders': {},
+                    'framework': 'TensorFlow',
+                }, f)
+
+            mock_model = MagicMock(spec=ModelRecord)
+            mock_model.model_file_path = str(model_file)
+            mock_model.training_job = None
+            mock_model.model_type = 'classification'
+            mock_model.name = 'tf_pred_test'
+
+            df = pd.DataFrame({'f1': [2.0, 6.0], 'f2': [3.0, 7.0]})
+            result = ModelInferenceService.predict(mock_model, df)
+            assert result['success'] is True
+            assert len(result['predictions']) == 2
+            assert result['task_type'] == 'classification'
+            assert result['num_samples'] == 2
+            assert result['probabilities'] is not None
+            assert len(result['probabilities']) == 2
+
+    def test_predict_tf_regression(self, app, tmp_path):
+        """TF 回归模型预测"""
+        with app.app_context():
+            try:
+                import tensorflow as tf
+            except ImportError:
+                pytest.skip('TensorFlow 未安装')
+
+            from app.models.model_record import ModelRecord
+
+            X = np.array([[1.0], [2.0], [3.0], [4.0]], dtype='float32')
+            y = np.array([2.0, 4.0, 6.0, 8.0], dtype='float32')
+
+            model_tf = tf.keras.Sequential([
+                tf.keras.layers.Input(shape=(1,)),
+                tf.keras.layers.Dense(4, activation='relu'),
+                tf.keras.layers.Dense(1),
+            ])
+            model_tf.compile(optimizer='adam', loss='mse')
+            model_tf.fit(X, y, epochs=10, verbose=0)
+
+            model_file = tmp_path / 'model.keras'
+            model_tf.save(str(model_file))
+
+            config_path = tmp_path / 'model_config.pkl'
+            with open(config_path, 'wb') as f:
+                pickle.dump({
+                    'task_type': 'regression',
+                    'input_dim': 1,
+                    'output_dim': 1,
+                    'feature_names': ['x'],
+                    'scaler': None,
+                    'label_encoders': {},
+                    'framework': 'TensorFlow',
+                }, f)
+
+            mock_model = MagicMock(spec=ModelRecord)
+            mock_model.model_file_path = str(model_file)
+            mock_model.training_job = None
+            mock_model.model_type = 'regression'
+            mock_model.name = 'tf_reg_test'
+
+            df = pd.DataFrame({'x': [2.5, 3.5]})
+            result = ModelInferenceService.predict(mock_model, df)
+            assert result['success'] is True
+            assert len(result['predictions']) == 2
+            assert result['task_type'] == 'regression'
+
+    def test_predict_tf_with_scaler(self, app, tmp_path):
+        """TF 模型 + StandardScaler 预处理"""
+        with app.app_context():
+            try:
+                import tensorflow as tf
+            except ImportError:
+                pytest.skip('TensorFlow 未安装')
+
+            from sklearn.preprocessing import StandardScaler
+            from app.models.model_record import ModelRecord
+
+            X_raw = np.array([[10.0, 20.0], [30.0, 40.0], [50.0, 60.0]], dtype='float32')
+            scaler = StandardScaler()
+            X_scaled = scaler.fit_transform(X_raw)
+
+            y = np.array([0, 1, 0], dtype='int32')
+
+            model_tf = tf.keras.Sequential([
+                tf.keras.layers.Input(shape=(2,)),
+                tf.keras.layers.Dense(4, activation='relu'),
+                tf.keras.layers.Dense(2, activation='softmax'),
+            ])
+            model_tf.compile(optimizer='adam', loss='sparse_categorical_crossentropy')
+            model_tf.fit(X_scaled, y, epochs=5, verbose=0)
+
+            model_file = tmp_path / 'model.keras'
+            model_tf.save(str(model_file))
+
+            config_path = tmp_path / 'model_config.pkl'
+            with open(config_path, 'wb') as f:
+                pickle.dump({
+                    'task_type': 'classification',
+                    'input_dim': 2,
+                    'output_dim': 2,
+                    'feature_names': ['f1', 'f2'],
+                    'scaler': scaler,
+                    'label_encoders': {},
+                    'framework': 'TensorFlow',
+                }, f)
+
+            mock_model = MagicMock(spec=ModelRecord)
+            mock_model.model_file_path = str(model_file)
+            mock_model.training_job = None
+            mock_model.model_type = 'classification'
+            mock_model.name = 'tf_scaler_test'
+
+            # 输入 raw scale 数据, scaler 应在 predict 内自动转换
+            df = pd.DataFrame({'f1': [20.0], 'f2': [30.0]})
+            result = ModelInferenceService.predict(mock_model, df)
+            assert result['success'] is True
+            assert len(result['predictions']) == 1
+            assert result['probabilities'] is not None

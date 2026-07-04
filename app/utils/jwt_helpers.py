@@ -4,11 +4,55 @@ JWT 认证工具
 生成、验证、刷新 JSON Web Token
 ============================================
 """
+import uuid
 import jwt
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Tuple, Dict, Any
 from flask import current_app
 from app import logger
+
+
+# ── Token 黑名单 (数据库持久化, 服务重启不丢失) ──
+
+
+def is_token_revoked(jti: str) -> bool:
+    """检查 token jti 是否已被撤销 (数据库查询)"""
+    from app.models.revoked_token import RevokedToken
+    from app import db
+    return db.session.execute(
+        db.select(RevokedToken.id).filter_by(jti=jti).limit(1)
+    ).scalar() is not None
+
+
+def revoke_token(jti: str, exp_timestamp: float):
+    """将 token jti 加入数据库黑名单, 有效期至 exp_timestamp"""
+    from app.models.revoked_token import RevokedToken
+    from app import db
+    try:
+        expires_at = datetime.fromtimestamp(exp_timestamp, tz=timezone.utc)
+        entry = RevokedToken(jti=jti, expires_at=expires_at)
+        db.session.add(entry)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        # 唯一约束冲突 — token 已在黑名单中, 忽略
+        pass
+
+
+def cleanup_expired_revocations():
+    """清理过期的黑名单条目 (可由定时任务调用)"""
+    from app.models.revoked_token import RevokedToken
+    from app import db
+    try:
+        db.session.execute(
+            db.delete(RevokedToken).where(
+                RevokedToken.expires_at < datetime.now(timezone.utc)
+            )
+        )
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
 
 
 def _get_jwt_secret() -> str:
@@ -49,6 +93,7 @@ def generate_access_token(user_id: int, username: str, role: str) -> str:
         'username': username,             # 用户名 (方便日志/调试)
         'role': role,                     # 角色
         'type': 'access',                 # token 类型
+        'jti': str(uuid.uuid4()),         # JWT ID — 用于黑名单/撤销
         'iat': now,                       # 签发时间 (issued at)
         'exp': now + _get_access_expiry(),  # 过期时间
     }
@@ -73,6 +118,7 @@ def generate_refresh_token(user_id: int, username: str, token_version: int = 1) 
         'sub': str(user_id),              # PyJWT 2.10+ 要求 sub 为字符串
         'username': username,
         'type': 'refresh',
+        'jti': str(uuid.uuid4()),         # JWT ID — 用于刷新轮换时撤销旧 token
         'ver': token_version,             # Token 版本 — 改密码时递增以撤销旧 Token
         'iat': now,
         'exp': now + _get_refresh_expiry(),
@@ -129,10 +175,15 @@ def decode_access_token(token: str) -> Tuple[Optional[Dict[str, Any]], Optional[
 
 
 def decode_refresh_token(token: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
-    """解码 Refresh Token (便捷方法, 额外验证 token_version)"""
+    """解码 Refresh Token (便捷方法, 额外验证 token_version 和撤销状态)"""
     payload, error = decode_token(token, expected_type='refresh')
     if error:
         return None, error
+
+    # 验证 token 未被撤销 (refresh token 轮换)
+    jti = payload.get('jti')
+    if jti and is_token_revoked(jti):
+        return None, 'Token 已被撤销，请重新登录。'
 
     # 验证 token_version 与数据库一致 (改密码后旧 Token 自动失效)
     token_ver = payload.get('ver')

@@ -160,6 +160,9 @@ class ModelService:
             model.updated_at = localnow()
 
             db.session.commit()
+            dashboard_cache.invalidate('model_stats:')
+            dashboard_cache.invalidate('dashboard:')
+            leaderboard_cache.clear()
 
             logger.info(f"模型文件上传成功: {model.name} ({file_size} bytes)")
             return True, None
@@ -189,14 +192,18 @@ class ModelService:
 
     @staticmethod
     def get_model_by_id(model_id: int) -> Optional[ModelRecord]:
-        """根据 ID 获取模型"""
-        return db.session.get(ModelRecord, model_id)
+        """根据 ID 获取模型 (预加载 owner 避免详情页 N+1)"""
+        return db.session.execute(
+            db.select(ModelRecord).filter_by(id=model_id)
+            .options(joinedload(ModelRecord.owner))
+        ).scalar_one_or_none()
 
     @staticmethod
     def get_model_by_uuid(model_uuid: str) -> Optional[ModelRecord]:
-        """根据 UUID 获取模型"""
+        """根据 UUID 获取模型 (预加载 owner 避免详情页 N+1)"""
         return db.session.execute(
             db.select(ModelRecord).filter_by(uuid=model_uuid)
+            .options(joinedload(ModelRecord.owner))
         ).scalar_one_or_none()
 
     @staticmethod
@@ -238,14 +245,23 @@ class ModelService:
                 .values(model_id=None)
             )
 
-            # 删除关联文件
+            # 先删除 DB 记录，再删物理文件 (确保 DB 操作成功后再操作文件)
+            model_files = []
             for path_attr in ['model_file_path', 'weights_file_path', 'config_file_path']:
                 path = getattr(model, path_attr)
                 if path and os.path.exists(path):
-                    os.remove(path)
+                    model_files.append(path)
 
             db.session.delete(model)
             db.session.commit()
+
+            # DB 提交成功后才删除物理文件
+            for path in model_files:
+                try:
+                    os.remove(path)
+                except OSError as e:
+                    logger.warning(f'删除模型文件失败 (文件可能已不存在): {path} - {e}')
+
             dashboard_cache.invalidate('model_stats:')
             dashboard_cache.invalidate('dashboard:')
             leaderboard_cache.clear()
@@ -257,6 +273,63 @@ class ModelService:
             db.session.rollback()
             logger.error(f'删除模型失败: {e}')
             return False, sanitize_service_error(e, '删除模型失败')
+
+    @staticmethod
+    def import_model(user: User, name: str, model_type: str = 'other',
+                     framework: str = None, description: str = None,
+                     version: str = '1.0.0', hyperparameters: dict = None,
+                     metrics: dict = None, model_file_path: str = None,
+                     is_public: bool = False) -> Tuple[Optional[ModelRecord], Optional[str]]:
+        """导入模型 — 从已有模型文件创建完整 ModelRecord
+
+        与 create_model 的区别:
+            - 自动将 status 设为 'trained' (而非 'draft')
+            - 可回填 metrics
+            - 直接使用已有文件路径 (而非从 multipart 上传)
+
+        Returns:
+            (ModelRecord, error_message)
+        """
+        try:
+            model = ModelRecord(
+                name=name,
+                description=description,
+                version=version,
+                model_type=model_type,
+                framework=framework,
+                is_public=is_public,
+                owner_id=user.id,
+                status='trained',
+            )
+
+            if hyperparameters:
+                model.set_hyperparameters(hyperparameters)
+
+            # 绑定额外的模型路径
+            if model_file_path and os.path.exists(model_file_path):
+                model.model_file_path = model_file_path
+                model.file_size = os.path.getsize(model_file_path)
+
+            # 先提交 DB 获得 id
+            db.session.add(model)
+            db.session.flush()
+
+            # 回填指标
+            if metrics:
+                model.set_metrics(metrics)
+
+            db.session.commit()
+            dashboard_cache.invalidate('model_stats:')
+            dashboard_cache.invalidate('dashboard:')
+            if any(k in (metrics or {}) for k in ('accuracy', 'f1_score', 'r2')):
+                leaderboard_cache.clear()
+
+            logger.info(f"模型导入成功: {name} v{version} by {user.username}")
+            return model, None
+
+        except Exception as e:
+            db.session.rollback()
+            return None, sanitize_service_error(e, '模型导入失败')
 
     # 允许排序的列名白名单 (防SQL注入)
     _SORTABLE_COLUMNS = {
@@ -436,6 +509,9 @@ class ModelService:
         fw = model.framework or 'unknown'
         task = model.model_type or 'other'
         algo = hp.get('algorithm', '')
+        # 算法中文名 (用于卡片展示)
+        from app.utils.algorithm_info import ALGORITHM_INFO
+        algo_display_name = ALGORITHM_INFO.get(algo, {}).get('name', algo) if algo else ''
         now_str = localnow().strftime('%Y-%m-%d')
 
         # ── 任务类型中英文映射 ──
@@ -457,8 +533,11 @@ class ModelService:
             tags.append(algo)
         tags_str = '\n  - '.join(tags)
 
-        # ── 提取特征名 (最多 30 个) ──
+        # ── 提取特征名 (最多 30 个, 优先从 DB 元数据读取, 避免加载全模型) ──
         feature_names = mm.get('feature_names', [])
+        if not feature_names:
+            hyperparams = model.hyperparameters_dict or {}
+            feature_names = hyperparams.get('feature_names', [])
         if not feature_names:
             try:
                 from app.services.inference_service import ModelInferenceService
@@ -519,8 +598,8 @@ class ModelService:
             'metrics_table': metrics_table,
             'feature_table': feature_table, 'class_table': class_table,
             'hp_table': hp_table, 'dataset_info': dataset_info,
-            'model_uuid': model_uuid, 'algo_suffix': algo_suffix,
-            'nlp_hint': nlp_hint,
+            'model_uuid': model_uuid, 'algo_display_name': algo_display_name,
+            'algo_suffix': algo_suffix, 'nlp_hint': nlp_hint,
             'safe_name': safe_name, 'safe_owner': safe_owner,
             'safe_bibtex_name': safe_bibtex_name, 'safe_bibtex_owner': safe_bibtex_owner,
             'safe_bibtex_fw': safe_bibtex_fw, 'safe_bibtex_task': safe_bibtex_task,

@@ -193,6 +193,8 @@ class PyTorchTrainer(BaseTrainer):
         self.lr_factor = float(self.hyperparams.get('lr_factor', 0.5))
 
         self._model = None
+        self._class_weights = None  # 类别权重 (自动计算)
+        self._amp_scaler = None  # AMP GradScaler (GPU 混合精度)
         # 三个 DataLoader: train / val / test
         self._train_loader = self._val_loader = self._test_loader = None
         self._input_dim = self._output_dim = None
@@ -203,6 +205,10 @@ class PyTorchTrainer(BaseTrainer):
         self._label_encoders = {}
         self._feature_names = []
         self._device = None
+        # NLP 支持
+        self._vectorizer = None   # TfidfVectorizer (NLP 文本向量化)
+        self._class_labels = []   # 人类可读类别标签
+        self._nlp_text_col = None # 检测到的文本列名
         # 保存完整测试集用于最终评估
         self._X_test_tensor = self._y_test_tensor = None
         # 早停追踪
@@ -252,6 +258,47 @@ class PyTorchTrainer(BaseTrainer):
         y_raw = df[target_col]
         self._feature_names = list(X.columns)
 
+        # ── NLP 检测: 提取文本列 (在编码之前) ──
+        nlp_texts = None
+        nlp_vectorizer_config = None
+        ds_category = getattr(self.dataset, 'category', None)
+        self._nlp_text_col = None
+
+        if ds_category == 'nlp':
+            from app.utils.nlp_preprocessing import (
+                detect_nlp_text_column, create_vectorizer_config, extract_class_labels,
+            )
+            self._nlp_text_col = detect_nlp_text_column(X, ds_category)
+            if self._nlp_text_col:
+                nlp_mf = int(self.hyperparams.get('nlp_max_features', 2000))
+                nlp_min_df = int(self.hyperparams.get('nlp_min_df', 2))
+                nlp_max_df = float(self.hyperparams.get('nlp_max_df', 0.9))
+
+                # 自适应 max_features
+                n_train_est = int(len(X) * (1 - self.test_size))
+                adaptive_mf = max(100, min(nlp_mf, n_train_est // 2))
+                if adaptive_mf != nlp_mf:
+                    self.callback.on_log(
+                        f'[NLP] adaptive max_features: {nlp_mf} -> {adaptive_mf} '
+                        f'(~{n_train_est} train samples)'
+                    )
+                    nlp_mf = adaptive_mf
+
+                nlp_vectorizer_config = create_vectorizer_config(nlp_mf, nlp_min_df, nlp_max_df)
+                nlp_texts = X[self._nlp_text_col].fillna('').astype(str).tolist()
+                self.callback.on_log(
+                    f'[NLP] Detected text col "{self._nlp_text_col}", '
+                    f'TfidfVectorizer (jieba, max_features={nlp_mf}, '
+                    f'min_df={nlp_min_df}, max_df={nlp_max_df})'
+                )
+                # 从特征矩阵中移除文本列
+                X = X.drop(columns=[self._nlp_text_col])
+                self._feature_names = list(X.columns)
+
+        # 保存类别标签
+        if self.task_type == 'classification' and nlp_texts is not None:
+            self._class_labels = extract_class_labels(y_raw)
+
         # 处理缺失值
         num_cols = X.select_dtypes(include=[np.number]).columns
         if len(num_cols) > 0:
@@ -272,45 +319,129 @@ class PyTorchTrainer(BaseTrainer):
             y = le.fit_transform(y_raw.astype(str))
             self._label_encoders['__target__'] = le
             self._output_dim = len(le.classes_)
+            # 如果 NLP 未检测到, 在这里保存标签
+            if not self._class_labels:
+                try:
+                    self._class_labels = [str(l) for l in sorted(le.classes_, key=str)]
+                except Exception:
+                    self._class_labels = []
         else:
             y_raw_vals = y_raw.values.astype('float32').reshape(-1, 1)
             self._y_scaler = StandardScaler()
             y = self._y_scaler.fit_transform(y_raw_vals).ravel().astype('float32')
             self._output_dim = 1
 
-        # 标准化特征
-        X_num = X.values.astype('float32')
-        self._scaler = StandardScaler()
-        X_num = self._scaler.fit_transform(X_num).astype('float32')
+        # ── 类别权重计算 (处理不平衡) ──
+        self._class_weights = None
+        if self.task_type == 'classification':
+            from collections import Counter
+            class_counts = Counter(y)
+            n_total = len(y)
+            # inverse frequency: weight = n_total / (n_classes * count)
+            n_classes = len(class_counts)
+            if n_classes >= 2:
+                weights = [n_total / (n_classes * class_counts.get(c, 1)) for c in sorted(class_counts)]
+                min_w, max_w = min(weights), max(weights)
+                if max_w / max(min_w, 1) > 3:  # only apply if imbalance > 3:1
+                    self._class_weights = weights
 
-        self._input_dim = X_num.shape[1]
-        n_samples = X_num.shape[0]
+        # ── 3-way 分割 (先分索引, 再做 NLP/TF-IDF, 最后标准化) ──
+        n_samples = len(y)
+        orig_indices = np.arange(n_samples)
+        stratify_y = y if self.task_type == 'classification' and len(set(y)) > 1 else None
+
+        _rs = self.hyperparams.get('random_state')
+        train_val_idx, test_idx = train_test_split(
+            orig_indices, test_size=self.test_size, random_state=_rs,
+            stratify=stratify_y
+        )
+        stratify_tv = y[train_val_idx] if stratify_y is not None else None
+        val_ratio = self.val_size / (1.0 - self.test_size)
+        train_idx, val_idx = train_test_split(
+            train_val_idx, test_size=val_ratio, random_state=_rs,
+            stratify=stratify_tv
+        )
+
+        # ── NLP: 在训练集上拟合 TF-IDF, 变换所有 split ──
+        if nlp_texts is not None and nlp_vectorizer_config is not None:
+            from app.utils.nlp_preprocessing import apply_tfidf_3way, tfidf_to_dataframe
+
+            self._vectorizer, tfidf_train, tfidf_val, tfidf_test, n_tfidf = \
+                apply_tfidf_3way(
+                    train_idx.tolist(), val_idx.tolist(), test_idx.tolist(),
+                    nlp_texts, nlp_vectorizer_config,
+                )
+
+            # 将 TF-IDF 特征转为 DataFrame 并合并到 X
+            tfidf_train_df = tfidf_to_dataframe(tfidf_train, train_idx)
+            tfidf_val_df = tfidf_to_dataframe(tfidf_val, val_idx)
+            tfidf_test_df = tfidf_to_dataframe(tfidf_test, test_idx)
+
+            # 需要保留索引对齐 — 使用 pd.concat
+            X = pd.concat([X, tfidf_train_df.reindex(X.index)], axis=1)
+            # 填充 val/test 行 (TF-IDF 列对它们也是有效的)
+            for col in tfidf_train_df.columns:
+                if col not in X.columns:
+                    X[col] = np.float32(0)
+            X.loc[val_idx, tfidf_train_df.columns] = tfidf_val_df.values
+            X.loc[test_idx, tfidf_train_df.columns] = tfidf_test_df.values
+
+            self.callback.on_log(
+                f'[NLP] TF-IDF: {n_tfidf} features, '
+                f'train={len(train_idx)} val={len(val_idx)} test={len(test_idx)}'
+            )
+
+        # ── 分割原始 X 为 train/val/test (在标准化之前) ──
+        X_train_raw = X.iloc[train_idx].copy()
+        X_val_raw = X.iloc[val_idx].copy()
+        X_test_raw = X.iloc[test_idx].copy()
+        y_train = y[train_idx]
+        y_val = y[val_idx]
+        y_test = y[test_idx]
+
+        # ── 标准化: 只在训练集上拟合, 跳过 tfidf_* 列 ──
+        all_num_cols = X.select_dtypes(include=[np.number]).columns
+        tfidf_cols = [c for c in all_num_cols if str(c).startswith('tfidf_')]
+        non_tfidf_cols = [c for c in all_num_cols if c not in tfidf_cols]
+
+        if tfidf_cols:
+            self.callback.on_log(
+                f'[NLP] 已跳过 StandardScaler for {len(tfidf_cols)} TF-IDF 特征列 '
+                f'(TfidfVectorizer 已做 L2 归一化)'
+            )
+
+        if len(non_tfidf_cols) > 0:
+            self._scaler = StandardScaler()
+            X_train_raw[non_tfidf_cols] = self._scaler.fit_transform(
+                X_train_raw[non_tfidf_cols]
+            ).astype('float32')
+            val_cols = [c for c in non_tfidf_cols if c in X_val_raw.columns]
+            if val_cols:
+                X_val_raw[val_cols] = self._scaler.transform(
+                    X_val_raw[val_cols]
+                ).astype('float32')
+            test_cols = [c for c in non_tfidf_cols if c in X_test_raw.columns]
+            if test_cols:
+                X_test_raw[test_cols] = self._scaler.transform(
+                    X_test_raw[test_cols]
+                ).astype('float32')
+        else:
+            self._scaler = None
+
+        X_train = X_train_raw.values.astype('float32')
+        X_val = X_val_raw.values.astype('float32')
+        X_test = X_test_raw.values.astype('float32')
+
+        self._input_dim = X_train.shape[1]
 
         # —— 智能模型规模推断 ——
         if self.hidden_layers is None:
             n_classes = self._output_dim if self.task_type == 'classification' else 2
-            self.hidden_layers = _auto_hidden_layers(n_samples, self._input_dim, n_classes)
+            self.hidden_layers = _auto_hidden_layers(len(train_idx), self._input_dim, n_classes)
             self.callback.on_log(f'智能模型规模: {self.hidden_layers} '
-                               f'(样本={n_samples}, 特征={self._input_dim})')
+                               f'(样本={len(train_idx)}, 特征={self._input_dim})')
         else:
             self.callback.on_log(f'用户指定网络结构: {self.hidden_layers}')
-
-        # —— 3-way 分割: train / val / test ——
-        # Step 1: 分出 test 集
-        stratify_y = y if self.task_type == 'classification' and len(set(y)) > 1 else None
-        X_train_val, X_test, y_train_val, y_test = train_test_split(
-            X_num, y, test_size=self.test_size, random_state=42,
-            stratify=stratify_y
-        )
-
-        # Step 2: 从 train_val 中分出 val 集
-        # val_size 是占 train_val 的比例 (例如 0.15 / 0.80 ≈ 0.1875)
-        val_ratio = self.val_size / (1.0 - self.test_size)
-        stratify_tv = y_train_val if self.task_type == 'classification' and len(set(y_train_val)) > 1 else None
-        X_train, X_val, y_train, y_val = train_test_split(
-            X_train_val, y_train_val, test_size=val_ratio, random_state=42,
-            stratify=stratify_tv
-        )
 
         # —— 转为 Tensor ——
         def _to_tensor(x_data, y_data, is_classification):
@@ -348,7 +479,14 @@ class PyTorchTrainer(BaseTrainer):
                 self._input_dim, self.hidden_layers,
                 self._output_dim, self.dropout
             )
-            self._criterion = nn.CrossEntropyLoss()
+            # 自动计算 class_weight 处理类别不平衡
+            if self._class_weights is not None:
+                weight_tensor = torch.tensor(self._class_weights, dtype=torch.float32,
+                                            device=self._device)
+                self._criterion = nn.CrossEntropyLoss(weight=weight_tensor)
+                self.callback.on_log(f'[class_weight] 应用类别权重: {self._class_weights}')
+            else:
+                self._criterion = nn.CrossEntropyLoss()
         else:
             self._model, _, _ = create_mlp_regressor(
                 self._input_dim, self.hidden_layers, self.dropout
@@ -406,15 +544,32 @@ class PyTorchTrainer(BaseTrainer):
         total_loss = 0.0
         correct = total = 0
 
+        # Lazy init AMP scaler (GPU only)
+        if self._amp_scaler is None and self._device.type == 'cuda':
+            self._amp_scaler = torch.cuda.amp.GradScaler()
+            self.callback.on_log('[AMP] 混合精度训练已启用 (FP16+FP32)')
+
+        use_amp = self._amp_scaler is not None
+
         for batch_x, batch_y in self._train_loader:
             batch_x, batch_y = batch_x.to(self._device), batch_y.to(self._device)
 
             self._optimizer.zero_grad()
-            outputs = self._model(batch_x)
-            loss = self._criterion(outputs, batch_y)
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(self._model.parameters(), max_norm=1.0)
-            self._optimizer.step()
+            if use_amp:
+                with torch.cuda.amp.autocast():
+                    outputs = self._model(batch_x)
+                    loss = self._criterion(outputs, batch_y)
+                self._amp_scaler.scale(loss).backward()
+                self._amp_scaler.unscale_(self._optimizer)
+                torch.nn.utils.clip_grad_norm_(self._model.parameters(), max_norm=1.0)
+                self._amp_scaler.step(self._optimizer)
+                self._amp_scaler.update()
+            else:
+                outputs = self._model(batch_x)
+                loss = self._criterion(outputs, batch_y)
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(self._model.parameters(), max_norm=1.0)
+                self._optimizer.step()
 
             total_loss += loss.item() * len(batch_x)
             if self.task_type == 'classification':
@@ -534,6 +689,9 @@ class PyTorchTrainer(BaseTrainer):
             'label_encoders': self._label_encoders,
             'val_size': self.val_size,
             'early_stopping_patience': self.early_stopping_patience,
+            'vectorizer': self._vectorizer,       # NLP: TfidfVectorizer
+            'class_labels': self._class_labels,   # NLP: 人类可读类别标签
+            'nlp_text_col': self._nlp_text_col,   # NLP: 文本列名
         }
         with open(path + '_config.pkl', 'wb') as f:
             pickle.dump(config, f)

@@ -7,6 +7,7 @@ pytest fixtures 和共享配置
 import pytest
 from app import create_app, db
 from app.models.user import User
+from app.services.auth_service import AuthService
 
 
 @pytest.fixture
@@ -38,10 +39,9 @@ def client(app):
     return app.test_client()
 
 
-@pytest.fixture
-def runner(app):
-    """创建 CLI 运行器"""
-    return app.test_cli_runner()
+# 测试用 API 密钥 (原始值, 用于请求头; 数据库中存储其 SHA256 哈希)
+_TEST_USER_API_KEY = 'ak_testuserkey1234567890abcdef'
+_TEST_ADMIN_API_KEY = 'ak_testadminkey1234567890abcdef'
 
 
 @pytest.fixture
@@ -57,7 +57,8 @@ def test_user(app):
         is_verified=True,
     )
     user.set_password('Test123456')
-    user.api_key = 'ak_testuserkey1234567890abcdef'
+    # API Key 哈希存储 (与 AuthService.register 行为一致)
+    user.api_key = AuthService._hash_api_key(_TEST_USER_API_KEY)
     db.session.add(user)
     db.session.commit()
     return user
@@ -75,7 +76,8 @@ def test_admin(app):
         is_verified=True,
     )
     user.set_password('Admin123456')
-    user.api_key = 'ak_testadminkey1234567890abcdef'
+    # API Key 哈希存储 (与 AuthService.register 行为一致)
+    user.api_key = AuthService._hash_api_key(_TEST_ADMIN_API_KEY)
     db.session.add(user)
     db.session.commit()
     return user

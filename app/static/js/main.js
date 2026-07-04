@@ -12,9 +12,14 @@ document.addEventListener('DOMContentLoaded', function () {
     initClickableRows();
     initAutoResize();
     initTooltips();
+    initScrollReveal();
+    initSmoothScroll();
+    initNavbarEffect();
+    initCardHover();
+    initAutoThemeBadges();
     initCountUp();
-    initFlashToCentered();   // Bootstrap alert → centered notification
-    initBackToTop();          // Vanilla JS back-to-top button
+    initFlashToCentered();
+    initBackToTop();
 });
 
 // ============ HTML 转义工具函数 (防止 XSS) ============
@@ -313,25 +318,6 @@ function showToast(message, type, duration) {
 }
 window.showToast = showToast;
 
-// ============ Count-up number animation ============
-function initCountUp() {
-    document.querySelectorAll('.count-up').forEach(function (el) {
-        var target = parseInt(el.dataset.target) || parseInt(el.textContent) || 0;
-        var duration = 1000;
-        var start = performance.now();
-
-        function update(now) {
-            var elapsed = now - start;
-            var progress = Math.min(elapsed / duration, 1);
-            var eased = 1 - Math.pow(1 - progress, 3);
-            var current = Math.round(target * eased);
-            el.textContent = current;
-            if (progress < 1) requestAnimationFrame(update);
-        }
-        requestAnimationFrame(update);
-    });
-}
-
 // ============ Copy to clipboard ============
 window.copyToClipboard = function (text, buttonEl) {
     navigator.clipboard.writeText(text).then(function () {
@@ -400,6 +386,230 @@ function initBackToTop() {
         }
     }, { passive: true });
 }
+
+// ============ Scroll-triggered reveal (IntersectionObserver) ============
+function initScrollReveal() {
+    if (!('IntersectionObserver' in window)) {
+        document.querySelectorAll('.reveal').forEach(function (el) { el.classList.add('revealed'); });
+        return;
+    }
+    var observer = new IntersectionObserver(
+        function (entries) {
+            entries.forEach(function (entry) {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('revealed');
+                    observer.unobserve(entry.target);
+                }
+            });
+        },
+        { threshold: 0.1, rootMargin: '0px 0px -30px 0px' }
+    );
+    document.querySelectorAll('.reveal').forEach(function (el) { observer.observe(el); });
+    document.querySelectorAll('.card:not(.reveal):not(.no-reveal)').forEach(function (card, i) {
+        card.classList.add('reveal', 'reveal-up');
+        if (i < 6) card.classList.add('reveal-delay-' + (i + 1));
+        observer.observe(card);
+    });
+}
+
+// ============ Smooth scroll for anchor links ============
+function initSmoothScroll() {
+    document.querySelectorAll('a[href^="#"]').forEach(function (anchor) {
+        anchor.addEventListener('click', function (e) {
+            var target = document.querySelector(this.getAttribute('href'));
+            if (target) {
+                e.preventDefault();
+                target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        });
+    });
+}
+
+// ============ Navbar subtle shadow on scroll ============
+function initNavbarEffect() {
+    var navbar = document.querySelector('.navbar');
+    if (!navbar) return;
+    window.addEventListener('scroll', function () {
+        if (window.scrollY > 10) {
+            navbar.style.boxShadow = '0 1px 0 rgba(255,255,255,0.08), 0 2px 8px rgba(0,0,0,0.2)';
+        } else {
+            navbar.style.boxShadow = '0 1px 0 rgba(255,255,255,0.08), 0 1px 4px rgba(0,0,0,0.15)';
+        }
+    }, { passive: true });
+}
+
+// ============ Visibility change — respect user's time away ============
+(function () {
+    document.addEventListener('visibilitychange', function () {
+        var animations = document.querySelectorAll('.float-anim, .float-anim-delayed');
+        if (document.hidden) {
+            animations.forEach(function (el) { el.style.animationPlayState = 'paused'; });
+        } else {
+            animations.forEach(function (el) { el.style.animationPlayState = 'running'; });
+        }
+    });
+})();
+
+// ============ Card hover — add hoverable class ============
+function initCardHover() {
+    document.querySelectorAll('.card:not(.no-hover):not(.card-hoverable)').forEach(function (card) {
+        if (card.querySelector('a, button, .clickable-row, [data-href]')) {
+            card.classList.add('card-hoverable');
+        }
+    });
+}
+
+// ============ Auto-style status badges with soft colors ============
+function initAutoThemeBadges() {
+    document.querySelectorAll('.badge').forEach(function (badge) {
+        var text = badge.textContent.trim().toLowerCase();
+        var map = {
+            'trained': 'badge-soft-success',
+            'deployed': 'badge-soft-success',
+            'completed': 'badge-soft-success',
+            'running': 'badge-soft-primary',
+            'pending': 'badge-soft-info',
+            'failed': 'badge-soft-danger',
+            'cancelled': 'badge-soft-warning',
+            'draft': 'badge-soft-warning',
+            'success': 'badge-soft-success',
+            'error': 'badge-soft-danger',
+            'warning': 'badge-soft-warning',
+            'info': 'badge-soft-info',
+            'positive': 'badge-soft-success',
+            'negative': 'badge-soft-danger',
+            'neutral': 'badge-soft-warning',
+        };
+        for (var key in map) {
+            if (text.indexOf(key) !== -1) {
+                badge.classList.add('badge-soft', map[key]);
+                break;
+            }
+        }
+    });
+}
+
+// ============ Count-up number animation (IntersectionObserver) ============
+function initCountUp() {
+    if (!('IntersectionObserver' in window)) return;
+    var observer = new IntersectionObserver(function (entries) {
+        entries.forEach(function (entry) {
+            if (entry.isIntersecting) {
+                var el = entry.target;
+                var target = parseFloat(el.dataset.target) || 0;
+                var decimals = parseInt(el.dataset.decimals) || 0;
+                var duration = parseInt(el.dataset.duration) || 800;
+                var startTime = null;
+                function step(timestamp) {
+                    if (!startTime) startTime = timestamp;
+                    var progress = Math.min((timestamp - startTime) / duration, 1);
+                    var eased = 1 - Math.pow(1 - progress, 3);
+                    var current = eased * target;
+                    el.textContent = decimals > 0 ? current.toFixed(decimals) : Math.round(current);
+                    if (progress < 1) requestAnimationFrame(step);
+                }
+                requestAnimationFrame(step);
+                observer.unobserve(el);
+            }
+        });
+    }, { threshold: 0.3 });
+    document.querySelectorAll('.count-up').forEach(function (el) { observer.observe(el); });
+}
+
+// ============ Confetti celebration (canvas, no dependencies) ============
+window.launchConfetti = function (opts) {
+    opts = opts || {};
+    var count = opts.count || 80;
+    var spread = opts.spread || 80;
+    var originX = opts.originX !== undefined ? opts.originX : 0.5;
+    var originY = opts.originY !== undefined ? opts.originY : 0.5;
+    var colors = opts.colors || ['#1f883d', '#0969da', '#9a6700', '#cf222e', '#8250df', '#bf3989'];
+    var canvas = document.getElementById('confetti-canvas');
+    if (!canvas) {
+        canvas = document.createElement('canvas');
+        canvas.id = 'confetti-canvas';
+        document.body.appendChild(canvas);
+    }
+    var ctx = canvas.getContext('2d');
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    var particles = [];
+    for (var i = 0; i < count; i++) {
+        var angle = (Math.PI / 180) * (Math.random() * spread - spread / 2);
+        var velocity = 4 + Math.random() * 4;
+        particles.push({
+            x: canvas.width * originX,
+            y: canvas.height * originY,
+            vx: Math.cos(angle) * velocity * (0.6 + Math.random() * 0.4),
+            vy: Math.sin(angle) * velocity * (0.6 + Math.random() * 0.4) - 4,
+            size: 5 + Math.random() * 5,
+            color: colors[Math.floor(Math.random() * colors.length)],
+            rotation: Math.random() * 360,
+            rotSpeed: (Math.random() - 0.5) * 10,
+            opacity: 1,
+            shape: Math.random() > 0.5 ? 'circle' : 'rect',
+        });
+    }
+    var gravity = 0.12;
+    var drag = 0.98;
+    var startTime = Date.now();
+    var duration = opts.duration || 2500;
+    function animate() {
+        var elapsed = Date.now() - startTime;
+        if (elapsed > duration) { ctx.clearRect(0, 0, canvas.width, canvas.height); return; }
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        for (var i = particles.length - 1; i >= 0; i--) {
+            var p = particles[i];
+            p.vx *= drag; p.vy += gravity;
+            p.x += p.vx; p.y += p.vy;
+            p.rotation += p.rotSpeed;
+            p.opacity = Math.max(0, 1 - elapsed / duration);
+            if (p.y > canvas.height + 20 || p.opacity <= 0) { particles.splice(i, 1); continue; }
+            ctx.save();
+            ctx.translate(p.x, p.y);
+            ctx.rotate((p.rotation * Math.PI) / 180);
+            ctx.globalAlpha = p.opacity;
+            ctx.fillStyle = p.color;
+            if (p.shape === 'circle') {
+                ctx.beginPath(); ctx.arc(0, 0, p.size / 2, 0, Math.PI * 2); ctx.fill();
+            } else {
+                ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+            }
+            ctx.restore();
+        }
+        requestAnimationFrame(animate);
+    }
+    animate();
+};
+
+// ============ Trigger success celebration (checkmark + confetti) ============
+window.celebrateSuccess = function (selector, opts) {
+    window.launchConfetti(opts);
+    var target = selector ? document.querySelector(selector) : null;
+    if (target) target.classList.add('celebration-pulse', 'sparkle-burst');
+    var checkEl = document.createElement('div');
+    checkEl.className = 'success-checkmark';
+    checkEl.style.cssText = 'position:fixed;top:50%;left:50%;margin:-32px 0 0 -32px;z-index:99998;';
+    checkEl.innerHTML = '<svg viewBox="0 0 52 52" class="check-circle"><circle class="check-circle" cx="26" cy="26" r="23"/><path class="check-path" d="M14 27l7 7 16-16"/></svg>';
+    document.body.appendChild(checkEl);
+    checkEl.classList.add('bounce-in');
+    setTimeout(function () { if (checkEl.parentNode) checkEl.parentNode.removeChild(checkEl); }, 2000);
+};
+
+// ============ Trigger training complete banner ============
+window.showTrainingComplete = function (modelName, accuracy) {
+    window.celebrateSuccess(null, { count: 120, spread: 120 });
+    var banner = document.createElement('div');
+    banner.style.cssText = 'position:fixed;top:76px;left:50%;transform:translateX(-50%);z-index:99990;min-width:320px;max-width:500px;padding:16px 24px;border-radius:8px;background:#1f883d;color:#fff;text-align:center;animation:bounce-in 0.4s cubic-bezier(0.34,1.56,0.64,1) both;';
+    banner.innerHTML = '<div style="font-size:2rem;margin-bottom:4px;">&#10003;</div><div style="font-size:1rem;font-weight:600;margin-bottom:2px;">训练完成!</div><div style="font-size:0.85rem;opacity:0.9;">' + escapeHtml(modelName || '') + (accuracy ? ' &middot; 准确率 ' + accuracy : '') + '</div>';
+    document.body.appendChild(banner);
+    setTimeout(function () {
+        banner.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
+        banner.style.opacity = '0';
+        banner.style.transform = 'translateX(-50%) translateY(-10px)';
+        setTimeout(function () { if (banner.parentNode) banner.parentNode.removeChild(banner); }, 310);
+    }, 3000);
+};
 
 // ============ Theme Toggle — light/dark ============
 (function() {

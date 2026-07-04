@@ -144,6 +144,13 @@ def create_model():
     return render_template('models/create.html')
 
 
+@models_bp.route('/import')
+@login_required
+def import_model():
+    """导入模型页面 — 上传 .pkl / .zip 文件创建新模型记录"""
+    return render_template('models/import.html')
+
+
 @models_bp.route('/<int:model_id>')
 @login_required
 def model_detail(model_id):
@@ -347,6 +354,149 @@ def compare():
     )
 
 
+def _build_model_hints(model, metadata, hyperparams, feature_names):
+    """根据模型元数据构建输入指导提示
+
+    分析模型名称/数据集/类别标签/特征名等, 生成面向用户的输入指南。
+    """
+    hints = {
+        'model_type': model.model_type or 'general',
+        'domain': 'general',
+        'domain_label': '通用',
+        'classes': [],
+        'input_guide': {},
+        'capabilities': [],
+        'limitations': [],
+    }
+
+    task_type = (metadata or {}).get('task_type', model.model_type)
+    class_labels = (metadata or {}).get('class_labels', [])
+    algorithm = (metadata or {}).get('algorithm', hyperparams.get('algorithm', ''))
+    framework = (metadata or {}).get('framework', model.framework or '')
+    dataset_name = (model.training_dataset.name if model.training_dataset else '') or ''
+    dataset_desc = (model.training_dataset.description if model.training_dataset else '') or ''
+    model_name = model.name or ''
+
+    # ── 域名检测 ──
+    domain_keywords = {
+        'movie': ['douban', 'movie', '电影', '影评', '豆瓣'],
+        'shopping': ['shopping', 'taobao', 'jd', '购物', '商品', '电商', '淘宝'],
+        'restaurant': ['restaurant', 'food', '餐厅', '美食', '外卖', '点评'],
+        'hotel': ['hotel', '酒店', '住宿', '旅行'],
+        'finance': ['finance', 'stock', '金融', '股票', '财经'],
+        'social': ['weibo', 'twitter', '微博', '社交', '舆情'],
+        'news': ['news', '新闻', '头条', '资讯'],
+    }
+    search_text = (model_name + ' ' + dataset_name + ' ' + dataset_desc).lower()
+    detected_domain = 'general'
+    for domain, keywords in domain_keywords.items():
+        for kw in keywords:
+            if kw in search_text:
+                detected_domain = domain
+                break
+        if detected_domain != 'general':
+            break
+
+    domain_config = {
+        'movie':      {'label': '电影评论',    'placeholder': '输入电影评论，例如: 这部电影非常精彩，演员表现出色，剧情扣人心弦。', 'examples': ['这部电影非常精彩，演员表现出色，剧情扣人心弦。', '剧情太拖沓了，浪费了两个小时。', '特效很棒但故事一般，总体还行。']},
+        'shopping':   {'label': '购物评价',    'placeholder': '输入商品评价，例如: 质量很好，做工精细，物流也很快，非常满意！', 'examples': ['质量很好，做工精细，物流也很快，非常满意！', '跟描述不符，质量很差，不建议购买。', '性价比不错，对得起这个价格。']},
+        'restaurant': {'label': '餐厅点评',    'placeholder': '输入餐厅评价，例如: 菜品口味地道，环境优雅，服务周到。', 'examples': ['菜品口味地道，环境优雅，服务周到。', '上菜太慢了，味道也一般。']},
+        'hotel':      {'label': '酒店评价',    'placeholder': '输入酒店评价，例如: 房间干净整洁，前台服务热情，地理位置方便。', 'examples': ['房间干净整洁，前台服务热情，地理位置方便。', '隔音太差，一晚上没睡好。']},
+        'finance':    {'label': '财经文本',    'placeholder': '输入财经相关文本，例如: 今日大盘震荡上行，科技板块领涨。', 'examples': ['今日大盘震荡上行，科技板块领涨。']},
+        'social':     {'label': '社交媒体',    'placeholder': '输入社交媒体文本，例如: 今天天气真好，出去玩了一天！', 'examples': ['今天天气真好，出去玩了一天！']},
+        'news':       {'label': '新闻文本',    'placeholder': '输入新闻文本，例如: 据新华社报道，今日国家统计局发布了最新经济数据。', 'examples': ['据新华社报道，今日国家统计局发布了最新经济数据。']},
+        'general':    {'label': '文本内容',    'placeholder': '输入文本内容进行预测...', 'examples': []},
+    }
+    dc = domain_config.get(detected_domain, domain_config['general'])
+    hints['domain'] = detected_domain
+    hints['domain_label'] = dc['label']
+
+    # ── 类别标签 ──
+    if class_labels:
+        hints['classes'] = [str(c) for c in class_labels]
+    elif task_type == 'classification':
+        # 尝试从特征名推断 (二分类常见标签)
+        hints['classes'] = []
+
+    # ── 按模型类型构建输入指导 ──
+    if model.model_type == 'nlp':
+        # 输入长度建议
+        text_column = (metadata or {}).get('text_column', '')
+        max_len = (metadata or {}).get('max_length', 0)
+
+        hints['input_guide'] = {
+            'type': 'text',
+            'min_length': 5,
+            'max_length': max_len if max_len else 200,
+            'placeholder': dc['placeholder'],
+            'examples': dc['examples'],
+            'note': (
+                f'此模型训练于{dc["label"]}数据'
+                + (f'（{dataset_name}）' if dataset_name else '')
+                + '。建议输入10字以上的完整句子以获得准确预测。'
+            ),
+        }
+        hints['capabilities'] = ['文本情感分析', '短文本分类']
+        hints['limitations'] = [
+            '短文本（<5字）预测准确度较低，建议输入完整句子',
+            '仅支持中文文本',
+            '请勿输入与训练领域无关的内容（如用电影评论模型预测财经文本）',
+        ]
+        if class_labels:
+            hints['capabilities'].append(f'可识别类别: {", ".join(str(c) for c in class_labels)}')
+
+    elif model.model_type in ('classification', 'regression'):
+        hints['input_guide'] = {
+            'type': 'tabular',
+            'feature_count': len(feature_names) if feature_names else 0,
+            'note': (
+                f'此模型使用 {len(feature_names)} 个特征进行'
+                + ('分类' if task_type == 'classification' else '回归')
+                + '预测。请手动输入特征值或上传CSV文件批量预测。'
+            ),
+        }
+        hints['capabilities'] = [
+            f'{"多分类" if task_type == "classification" else "回归"}预测',
+            f'输入特征数: {len(feature_names)}',
+        ]
+        if class_labels:
+            hints['capabilities'].append(f'可预测类别: {", ".join(str(c) for c in class_labels)}')
+        hints['limitations'] = [
+            '请确保输入特征与训练数据分布一致',
+            '异常值可能导致预测偏差',
+        ]
+
+    elif model.model_type == 'computer_vision':
+        hints['input_guide'] = {
+            'type': 'image',
+            'formats': ['JPG', 'PNG', 'WebP', 'BMP'],
+            'note': (
+                '此模型使用 CNN 提取图像特征后进行'
+                + ('分类' if task_type == 'classification' else '预测')
+                + '。支持常见图像格式，建议图像分辨率不低于224×224。'
+            ),
+        }
+        hints['capabilities'] = ['图像特征提取', '基于CNN的预测']
+        hints['limitations'] = [
+            '图像质量过低会影响预测准确度',
+            '建议使用清晰、光线充足的照片',
+        ]
+
+    else:
+        hints['input_guide'] = {
+            'type': 'general',
+            'note': '请根据模型类型选择合适的输入方式。',
+        }
+
+    # ── 框架/算法信息 ──
+    if algorithm:
+        hints['algorithm'] = algorithm
+    if framework:
+        hints['framework'] = framework
+
+    return hints
+
+
 @models_bp.route('/<int:model_id>/test', methods=['GET', 'POST'])
 @login_required
 def test_model(model_id):
@@ -429,21 +579,36 @@ def test_model(model_id):
                 error = '请输入文本内容后再点击预测。'
             else:
                 try:
-                    from app.services.feature_extractor import FeatureExtractor
-                    n_features = len(feature_names) if feature_names else 100
-                    features, feat_error = FeatureExtractor.extract_text_features(
-                        text_input, max(n_features, 10)
-                    )
-                    if feat_error:
-                        error = feat_error
+                    import pandas as pd
+                    import numpy as np
+                    # 优先使用训练时保存的 TF-IDF vectorizer
+                    _, _md, _, _le = ModelInferenceService.load_model(model)
+                    _vec = (_md or {}).get('vectorizer')
+                    _fn = (_md or {}).get('feature_names', [])
+                    if _vec is not None:
+                        X_vec = _vec.transform([text_input])
+                        X_dense = X_vec.toarray()
+                        _tfn = [c for c in _fn if str(c).startswith('tfidf_')]
+                        if _tfn and len(_tfn) == X_dense.shape[1]:
+                            df = pd.DataFrame(X_dense, columns=_tfn)
+                        else:
+                            df = pd.DataFrame(X_dense)
                     else:
-                        import pandas as pd
-                        df = pd.DataFrame(
-                            features,
-                            columns=[feature_names[i] if i < len(feature_names)
-                                     else f'feature_{i}'
-                                     for i in range(features.shape[1])]
+                        from app.services.feature_extractor import FeatureExtractor
+                        n_features = len(_fn) if _fn else 100
+                        features, feat_error = FeatureExtractor.extract_text_features(
+                            text_input, max(n_features, 10)
                         )
+                        if feat_error:
+                            error = feat_error
+                            df = None
+                        else:
+                            df = pd.DataFrame(
+                                features,
+                                columns=[_fn[i] if i < len(_fn) else f'feature_{i}'
+                                         for i in range(features.shape[1])]
+                            )
+                    if df is not None:
                         result = ModelInferenceService.predict(model, df)
                 except Exception as e:
                     error = f'文本预测失败: {str(e)}'
@@ -529,4 +694,5 @@ def test_model(model_id):
         preview_columns=preview_columns,
         model_file_error=model_file_error,
         image_preview=image_preview,
+        hints=_build_model_hints(model, metadata, hyperparams, feature_names),
     )

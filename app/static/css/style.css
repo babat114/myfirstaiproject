@@ -1270,6 +1270,122 @@ textarea.form-control:focus {
     }
 }
 
+/* ============================================
+   模型测试页 — 输入指导提示卡
+   ============================================ */
+.model-hint-card {
+    border-left: 3px solid #0dcaf0;
+    transition: box-shadow 0.2s ease;
+}
+.model-hint-card:hover {
+    box-shadow: 0 2px 12px rgba(13,202,240,0.12);
+}
+.model-hint-card .card-header {
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.15s;
+}
+.model-hint-card .card-header:hover {
+    background: rgba(13,202,240,0.15) !important;
+}
+.example-fill-btn {
+    font-size: 0.78rem;
+    padding: 2px 10px;
+    transition: all 0.15s;
+}
+.example-fill-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(13,202,240,0.25);
+}
+/* Badge 小标签对齐 */
+.model-hint-card .badge {
+    font-weight: 500;
+    font-size: 0.72rem;
+}
+
+/* ============================================
+   图片缩放灯箱 (Image Zoom Lightbox)
+   ============================================ */
+.image-lightbox-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 99999;
+    background: rgba(0, 0, 0, 0.92);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: zoom-out;
+    animation: lightboxFadeIn 0.2s ease;
+}
+@keyframes lightboxFadeIn {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+.image-lightbox-overlay .lightbox-img-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    /* transform-origin is set inline by JS for zoom centre */
+    transition: transform 0.08s ease-out;
+    will-change: transform;
+}
+.image-lightbox-overlay .lightbox-img-wrap img {
+    display: block;
+    max-width: 90vw;
+    max-height: 85vh;
+    border-radius: 6px;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.5);
+    user-select: none;
+    -webkit-user-drag: none;
+    pointer-events: none;  /* drag events handled on wrapper */
+}
+/* Toolbar — top-right corner */
+.lightbox-toolbar {
+    position: absolute;
+    top: 12px;
+    right: 16px;
+    display: flex;
+    gap: 6px;
+    z-index: 100001;
+}
+.lightbox-toolbar button {
+    width: 38px;
+    height: 38px;
+    border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.25);
+    background: rgba(0,0,0,0.55);
+    color: #fff;
+    font-size: 1.15rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s, border-color 0.15s;
+    backdrop-filter: blur(4px);
+}
+.lightbox-toolbar button:hover {
+    background: rgba(255,255,255,0.18);
+    border-color: rgba(255,255,255,0.5);
+}
+/* Zoom info badge — bottom centre */
+.lightbox-zoom-badge {
+    position: absolute;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0,0,0,0.6);
+    color: #fff;
+    padding: 5px 14px;
+    border-radius: 20px;
+    font-size: 0.82rem;
+    backdrop-filter: blur(4px);
+    border: 1px solid rgba(255,255,255,0.15);
+    pointer-events: none;
+    z-index: 100001;
+    transition: opacity 0.2s;
+}
+
 /* ═══════════════════════════════════════════════════════════════
    M5 内联样式提取 — 语义化工具类 (从模板 style="" 迁移)
    ═══════════════════════════════════════════════════════════════ */
@@ -1334,4 +1450,657 @@ textarea.form-control:focus {
 
 /* ── 文本右对齐 ── */
 .text-right { text-align: right; }
+
+/* ============================================
+   beautify.css 合并内容 (Scroll Reveal · 动画增强 · Hero/首页)
+   ============================================ */
+
+/* ===== 1. Scroll-triggered reveal ===== */
+.reveal {
+    opacity: 0;
+    transition: opacity 0.4s ease-out, transform 0.4s ease-out;
+}
+.reveal.reveal-up    { transform: translateY(16px); }
+.reveal.reveal-left  { transform: translateX(-16px); }
+.reveal.reveal-right { transform: translateX(16px); }
+.reveal.reveal-scale { transform: scale(0.97); }
+.reveal.revealed {
+    opacity: 1;
+    transform: translate(0) scale(1);
+}
+
+/* Staggered delays */
+.reveal-delay-1 { transition-delay: 0.04s; }
+.reveal-delay-2 { transition-delay: 0.08s; }
+.reveal-delay-3 { transition-delay: 0.12s; }
+.reveal-delay-4 { transition-delay: 0.16s; }
+.reveal-delay-5 { transition-delay: 0.20s; }
+.reveal-delay-6 { transition-delay: 0.24s; }
+.reveal-delay-7 { transition-delay: 0.28s; }
+.reveal-delay-8 { transition-delay: 0.32s; }
+
+/* ===== 2. Underline on hover ===== */
+.underline-hover {
+    position: relative; text-decoration: none;
+}
+.underline-hover::after {
+    content: '';
+    position: absolute; bottom: -2px; left: 0;
+    width: 0; height: 1.5px;
+    background: currentColor;
+    transition: width 0.25s ease;
+}
+.underline-hover:hover::after { width: 100%; }
+
+/* ===== 3. Button loading state ===== */
+.btn.btn-loading {
+    position: relative; color: transparent; pointer-events: none;
+}
+.btn-loading::after {
+    content: '';
+    position: absolute; top: 50%; left: 50%;
+    width: 14px; height: 14px;
+    margin: -7px 0 0 -7px;
+    border: 2px solid rgba(255,255,255,0.3);
+    border-top-color: #fff; border-radius: 50%;
+    animation: btn-spin 0.6s linear infinite;
+}
+@keyframes btn-spin { to { transform: rotate(360deg); } }
+
+/* ===== 4. Card selected state ===== */
+.card.card-selected {
+    border-color: var(--color-text-link, #0969da);
+    box-shadow: 0 0 0 3px rgba(9, 105, 218, 0.12);
+}
+
+/* ===== 5. Print optimization ===== */
+@media print {
+    .no-print, .navbar, footer, .btn, .toast-container,
+    #globalConfirmModal, #centeredMessages { display: none !important; }
+    body { background: #fff; }
+    .card { box-shadow: none; break-inside: avoid; border: 1px solid #ddd; }
+}
+
+/* ===== 6. Reduced motion ===== */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}
+
+/* ===== 7. Card lift effect with border accent ===== */
+.card.card-hoverable {
+    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+.card.card-hoverable:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 1px 3px rgba(0,0,0,0.04);
+    border-color: var(--color-accent-emphasis);
+}
+
+/* ===== 8. Table row with left border accent ===== */
+.table .clickable-row {
+    cursor: pointer;
+    transition: background 0.15s ease;
+    border-left: 2px solid transparent;
+}
+.table .clickable-row:hover {
+    border-left-color: var(--color-accent-emphasis);
+    background: rgba(9, 105, 218, 0.03);
+}
+.table .clickable-row:active {
+    background: rgba(9, 105, 218, 0.06);
+}
+
+/* ===== 9. (reserved) ===== */
+
+/* ===== 10. Stat/metric card with gradient accent ===== */
+.stat-card {
+    position: relative;
+    overflow: hidden;
+}
+.stat-card .stat-icon {
+    font-size: 2rem;
+    opacity: 0.15;
+    position: absolute;
+    right: 12px;
+    bottom: 12px;
+    transition: opacity 0.3s ease, transform 0.3s ease;
+}
+.stat-card:hover .stat-icon {
+    opacity: 0.25;
+    transform: scale(1.1);
+}
+.stat-card .stat-value {
+    font-size: 1.75rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+}
+.stat-card .stat-label {
+    font-size: 0.8rem;
+    color: var(--color-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-weight: 500;
+}
+.stat-card .stat-change {
+    font-size: 0.75rem;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+}
+
+/* ===== 11. Badge soft colors ===== */
+.badge.badge-soft {
+    font-weight: 500;
+    padding: 2px 10px;
+    border-radius: 99px;
+    font-size: 0.75rem;
+}
+.badge.badge-soft-primary {
+    background: rgba(9, 105, 218, 0.1);
+    color: var(--color-accent-emphasis);
+}
+.badge.badge-soft-success {
+    background: rgba(31, 136, 61, 0.1);
+    color: var(--color-success-emphasis);
+}
+.badge.badge-soft-danger {
+    background: rgba(207, 34, 46, 0.1);
+    color: var(--color-danger-emphasis);
+}
+.badge.badge-soft-warning {
+    background: rgba(154, 103, 0, 0.1);
+    color: var(--color-warning-emphasis);
+}
+.badge.badge-soft-info {
+    background: rgba(9, 105, 218, 0.1);
+    color: var(--color-info-emphasis);
+}
+
+/* ===== 12. Filter/search bar glass effect ===== */
+.filter-bar {
+    background: rgba(255,255,255,0.7);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.filter-bar:focus-within {
+    border-color: var(--color-accent-emphasis);
+    box-shadow: 0 0 0 3px var(--color-input-focus-shadow);
+}
+[data-theme="dark"] .filter-bar {
+    background: rgba(30, 30, 30, 0.7);
+}
+
+/* ===== 13. Centered notification animations ===== */
+.centered-message {
+    animation: message-slide-in 0.25s ease-out;
+    border-radius: var(--radius);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+}
+@keyframes message-slide-in {
+    from {
+        opacity: 0;
+        transform: translateY(-12px) scale(0.96);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+.centered-message.removing {
+    animation: message-slide-out 0.2s ease-in forwards;
+}
+@keyframes message-slide-out {
+    from { opacity: 1; transform: translateY(0) scale(1); }
+    to   { opacity: 0; transform: translateY(-8px) scale(0.96); }
+}
+
+/* ===== 14. Dark theme refinements ===== */
+[data-theme="dark"] .card.card-hoverable:hover {
+    box-shadow: 0 4px 16px rgba(0,0,0,0.3), 0 1px 4px rgba(0,0,0,0.2);
+}
+[data-theme="dark"] .table .clickable-row:hover {
+    background: rgba(255,255,255,0.03);
+}
+[data-theme="dark"] .table .clickable-row:active {
+    background: rgba(255,255,255,0.06);
+}
+[data-theme="dark"] .filter-bar {
+    border-color: rgba(255,255,255,0.08);
+}
+[data-theme="dark"] .stat-card .stat-icon {
+    opacity: 0.2;
+}
+[data-theme="dark"] .centered-message {
+    box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+}
+
+/* ===== 15. Toast notification ===== */
+.toast-notification {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    z-index: 9999;
+    min-width: 280px;
+    max-width: 400px;
+    padding: 12px 16px;
+    border-radius: var(--radius);
+    background: var(--color-card-bg);
+    border: 1px solid var(--color-border-default);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+}
+.toast-notification .toast-icon {
+    font-size: 1.2rem;
+    flex-shrink: 0;
+}
+
+/* ===== 16. Success checkmark animation ===== */
+.success-checkmark {
+    width: 64px;
+    height: 64px;
+    margin: 0 auto;
+    position: relative;
+}
+.success-checkmark .check-circle {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    stroke-width: 2;
+    stroke: var(--color-success-emphasis, #1f883d);
+    fill: none;
+    stroke-dasharray: 166;
+    stroke-dashoffset: 166;
+    animation: check-circle-draw 0.5s ease-out forwards;
+}
+.success-checkmark .check-path {
+    stroke-width: 3;
+    stroke: var(--color-success-emphasis, #1f883d);
+    fill: none;
+    stroke-dasharray: 48;
+    stroke-dashoffset: 48;
+    animation: check-path-draw 0.3s 0.35s ease-out forwards;
+}
+@keyframes check-circle-draw {
+    to { stroke-dashoffset: 0; }
+}
+@keyframes check-path-draw {
+    to { stroke-dashoffset: 0; }
+}
+
+/* ===== 17. Celebration pulse ===== */
+.celebration-pulse {
+    animation: celeb-pulse 0.6s ease-out;
+}
+@keyframes celeb-pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(var(--color-success-emphasis-rgb, 31, 136, 61), 0.5); }
+    100% { box-shadow: 0 0 0 20px rgba(var(--color-success-emphasis-rgb, 31, 136, 61), 0); }
+}
+
+/* ===== 18. Sparkle burst ===== */
+.sparkle-burst {
+    position: relative;
+    overflow: visible;
+}
+.sparkle-burst::before,
+.sparkle-burst::after {
+    content: '';
+    position: absolute;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--color-success-emphasis, #1f883d);
+    opacity: 0;
+    pointer-events: none;
+}
+.sparkle-burst::before {
+    top: 20%;
+    right: 10%;
+    animation: sparkle-1 0.8s ease-out forwards;
+}
+.sparkle-burst::after {
+    top: 40%;
+    right: 5%;
+    animation: sparkle-2 0.8s 0.15s ease-out forwards;
+}
+@keyframes sparkle-1 {
+    0%   { opacity: 1; transform: translate(0,0) scale(1); }
+    100% { opacity: 0; transform: translate(20px,-20px) scale(0); }
+}
+@keyframes sparkle-2 {
+    0%   { opacity: 1; transform: translate(0,0) scale(1); }
+    100% { opacity: 0; transform: translate(30px,-10px) scale(0); }
+}
+
+/* ===== 19. Bounce-in ===== */
+.bounce-in {
+    animation: bounce-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+@keyframes bounce-in {
+    0%   { opacity: 0; transform: scale(0.7); }
+    70%  { transform: scale(1.05); }
+    100% { opacity: 1; transform: scale(1); }
+}
+
+/* ===== 20. Confetti canvas overlay ===== */
+#confetti-canvas {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    pointer-events: none;
+    z-index: 99999;
+}
+
+/* ===== 21. Hero Section ===== */
+.hero-section {
+    position: relative;
+    padding: 4rem 1rem 3rem;
+    margin: -1rem -0.75rem 2rem;
+    background: linear-gradient(135deg, #f0f6ff 0%, #e6f0ff 50%, #f6f8fa 100%);
+    overflow: hidden;
+    text-align: center;
+}
+[data-theme="dark"] .hero-section {
+    background: linear-gradient(135deg, #161b22 0%, #0d1117 50%, #161b22 100%);
+}
+.hero-bg-pattern {
+    position: absolute;
+    inset: 0;
+    background-image:
+        radial-gradient(circle at 20% 50%, rgba(9,105,218,0.04) 0%, transparent 50%),
+        radial-gradient(circle at 80% 50%, rgba(45,164,78,0.04) 0%, transparent 50%),
+        radial-gradient(circle at 50% 0%, rgba(9,105,218,0.03) 0%, transparent 50%);
+    pointer-events: none;
+}
+.hero-content {
+    position: relative;
+    z-index: 1;
+    max-width: 700px;
+    margin: 0 auto;
+}
+.hero-badge {
+    display: inline-block;
+    padding: 4px 14px;
+    border-radius: 99px;
+    font-size: 12px;
+    font-weight: 600;
+    background: rgba(var(--color-accent-emphasis-rgb, 9,105,218), 0.08);
+    color: var(--color-accent-emphasis, #0969da);
+    margin-bottom: 1rem;
+    letter-spacing: 0.02em;
+}
+[data-theme="dark"] .hero-badge {
+    background: rgba(56,139,253,0.15);
+    color: #58a6ff;
+}
+.hero-title {
+    font-size: 2.6rem;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    line-height: 1.15;
+    margin-bottom: 1rem;
+    color: var(--color-text-primary);
+}
+.hero-highlight {
+    background: linear-gradient(135deg, var(--color-accent-emphasis), var(--color-success-emphasis));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+.hero-desc {
+    font-size: 1.05rem;
+    color: var(--color-text-secondary);
+    max-width: 520px;
+    margin: 0 auto 1.8rem;
+    line-height: 1.6;
+}
+@media (max-width: 768px) {
+    .hero-title { font-size: 1.8rem; }
+    .hero-section { padding: 2.5rem 1rem 2rem; }
+}
+
+/* ===== 22. Stats Bar ===== */
+.stats-bar {
+    background: var(--color-card-bg);
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius);
+    margin: -1rem auto 2rem;
+    max-width: 700px;
+    box-shadow: var(--shadow-sm);
+}
+.stat-bar-item {
+    padding: 1rem 0.5rem;
+    border-right: 1px solid var(--color-border-subtle);
+}
+.stat-bar-item:last-child { border-right: none; }
+.stat-bar-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--color-text-primary);
+    line-height: 1.2;
+}
+.stat-bar-label {
+    font-size: 0.75rem;
+    color: var(--color-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-weight: 500;
+    margin-top: 2px;
+}
+
+/* ===== 23. Section Header ===== */
+.section-header {
+    text-align: center;
+    margin-bottom: 2rem;
+}
+.section-header .section-title {
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin-bottom: 0.35rem;
+    letter-spacing: -0.02em;
+    display: inline-block;
+}
+.section-header .section-title::after {
+    content: '';
+    display: block;
+    width: 40px;
+    height: 3px;
+    background: linear-gradient(90deg, var(--color-accent-emphasis), var(--color-success-emphasis));
+    border-radius: 99px;
+    margin: 0.5rem auto 0;
+}
+
+/* ===== 24. Workflow Cards ===== */
+.workflow-card {
+    text-align: center;
+    padding: 2rem 1.25rem;
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-lg);
+    transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+    position: relative;
+    overflow: hidden;
+}
+.workflow-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.08), 0 2px 8px rgba(0,0,0,0.04);
+    border-color: var(--color-accent-emphasis);
+}
+[data-theme="dark"] .workflow-card:hover {
+    box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+}
+.workflow-step {
+    position: absolute;
+    top: 8px;
+    left: 12px;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--color-page-bg);
+    color: var(--color-text-tertiary);
+    font-size: 11px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.workflow-icon {
+    font-size: 2rem;
+    color: var(--color-accent-emphasis);
+    margin-bottom: 0.75rem;
+    opacity: 0.85;
+    transition: transform 0.3s ease, opacity 0.3s ease;
+}
+.workflow-card:hover .workflow-icon {
+    transform: scale(1.1);
+    opacity: 1;
+}
+.workflow-card h5 {
+    font-weight: 600;
+    font-size: 1rem;
+    margin-bottom: 0.5rem;
+}
+
+/* ===== 25. Feature Cards ===== */
+.feature-card {
+    padding: 1.75rem;
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-lg);
+    transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+}
+.feature-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+    border-color: var(--color-accent-emphasis);
+}
+[data-theme="dark"] .feature-card:hover {
+    box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+}
+.feature-card-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: var(--radius);
+    background: rgba(var(--color-accent-emphasis-rgb, 9,105,218), 0.08);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.3rem;
+    color: var(--color-accent-emphasis);
+    margin-bottom: 1rem;
+    transition: background 0.25s ease, transform 0.25s ease;
+}
+.feature-card:hover .feature-card-icon {
+    background: rgba(var(--color-accent-emphasis-rgb, 9,105,218), 0.14);
+    transform: scale(1.05);
+}
+.feature-card h5 {
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+}
+.feature-list {
+    list-style: none;
+    padding: 0;
+    margin: 0.75rem 0 0;
+}
+.feature-list li {
+    font-size: 0.8rem;
+    color: var(--color-text-secondary);
+    padding: 2px 0;
+}
+.feature-list li i {
+    color: var(--color-success-emphasis, #1f883d);
+    margin-right: 4px;
+    font-size: 0.75rem;
+}
+
+/* ===== 26. Advance Cards ===== */
+.advance-card {
+    padding: 0.5rem 1rem;
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-lg);
+    transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+}
+.advance-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.06);
+    border-color: var(--color-accent-emphasis);
+}
+[data-theme="dark"] .advance-card:hover {
+    box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+}
+.advance-icon {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, rgba(var(--color-accent-emphasis-rgb, 9,105,218), 0.08), rgba(var(--color-success-emphasis-rgb, 31,136,61), 0.08));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+    color: var(--color-accent-emphasis);
+    margin: 0 auto;
+    transition: transform 0.3s ease;
+}
+.advance-card:hover .advance-icon {
+    transform: scale(1.08);
+}
+.advance-card .card-body {
+    padding: 1rem 0;
+}
+
+/* ===== 27. CTA Section ===== */
+.cta-section {
+    background: var(--color-card-bg);
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-lg);
+    padding: 3rem 1.5rem;
+    margin-bottom: 1rem;
+    box-shadow: var(--shadow-sm);
+    position: relative;
+    overflow: hidden;
+}
+.cta-section::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--color-accent-emphasis), var(--color-success-emphasis));
+}
+[data-theme="dark"] .cta-section {
+    background: linear-gradient(135deg, #161b22, #0d1117);
+}
+
+/* ===== 28. Dark theme overrides for animations ===== */
+[data-theme="dark"] .success-checkmark .check-circle {
+    stroke: #2da44e;
+}
+[data-theme="dark"] .success-checkmark .check-path {
+    stroke: #2da44e;
+}
+[data-theme="dark"] .sparkle-burst::before,
+[data-theme="dark"] .sparkle-burst::after {
+    background: #2da44e;
+}
+[data-theme="dark"] .celebration-pulse {
+    animation-name: celeb-pulse-dark;
+}
+@keyframes celeb-pulse-dark {
+    0%   { box-shadow: 0 0 0 0 rgba(45, 164, 78, 0.5); }
+    100% { box-shadow: 0 0 0 20px rgba(45, 164, 78, 0); }
+}
 

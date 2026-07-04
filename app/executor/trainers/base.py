@@ -54,6 +54,7 @@ class BaseTrainer(ABC):
         # 检查点: 每N个epoch保存一次训练快照 (0 = 禁用)
         self.checkpoint_frequency = int(self.hyperparams.get('checkpoint_frequency', 5))
         self._current_epoch = 0  # 当前epoch (用于断点续训)
+        self._last_train_metrics = {}  # 最后一轮训练指标, 用于合并到final_metrics
 
     # ============ 子类必须实现 ============
 
@@ -81,6 +82,16 @@ class BaseTrainer(ABC):
     def save_model(self, path: str):
         """保存模型到指定路径"""
         ...
+
+    # ============ 交叉验证 (子类可选重写) ============
+
+    def run_cross_validation(self) -> dict | None:
+        """交叉验证评估泛化能力 (默认 no-op, sklearn 子类重写)
+
+        Returns:
+            dict with cv_mean, cv_std, cv_folds, n_samples, error | None
+        """
+        return None
 
     # ============ 检查点 (子类可选重写) ============
 
@@ -189,6 +200,7 @@ class BaseTrainer(ABC):
 
                 # 训练一个 epoch
                 metrics = self.train_epoch(epoch)
+                self._last_train_metrics = metrics  # 保存最后一轮训练指标
                 self.callback.on_epoch_end(epoch, self.total_epochs, metrics)
 
                 # 检查子类是否在 train_epoch 中设置了早停
@@ -229,7 +241,27 @@ class BaseTrainer(ABC):
             # 评估
             self.callback.on_log('正在最终评估...')
             final_metrics = self.evaluate()
+
+            # 合并最后一轮训练指标 (train_accuracy/train_loss), 保留到final_metrics
+            # 使diagnose_model_quality.py的train_test_gap检测能正常工作
+            for key in ('train_accuracy', 'train_loss', 'train_precision', 'train_recall', 'train_f1'):
+                if key in self._last_train_metrics:
+                    final_metrics[key] = self._last_train_metrics[key]
+
             self.callback.on_log(f'最终指标: {final_metrics}')
+
+            # 交叉验证 (sklearn子类实现, 其他框架no-op)
+            cv_results = self.run_cross_validation()
+            if cv_results and not cv_results.get('error'):
+                self.callback.on_log(
+                    f'CV: mean={cv_results["cv_mean"]:.4f} +/- {cv_results["cv_std"]:.4f} '
+                    f'({cv_results["cv_folds"]} folds, n={cv_results["n_samples"]})'
+                )
+                final_metrics['cv_mean'] = cv_results.get('cv_mean')
+                final_metrics['cv_std'] = cv_results.get('cv_std')
+                final_metrics['cv_folds'] = cv_results.get('cv_folds')
+            elif cv_results and cv_results.get('error'):
+                self.callback.on_log(f'[CV] 跳过: {cv_results["error"]}')
 
             # 保存模型
             os.makedirs(self.output_dir, exist_ok=True)

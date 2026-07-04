@@ -19,11 +19,6 @@ from app.executor.trainers.base import BaseTrainer
 _nlp_logger = logging.getLogger(__name__)
 
 
-def _jieba_cut(text: str):
-    """jieba 中文分词 — 模块级函数 (必须可 pickle)"""
-    import jieba
-    return list(jieba.cut(text))
-
 # ===================================================================
 # sklearn 算法注册表
 # 格式: '算法简称' → ('模块路径', '类名')
@@ -99,12 +94,19 @@ class SklearnTrainer(BaseTrainer):
     }
 
     # 需要正则化防过拟合的算法默认参数
+    # class_weight='balanced' 自动补偿类别不平衡 (对不支持该参数的算法跳过)
     _REGULARIZE_DEFAULTS = {
-        'decision_tree': {'max_depth': 10, 'min_samples_split': 10, 'min_samples_leaf': 5},
-        'random_forest': {'max_depth': 15, 'min_samples_leaf': 5},
+        'decision_tree': {'max_depth': 10, 'min_samples_split': 10, 'min_samples_leaf': 5,
+                          'class_weight': 'balanced'},
+        'random_forest': {'max_depth': 15, 'min_samples_leaf': 5,
+                          'class_weight': 'balanced'},
         'random_forest_regressor': {'max_depth': 15, 'min_samples_leaf': 5},
         'gradient_boosting': {'max_depth': 5, 'min_samples_leaf': 10},
         'gradient_boosting_regressor': {'max_depth': 5, 'min_samples_leaf': 10},
+        'svm': {'C': 0.5, 'class_weight': 'balanced'},
+        'svr': {'C': 0.5},
+        'knn': {'n_neighbors': 7},
+        'logistic_regression': {'max_iter': 2000, 'class_weight': 'balanced'},
     }
 
     def __init__(self, job, dataset, hyperparams: dict = None):
@@ -149,6 +151,12 @@ class SklearnTrainer(BaseTrainer):
         """
         df = self._read_data_file()
 
+        # ── 全行去重: 防止相同数据行落入训练/测试两侧导致数据泄露 ──
+        before = len(df)
+        df = df.drop_duplicates()
+        if len(df) < before:
+            self.callback.on_log(f'数据去重: {before} → {len(df)} 行 (移除 {before - len(df)} 条完全重复行)')
+
         # ── 聚类: 无监督学习, 不需要目标列 ──
         if self.task_type == 'clustering':
             self._prepare_clustering_data(df)
@@ -175,14 +183,14 @@ class SklearnTrainer(BaseTrainer):
         if self.task_type == 'classification':
             self._save_class_labels(y)
 
-        # ── 缺失值填充 + 分类特征编码 ──
-        X = self._impute_encode_features(X)
-
-        # ── 目标变量编码 (含分类→回归自动纠错) ──
-        y = self._encode_target_variable(y)
-
-        # ── 划分训练/测试集 (在 TF-IDF 和 StandardScaler 之前, 防止数据泄漏) ──
+        # ── 先划分训练/测试集 (在 imputation/encoding 之前, 防止数据泄漏) ──
         self._split_train_test(X, y)
+
+        # ── 仅在训练集上拟合 imputer/encoder, 变换训练集和测试集 ──
+        self._fit_impute_encode_splits()
+
+        # ── 目标变量编码: 仅在训练集上拟合 LabelEncoder ──
+        self._fit_encode_target()
 
         # ── NLP: TF-IDF 仅在训练集上拟合, 然后变换训练集和测试集 ──
         if nlp_texts is not None and nlp_vectorizer_config is not None:
@@ -314,11 +322,11 @@ class SklearnTrainer(BaseTrainer):
 
         _nlp_logger.info(
             '[NLP] Detected text col "%s", will apply TfidfVectorizer '
-            'AFTER split (jieba tokenizer, max_features=%d)', nlp_text_col, _nlp_mf
+            'AFTER split (combined jieba+char tokenizer, max_features=%d)', nlp_text_col, _nlp_mf
         )
         self.callback.on_log(
             f'[NLP] 检测到文本列 "{nlp_text_col}", TfidfVectorizer '
-            f'(jieba 分词, max_features={_nlp_mf}, min_df={_nlp_min_df}, '
+            f'(jieba+char 合并分词, max_features={_nlp_mf}, min_df={_nlp_min_df}, '
             f'max_df={_nlp_max_df}, 仅在训练集上拟合)'
         )
 
@@ -335,33 +343,9 @@ class SklearnTrainer(BaseTrainer):
             )
             _nlp_mf = _adaptive_mf
 
-        # ── 配置 vectorizer (暂不拟合) ──
-        from sklearn.feature_extraction.text import TfidfVectorizer
-
-        try:
-            import jieba  # noqa: F401
-            tokenizer_fn = _jieba_cut
-            _nlp_logger.info('[NLP] Using jieba word tokenizer')
-            nlp_vectorizer_config = {
-                'tokenizer': tokenizer_fn,
-                'max_features': _nlp_mf,
-                'min_df': _nlp_min_df,
-                'max_df': _nlp_max_df,
-                'sublinear_tf': True,
-                'dtype': np.float32,
-            }
-        except ImportError:
-            tokenizer_fn = None
-            _nlp_logger.info('[NLP] jieba not available, falling back to char ngram')
-            nlp_vectorizer_config = {
-                'max_features': _nlp_mf,
-                'min_df': _nlp_min_df,
-                'max_df': _nlp_max_df,
-                'analyzer': 'char',
-                'ngram_range': (1, 3),
-                'sublinear_tf': True,
-                'dtype': np.float32,
-            }
+        # ── 配置 vectorizer (使用共享 NLP 预处理模块) ──
+        from app.utils.nlp_preprocessing import create_vectorizer_config
+        nlp_vectorizer_config = create_vectorizer_config(_nlp_mf, _nlp_min_df, _nlp_max_df)
 
         # 从特征矩阵中移除文本列 (稍后添加 TF-IDF 特征)
         X = X.drop(columns=[nlp_text_col])
@@ -379,44 +363,64 @@ class SklearnTrainer(BaseTrainer):
         except Exception:
             self._class_labels = []
 
-    def _impute_encode_features(self, X: pd.DataFrame) -> pd.DataFrame:
-        """处理缺失值并编码分类特征列。
+    def _fit_impute_encode_splits(self):
+        """在划分后的训练集上拟合 imputer/encoder, 变换训练集和测试集。
 
-        Numeric columns: mean imputation
-        Categorical columns: most_frequent imputation + LabelEncoder
+        防止数据泄漏: imputer/encoder 仅在训练集上拟合。
         """
-        # 处理缺失值 (非文本列)
-        num_cols = X.select_dtypes(include=[np.number]).columns
+        X_train = self._X_train
+        X_test = self._X_test
+
+        # 处理缺失值 (非文本列) — 仅在训练集上拟合
+        num_cols = X_train.select_dtypes(include=[np.number]).columns
         if len(num_cols) > 0:
             num_imputer = SimpleImputer(strategy='mean')
-            X[num_cols] = num_imputer.fit_transform(X[num_cols])
+            X_train[num_cols] = num_imputer.fit_transform(X_train[num_cols])
+            test_num = [c for c in num_cols if c in X_test.columns]
+            if test_num:
+                X_test[test_num] = num_imputer.transform(X_test[test_num])
 
-        cat_cols = X.select_dtypes(include=['object']).columns
+        cat_cols = X_train.select_dtypes(include=['object']).columns
         if len(cat_cols) > 0:
             cat_imputer = SimpleImputer(strategy='most_frequent')
-            X[cat_cols] = cat_imputer.fit_transform(X[cat_cols])
+            X_train[cat_cols] = cat_imputer.fit_transform(X_train[cat_cols])
+            test_cat = [c for c in cat_cols if c in X_test.columns]
+            if test_cat:
+                X_test[test_cat] = cat_imputer.transform(X_test[test_cat])
 
-        # 编码分类特征
+        # 编码分类特征 — 仅在训练集上拟合 LabelEncoder
         for col in cat_cols:
             le = LabelEncoder()
-            X[col] = le.fit_transform(X[col].astype(str))
+            X_train[col] = le.fit_transform(X_train[col].astype(str))
             self._label_encoders[col] = le
+            if col in X_test.columns:
+                try:
+                    X_test[col] = le.transform(X_test[col].astype(str))
+                except ValueError:
+                    # 测试集中出现训练集未见的类别 — 映射到已知类
+                    X_test[col] = X_test[col].astype(str).apply(
+                        lambda x: x if x in le.classes_ else le.classes_[0]
+                    )
+                    X_test[col] = le.transform(X_test[col].astype(str))
 
-        return X
+        self._X_train = X_train
+        self._X_test = X_test
 
-    # ── 数据加载步骤 5: 目标变量编码 ──
+    # ── 数据加载步骤 5: 目标变量编码 (拆分后, 仅在训练集上拟合) ──
 
-    def _encode_target_variable(self, y: pd.Series) -> pd.Series:
-        """编码目标变量, 含分类→回归自动纠错逻辑。
+    def _fit_encode_target(self):
+        """在划分后的训练集上拟合目标编码器, 变换训练集和测试集。
 
-        当 target 为连续值但 task_type='classification' 时,
-        自动切换到对应的回归算法。
+        含分类→回归自动纠错逻辑 (type_of_target 检查是纯检查, 无泄漏)。
         """
         if self.task_type != 'classification':
-            return y
+            return
+
+        y_train = self._y_train
+        y_test = self._y_test
 
         try:
-            yt = type_of_target(y)
+            yt = type_of_target(y_train)
         except Exception:
             yt = 'unknown'
 
@@ -445,14 +449,30 @@ class SklearnTrainer(BaseTrainer):
                     f'将强制编码为分类标签 (可能导致无意义结果)。'
                 )
                 le = LabelEncoder()
-                y = le.fit_transform(y.astype(str))
+                self._y_train = le.fit_transform(y_train.astype(str))
+                if y_test is not None:
+                    try:
+                        self._y_test = le.transform(y_test.astype(str))
+                    except ValueError:
+                        self._y_test = le.transform(
+                            y_test.astype(str).apply(
+                                lambda x: x if x in le.classes_ else le.classes_[0]
+                            )
+                        )
                 self._label_encoders['__target__'] = le
-        elif y.dtype == 'object':
+        elif y_train.dtype == 'object':
             le = LabelEncoder()
-            y = le.fit_transform(y.astype(str))
+            self._y_train = le.fit_transform(y_train.astype(str))
+            if y_test is not None:
+                try:
+                    self._y_test = le.transform(y_test.astype(str))
+                except ValueError:
+                    self._y_test = le.transform(
+                        y_test.astype(str).apply(
+                            lambda x: x if x in le.classes_ else le.classes_[0]
+                        )
+                    )
             self._label_encoders['__target__'] = le
-
-        return y
 
     # ── 数据加载步骤 6: 训练/测试集划分 ──
 
@@ -538,15 +558,12 @@ class SklearnTrainer(BaseTrainer):
         _tfidf_train = self._vectorizer.fit_transform(_train_texts)
         _tfidf_test = self._vectorizer.transform(_test_texts)
 
-        _tfidf_train_df = pd.DataFrame(
-            _tfidf_train.toarray(),
-            columns=[f'tfidf_{i}' for i in range(_tfidf_train.shape[1])],
-            index=_train_indices,
+        _tfidf_cols = [f'tfidf_{i}' for i in range(_tfidf_train.shape[1])]
+        _tfidf_train_df = pd.DataFrame.sparse.from_spmatrix(
+            _tfidf_train, columns=_tfidf_cols, index=_train_indices,
         )
-        _tfidf_test_df = pd.DataFrame(
-            _tfidf_test.toarray(),
-            columns=[f'tfidf_{i}' for i in range(_tfidf_test.shape[1])],
-            index=_test_indices,
+        _tfidf_test_df = pd.DataFrame.sparse.from_spmatrix(
+            _tfidf_test, columns=_tfidf_cols, index=_test_indices,
         )
 
         self._X_train = pd.concat([self._X_train, _tfidf_train_df], axis=1)
@@ -562,22 +579,47 @@ class SklearnTrainer(BaseTrainer):
     # ── 数据加载步骤 8: StandardScaler + 类别平衡 ──
 
     def _apply_scaler_and_balance(self):
-        """StandardScaler (仅在训练集上拟合) + 类别平衡 (SMOTE/undersample)。"""
+        """StandardScaler (仅在训练集上拟合) + 类别平衡 (SMOTE/undersample)。
+
+        IMPORTANT: TF-IDF 特征列 (tfidf_*) 不参与 StandardScaler。
+        TF-IDF 已被 TfidfVectorizer L2 归一化, 叠加 StandardScaler 会:
+         - 破坏稀疏性 (0 -> 负值, 模型无法区分"词不存在"和"词频低")
+         - 洗掉判别信号 (负面词和正面词区分度归零)
+         - 导致模型对全部输入预测同一类别 (正向偏置)
+        """
         # ═══════════════════════════════════════════════════════════════
-        # StandardScaler: 仅在训练集上拟合, 然后变换两个集合
+        # StandardScaler: 仅在训练集上拟合, 跳过 tfidf_* 列
         # ═══════════════════════════════════════════════════════════════
-        num_cols_train = self._X_train.select_dtypes(include=[np.number]).columns
-        if len(num_cols_train) > 0:
+        all_num_cols = self._X_train.select_dtypes(include=[np.number]).columns
+        tfidf_cols = [c for c in all_num_cols if str(c).startswith('tfidf_')]
+        non_tfidf_cols = [c for c in all_num_cols if c not in tfidf_cols]
+
+        if tfidf_cols:
+            n_tfidf = len(tfidf_cols)
+            _nlp_logger.info(
+                '[NLP] Skipping StandardScaler for %d tfidf_* columns '
+                '(already L2-normalized by TfidfVectorizer)', n_tfidf
+            )
+            self.callback.on_log(
+                f'[NLP] 已跳过 StandardScaler for {n_tfidf} TF-IDF 特征列 '
+                f'(TfidfVectorizer 已做 L2 归一化)'
+            )
+
+        if len(non_tfidf_cols) > 0:
             self._scaler = StandardScaler()
-            self._X_train[num_cols_train] = self._scaler.fit_transform(
-                self._X_train[num_cols_train]
+            self._X_train[non_tfidf_cols] = self._scaler.fit_transform(
+                self._X_train[non_tfidf_cols]
             )
             # 测试集用训练集的 scaler 变换
-            num_cols_test = [c for c in num_cols_train if c in self._X_test.columns]
+            num_cols_test = [c for c in non_tfidf_cols if c in self._X_test.columns]
             if num_cols_test:
                 self._X_test[num_cols_test] = self._scaler.transform(
                     self._X_test[num_cols_test]
                 )
+        else:
+            # 无其他数值列 (纯 NLP 数据集), scaler 保持 None
+            _nlp_logger.info('[NLP] No non-tfidf numeric columns, scaler is None')
+            self._scaler = None
 
         # ── NLP 类别不平衡 → 重采样 (SMOTE / undersample) ──
         _balance = self.hyperparams.get('balance', None)
@@ -634,8 +676,11 @@ class SklearnTrainer(BaseTrainer):
         module_path, class_name = model_info
         model_cls = _import_model(module_path, class_name)
 
-        # 获取算法特定参数
-        algo_params = dict(self.hyperparams.get('algorithm_params', {}))
+        # 获取算法特定参数, 过滤掉 None 值 (None 会覆盖 sklearn 默认值导致崩溃)
+        algo_params = {
+            k: v for k, v in self.hyperparams.get('algorithm_params', {}).items()
+            if v is not None
+        }
 
         # 应用正则化默认值 (防过拟合) — 用户显式指定则不覆盖
         if self.algorithm in self._REGULARIZE_DEFAULTS:
@@ -787,8 +832,12 @@ class SklearnTrainer(BaseTrainer):
 
         cv_folds = int(self.hyperparams.get('cv_folds', 0))
         if cv_folds < 2:
-            return {'error': 'CV disabled (cv_folds < 2)', 'cv_mean': 0, 'cv_std': 0,
-                    'cv_scores': [], 'cv_folds': 0, 'n_samples': 0}
+            # Auto-compute: min(5, n_samples // 50), need at least 2
+            n_total = (len(self._X_train) + len(self._X_test)
+                       if hasattr(self, '_X_test') and self._X_test is not None
+                       else len(self._X_train))
+            cv_folds = max(2, min(5, n_total // 50))
+            self.callback.on_log(f'[CV] 自动设置 cv_folds={cv_folds} (n_samples={n_total})')
 
         try:
             # 使用全量 X, y (train+test) 做 CV, 获得更稳定的泛化估计
@@ -962,17 +1011,19 @@ class SklearnTrainer(BaseTrainer):
         if self.task_type == 'classification':
             # 基础准确率
             metrics[f'{prefix}accuracy'] = round(float(accuracy_score(y_true, y_pred)), 4)
-            try:
-                # weighted 平均 — 按样本数加权
-                metrics[f'{prefix}precision_weighted'] = round(float(precision_score(y_true, y_pred, average='weighted', zero_division=0)), 4)
-                metrics[f'{prefix}recall_weighted'] = round(float(recall_score(y_true, y_pred, average='weighted', zero_division=0)), 4)
-                metrics[f'{prefix}f1_weighted'] = round(float(f1_score(y_true, y_pred, average='weighted', zero_division=0)), 4)
-                # macro 平均 — 各类别等权, 暴露小类别表现
-                metrics[f'{prefix}precision_macro'] = round(float(precision_score(y_true, y_pred, average='macro', zero_division=0)), 4)
-                metrics[f'{prefix}recall_macro'] = round(float(recall_score(y_true, y_pred, average='macro', zero_division=0)), 4)
-                metrics[f'{prefix}f1_macro'] = round(float(f1_score(y_true, y_pred, average='macro', zero_division=0)), 4)
-            except Exception:
-                pass
+            for name, func in [
+                ('precision_weighted', lambda: precision_score(y_true, y_pred, average='weighted', zero_division=0)),
+                ('recall_weighted', lambda: recall_score(y_true, y_pred, average='weighted', zero_division=0)),
+                ('f1_weighted', lambda: f1_score(y_true, y_pred, average='weighted', zero_division=0)),
+                ('precision_macro', lambda: precision_score(y_true, y_pred, average='macro', zero_division=0)),
+                ('recall_macro', lambda: recall_score(y_true, y_pred, average='macro', zero_division=0)),
+                ('f1_macro', lambda: f1_score(y_true, y_pred, average='macro', zero_division=0)),
+            ]:
+                full_name = f'{prefix}{name}'
+                try:
+                    metrics[full_name] = round(float(func()), 4)
+                except Exception:
+                    pass
         else:
             metrics[f'{prefix}mse'] = round(float(mean_squared_error(y_true, y_pred)), 4)
             metrics[f'{prefix}mae'] = round(float(mean_absolute_error(y_true, y_pred)), 4)

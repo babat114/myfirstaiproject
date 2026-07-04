@@ -14,8 +14,11 @@ NLP 模型重新训练脚本 (Batch B)
   --max-df F           最大文档频率比例 (默认: 0.9)
   --balance MODE       重采样: smote (默认) / undersample / none
   --cv N               交叉验证折数 (默认: 5, 0=禁用)
-  --augment N          数据增强倍数 (默认: 0=禁用, 建议2)
+  --augment N          数据增强倍数 (默认: 0=禁用, 不建议使用AI生成数据)
   --workers N          并行训练worker数 (默认: 2)
+  --profile PROFILE    训练参数配置: auto(默认), standard, conservative, ultra_conservative
+  --no-auto-profile    禁用自动根据数据规模选择参数配置
+  --quality-gate       训练后自动质量检查 (检测常数预测器等)
   --no-verify          跳过测试句子验证 (默认会验证10句)
   --output-json PATH   输出JSON报告到文件
 """
@@ -77,7 +80,13 @@ ALL_SKLEARN_ALGOS = [
     {'algo': 'decision_tree',       'cn': 'DecisionTree'},
 ]
 
+# PyTorch MLP algorithm (neural network with multi-epoch training)
+ALL_PYTORCH_ALGOS = [
+    {'algo': 'mlp_classifier',      'cn': 'MLP'},
+]
+
 # 默认算法集 (向后兼容: 经典3算法)
+ALL_ALGOS = ALL_SKLEARN_ALGOS + ALL_PYTORCH_ALGOS
 ALGORITHMS = ALL_SKLEARN_ALGOS[:3]
 
 # ===================================================================
@@ -268,6 +277,90 @@ def verify_model_predictions(model_path, test_sentences):
         return vec_ok, accuracy, test_results
 
 
+# ═══════════════════════════════════════════════════════════════
+# 保守训练参数配置 — 根据数据集规模自动选择
+# 不使用 AI 数据增强, 仅调节模型复杂度防止过拟合
+# ═══════════════════════════════════════════════════════════════
+
+def get_conservative_params(n_rows: int, profile: str = 'auto',
+                            base_max_features: int = 2000):
+    """根据数据集规模返回保守训练参数。
+
+    不支持 augment_factor (AI数据增强) — 仅通过降低模型复杂度防止过拟合。
+
+    Profiles:
+      auto (默认): 根据 n_rows 自动选择
+      standard: 标准参数 (大数据集 >5000行)
+      conservative: 保守参数 (500-2000行)
+      ultra_conservative: 极度保守 (<500行)
+    """
+    if profile == 'auto':
+        n_train = int(n_rows * 0.8)
+        if n_train < 300:
+            profile = 'ultra_conservative'
+        elif n_train < 500:
+            profile = 'ultra_conservative'
+        elif n_train < 2000:
+            profile = 'conservative'
+        else:
+            profile = 'standard'
+
+    # ── 各 profile 的算法参数覆盖 ──
+    profiles = {
+        'standard': {
+            'max_features': base_max_features,
+            'min_df': 2,
+            'max_df': 0.9,
+            'cv_folds': 5,
+            # 算法默认参数不动
+            'rf_max_depth': None,       # None = 使用默认 15
+            'rf_n_estimators': None,
+            'gb_max_depth': None,
+            'gb_n_estimators': None,
+            'dt_max_depth': None,
+            'knn_n_neighbors': None,
+            'knn_weights': None,        # None = 使用 distance 权重
+            'svm_C': None,              # None = 使用 sklearn 默认 C=1.0
+            'min_samples_leaf': 5,
+        },
+        'conservative': {
+            'max_features': min(1000, n_rows // 3),
+            'min_df': max(3, n_rows // 200),
+            'max_df': 0.85,
+            'cv_folds': min(5, max(3, n_rows // 80)),
+            'rf_max_depth': 15,
+            'rf_n_estimators': 200,
+            'gb_max_depth': 3,
+            'gb_n_estimators': 50,
+            'dt_max_depth': 4,
+            'knn_n_neighbors': min(7, max(3, n_rows // 50)),
+            'knn_weights': 'distance',
+            'svm_C': 0.1,
+            'min_samples_leaf': max(4, n_rows // 100),
+        },
+        'ultra_conservative': {
+            'max_features': min(300, max(50, n_rows // 2)),
+            'min_df': max(2, n_rows // 200),
+            'max_df': 0.8,
+            'cv_folds': min(3, max(2, n_rows // 30)),
+            'rf_max_depth': 8,
+            'rf_n_estimators': 100,
+            'gb_max_depth': 2,
+            'gb_n_estimators': 20,
+            'dt_max_depth': 2,
+            'knn_n_neighbors': max(11, min(21, n_rows // 12)),
+            'knn_weights': 'uniform',
+            'svm_C': 0.05,
+            'min_samples_leaf': max(3, n_rows // 50),
+            # DecisionTree 在极小数据集上退化为常数预测器 (节点过少)
+            # LogisticRegression (L2正则化) 是此类场景下更可靠的选择
+            'skip_algorithms': ['decision_tree'],
+        },
+    }
+
+    return profiles.get(profile, profiles['standard'])
+
+
 def train_one(app, admin_id, dataset_id, algo_conf, idx,
               verify=True,
               nlp_max_features=2000,
@@ -275,7 +368,9 @@ def train_one(app, admin_id, dataset_id, algo_conf, idx,
               nlp_max_df=0.9,
               balance_mode='smote',
               cv_folds=5,
-              augment_factor=0):
+              augment_factor=0,
+              conservative_params=None,
+              quality_gate=False):
     """训练一个NLP模型"""
     algo = algo_conf['algo']
     cn = algo_conf['cn']
@@ -313,6 +408,8 @@ def train_one(app, admin_id, dataset_id, algo_conf, idx,
             logger.info(f'[{idx}] 开始: {model.name} ({algo})')
 
             # ── 基础超参数 ──
+            # 如果提供了 conservative_params, 用它覆盖默认 NLP/TF-IDF 参数
+            cp = conservative_params or {}
             hp = {
                 'algorithm': algo,
                 'task_type': 'classification',
@@ -321,12 +418,12 @@ def train_one(app, admin_id, dataset_id, algo_conf, idx,
                 'random_state': 42,
                 'total_epochs': 10 if use_pytorch else 5,
                 'hidden_layers': [128, 64] if use_pytorch else None,
-                'nlp_max_features': nlp_max_features,
-                'nlp_min_df': nlp_min_df,
-                'nlp_max_df': nlp_max_df,
+                'nlp_max_features': cp.get('max_features', nlp_max_features),
+                'nlp_min_df': cp.get('min_df', nlp_min_df),
+                'nlp_max_df': cp.get('max_df', nlp_max_df),
                 'balance': balance_mode,
-                'cv_folds': cv_folds,
-                'augment_factor': augment_factor,
+                'cv_folds': cp.get('cv_folds', cv_folds) if cv_folds > 0 else 0,
+                'augment_factor': 0,  # 不使用 AI 数据增强
             }
 
             # ── 算法特定参数 ──
@@ -334,29 +431,37 @@ def train_one(app, admin_id, dataset_id, algo_conf, idx,
             if algo in _ALGOS_WITH_CLASS_WEIGHT:
                 _algo_params['class_weight'] = 'balanced'
 
-            # 各算法最佳实践参数 (Batch B 优化)
+            # 通用最小叶节点数 (保守参数覆盖)
+            min_leaf = cp.get('min_samples_leaf', 5)
+
+            # 各算法参数 (conservative 覆盖关键参数)
             if algo == 'logistic_regression':
                 _algo_params['max_iter'] = 2000
                 _algo_params['solver'] = 'liblinear'
             elif algo == 'svm':
                 _algo_params['probability'] = True
                 _algo_params['kernel'] = 'rbf'
+                _svm_c = cp.get('svm_C')
+                if _svm_c is not None:
+                    _algo_params['C'] = _svm_c
             elif algo == 'knn':
-                _algo_params['weights'] = 'distance'
-                _algo_params['n_neighbors'] = 5
+                _algo_params['weights'] = cp.get('knn_weights', 'distance')
+                _algo_params['n_neighbors'] = cp.get('knn_n_neighbors', 5)
             elif algo == 'gradient_boosting':
-                _algo_params['n_estimators'] = 200
-                _algo_params['max_depth'] = 5
-                _algo_params['min_samples_leaf'] = 10
+                _algo_params['n_estimators'] = cp.get('gb_n_estimators', 200)
+                _algo_params['max_depth'] = cp.get('gb_max_depth', 5)
+                _algo_params['min_samples_leaf'] = min_leaf
             elif algo == 'random_forest':
-                _algo_params['n_estimators'] = 200
-                _algo_params['max_depth'] = 15
-                _algo_params['min_samples_leaf'] = 5
+                _algo_params['n_estimators'] = cp.get('rf_n_estimators', 200)
+                _algo_params['max_depth'] = cp.get('rf_max_depth', 15)
+                _algo_params['min_samples_leaf'] = min_leaf
             elif algo == 'decision_tree':
-                _algo_params['max_depth'] = 10
-                _algo_params['min_samples_leaf'] = 5
+                _algo_params['max_depth'] = cp.get('dt_max_depth', 10)
+                _algo_params['min_samples_leaf'] = min_leaf
 
             if _algo_params:
+                # 过滤 None 值 (sklearn 构造函数中 None 会覆盖默认值)
+                _algo_params = {k: v for k, v in _algo_params.items() if v is not None}
                 hp['algorithm_params'] = _algo_params
 
             hp = {k: v for k, v in hp.items() if v is not None}
@@ -417,6 +522,42 @@ def train_one(app, admin_id, dataset_id, algo_conf, idx,
                         mark = 'OK' if ok else 'X'
                         logger.info(f'[{idx}]   [{mark}] "{sent[:40]}..." -> {pred} (exp: {exp})')
 
+            # ── 质量门禁 ──
+            quality_warnings = []
+            if quality_gate and model and model.status == 'trained':
+                acc = model.accuracy or 0
+                if acc >= 0.98:
+                    quality_warnings.append(f'acc={acc:.4f} (疑似过拟合)')
+                if acc == 1.0:
+                    quality_warnings.append('acc=1.0 精确过拟合!')
+                # 快速常数预测器检查 (仅检查 model.pkl 文件)
+                if model_path and os.path.exists(model_path) and not model_path.endswith('.pt'):
+                    try:
+                        with open(model_path, 'rb') as f:
+                            b = pickle.load(f)
+                        clf = b.get('model')
+                        vec = b.get('vectorizer')
+                        if clf and vec and hasattr(clf, 'predict'):
+                            test_sents = [
+                                "非常好，强烈推荐", "太差了，千万别买",
+                                "一般般吧", "还不错"
+                            ]
+                            X = vec.transform(test_sents)
+                            preds = clf.predict(X)
+                            unique = len(set(preds))
+                            if unique == 1:
+                                quality_warnings.append(
+                                    f'常数预测器! 对所有测试输入预测同一类别'
+                                )
+                    except Exception:
+                        pass  # 质量检查失败不阻塞训练
+
+                if quality_warnings:
+                    for w in quality_warnings:
+                        logger.warning(f'[{idx}] QUALITY-GATE: {w}')
+                else:
+                    logger.info(f'[{idx}] QUALITY-GATE: PASS')
+
             return model
 
         except Exception as e:
@@ -438,7 +579,8 @@ def parse_args():
   python scripts/retrain_nlp.py --quick                           # 快速验证1个模型
   python scripts/retrain_nlp.py --dataset chnsenticorp            # 仅训练指定数据集
   python scripts/retrain_nlp.py --algo all --workers 4            # 全部算法, 4 worker
-  python scripts/retrain_nlp.py --balance undersample --augment 2 # 欠采样 + 数据增强
+  python scripts/retrain_nlp.py --profile conservative            # 保守参数防过拟合
+  python scripts/retrain_nlp.py --quality-gate                    # 训练后质量检查
         ''',
     )
     parser.add_argument('--quick', action='store_true',
@@ -461,7 +603,15 @@ def parse_args():
     parser.add_argument('--cv', dest='cv_folds', type=int, default=5,
                         help='交叉验证折数 (默认: 5, 0=禁用)')
     parser.add_argument('--augment', dest='augment_factor', type=int, default=0,
-                        help='数据增强倍数 (默认: 0=禁用, 建议2)')
+                        help='数据增强倍数 (默认: 0=禁用, 不建议使用AI生成数据)')
+    parser.add_argument('--profile', type=str, default='auto',
+                        choices=['auto', 'standard', 'conservative', 'ultra_conservative'],
+                        help='训练参数配置: auto(默认, 按数据规模自动选择), standard, '
+                             'conservative, ultra_conservative')
+    parser.add_argument('--no-auto-profile', action='store_true',
+                        help='禁用自动选择, 严格使用 --profile 指定值')
+    parser.add_argument('--quality-gate', action='store_true',
+                        help='训练后自动质量检查 (常数预测器检测/过拟合告警)')
     parser.add_argument('--workers', type=int, default=2,
                         help='并行训练worker数 (默认: 2)')
     parser.add_argument('--output-json', type=str, default=None,
@@ -496,9 +646,11 @@ def main():
     if cv_folds < 0:
         cv_folds = 0
 
-    augment_factor = args.augment_factor
-    if augment_factor < 2:
-        augment_factor = 0
+    augment_factor = 0  # 不再使用 AI 数据增强
+
+    profile = args.profile
+    auto_profile = not args.no_auto_profile
+    quality_gate = args.quality_gate
 
     workers = args.workers
     if workers < 1:
@@ -539,13 +691,13 @@ def main():
 
     # ── 确定算法集 ──
     if algo_filter == 'all':
-        algos = ALL_SKLEARN_ALGOS
+        algos = ALL_ALGOS
     elif isinstance(algo_filter, list):
         # 按名称匹配算法
         matched = []
         for name in algo_filter:
             found = None
-            for a in ALL_SKLEARN_ALGOS:
+            for a in ALL_ALGOS:
                 if a['algo'] == name or a['cn'].lower() == name.lower():
                     found = a
                     break
@@ -554,7 +706,7 @@ def main():
             else:
                 logger.warning(
                     f'未知算法 "{name}", 可用: '
-                    f'{[a["algo"] for a in ALL_SKLEARN_ALGOS]}'
+                    f'{[a["algo"] for a in ALL_ALGOS]}'
                 )
         algos = matched if matched else ALGORITHMS
     else:
@@ -583,11 +735,40 @@ def main():
     for ds in datasets:
         for algo_conf in algos:
             total += 1
-            # 自动对小数据集启用增强 (Douban 800行/Shopping 700行)
-            ds_augment = augment_factor
-            if augment_factor <= 0 and ds.row_count and ds.row_count < 1000:
-                ds_augment = 2  # 自动2x增强
-                logger.info(f'自动启用数据增强: {ds.name} ({ds.row_count}行) -> factor=2')
+            # ── 根据数据集规模自动选择保守参数配置 ──
+            ds_row_count = ds.row_count or 5000
+            if auto_profile:
+                effective_profile = profile  # 'auto' 时由 get_conservative_params 内部决策
+            else:
+                effective_profile = profile
+
+            cons_params = get_conservative_params(
+                ds_row_count, effective_profile, nlp_max_features
+            )
+
+            # ── 跳过 profile 不推荐的算法 (除非用户显式指定) ──
+            skip_algos = cons_params.get('skip_algorithms', [])
+            if algo_conf['algo'] in skip_algos and not (
+                isinstance(algo_filter, list) and algo_conf['algo'] in algo_filter
+            ):
+                logger.info(
+                    f'[{ds.name}] 跳过 {algo_conf["cn"]} — '
+                    f'{effective_profile} profile 不推荐此算法 (改用 LogisticRegression 等)'
+                )
+                results.append({
+                    'index': total, 'dataset': ds.name,
+                    'algorithm': algo_conf['algo'], 'algorithm_cn': algo_conf['cn'],
+                    'status': 'skipped',
+                    'reason': f'{effective_profile} profile excludes this algorithm',
+                })
+                continue
+
+            logger.info(
+                f'[{ds.name}] {ds_row_count}行 -> profile={effective_profile}, '
+                f'max_features={cons_params["max_features"]}, '
+                f'rf_depth={cons_params["rf_max_depth"]}, '
+                f'rf_estimators={cons_params["rf_n_estimators"]}'
+            )
 
             model = train_one(
                 app, admin_id, ds.id, algo_conf, total,
@@ -597,7 +778,9 @@ def main():
                 nlp_max_df=nlp_max_df,
                 balance_mode=balance_mode,
                 cv_folds=cv_folds if cv_folds > 0 else 0,
-                augment_factor=ds_augment,
+                augment_factor=0,  # 不再使用 AI 增强
+                conservative_params=cons_params,
+                quality_gate=quality_gate,
             )
             result = {
                 'index': total,
@@ -633,7 +816,10 @@ def main():
                 'algorithms': [a['algo'] for a in algos],
                 'datasets': [ds.name for ds in datasets],
                 'cv_folds': cv_folds,
-                'augment_factor': augment_factor,
+                'augment_factor': 0,  # 不再使用 AI 增强
+                'profile': profile,
+                'auto_profile': auto_profile,
+                'quality_gate': quality_gate,
                 'balance_mode': balance_mode,
                 'max_features': nlp_max_features,
                 'min_df': nlp_min_df,

@@ -142,3 +142,90 @@ STANDARD_JOBS = [
     {'file': 'housing_regression.csv',           'name': '房价-随机森林回归',   'task': 'regression',     'algo': 'random_forest_regressor',    'target': 'median_house_value'},
     {'file': 'california_regression.csv',        'name': '加州房价-梯度提升',   'task': 'regression',     'algo': 'gradient_boosting_regressor','target': 'median_house_value'},
 ]
+
+
+# ═══════════════════════════════════════════════════════════════
+# 数据感知参数生成 (Phase 3 — 批量训练自动参数优化)
+# ═══════════════════════════════════════════════════════════════
+
+def generate_data_aware_params(dataset_file_path: str, algorithm: str,
+                                task_type: str, target_column: str,
+                                framework: str = 'sklearn',
+                                test_size: float = 0.2,
+                                verbose: bool = False) -> dict:
+    """使用 ParameterGuidanceService 生成数据感知的超参数。
+
+    基于数据集的实际规模、特征数、信号质量等，为每个算法生成
+    自适应参数（而非使用固定的 _REGULARIZE_DEFAULTS）。
+
+    Args:
+        dataset_file_path: 数据集 CSV 文件绝对路径
+        algorithm: 算法名 (random_forest, logistic_regression, ...)
+        task_type: classification / regression / clustering
+        target_column: 目标列名
+        framework: sklearn / pytorch
+        test_size: 测试集比例 (fallback)
+        verbose: 是否打印详细信息
+
+    Returns:
+        {task_type, algorithm, target_column, test_size, ...data_aware_params}
+        如果分析失败则返回仅包含基础键的 dict
+    """
+    import pandas as pd
+    from app.services.dataset_recommendation_service import DatasetAnalyzer
+    from app.services.parameter_guidance_service import ParameterGuidanceService
+
+    base_params = {
+        'task_type': task_type,
+        'algorithm': algorithm,
+        'target_column': target_column,
+        'test_size': test_size,
+    }
+
+    try:
+        # 分析数据集
+        analysis = DatasetAnalyzer.analyze(dataset_file_path, target_column)
+        if analysis.get('error'):
+            if verbose:
+                print(f'  [WARN] DatasetAnalyzer 失败: {analysis["error"]}')
+            return base_params
+
+        # 生成数据感知参数
+        recommendation = ParameterGuidanceService.recommend_initial_params(
+            analysis, algorithm, task_type, framework
+        )
+
+        # 自动检测类别不平衡 → SMOTE
+        if task_type == 'classification' and analysis.get('imbalanced'):
+            class_balance = analysis.get('class_balance', 0)
+            if class_balance < 0.3:  # minority < 30% of majority
+                base_params['balance'] = 'smote'
+                if verbose:
+                    print(f'  [SMOTE] 自动启用 SMOTE (class_balance={class_balance:.3f})')
+
+        if recommendation and recommendation.get('params'):
+            rec_params = recommendation['params']
+            # 合并不覆盖基础键
+            for k, v in rec_params.items():
+                if k not in base_params and v is not None:
+                    base_params[k] = v
+
+            if verbose:
+                n_samples = analysis.get('n_samples', '?')
+                n_features = analysis.get('n_features', '?')
+                signal = recommendation.get('signal_quality', '?')
+                print(f'  [数据感知] {n_samples}样本 x {n_features}特征, '
+                      f'信号={signal}, 生成{len(rec_params)}个参数')
+                for tip in recommendation.get('tips', [])[:3]:
+                    print(f'    Tip: {tip}')
+        elif verbose:
+            print(f'  [INFO] 数据感知参数生成为空，使用基础参数')
+
+    except ImportError as e:
+        if verbose:
+            print(f'  [WARN] 导入失败: {e}，使用基础参数')
+    except Exception as e:
+        if verbose:
+            print(f'  [WARN] 数据感知参数生成失败: {e}，使用基础参数')
+
+    return base_params

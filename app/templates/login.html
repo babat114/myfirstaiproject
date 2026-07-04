@@ -17,14 +17,14 @@
                 <div class="mb-3">
                     <label for="login_id" class="form-label">用户名或邮箱</label>
                     <input type="text" class="form-control" id="login_id" name="login_id"
-                           placeholder="请输入用户名或邮箱" required autofocus>
+                           placeholder="请输入用户名或邮箱" required autofocus autocomplete="username">
                 </div>
 
                 <div class="mb-3">
                     <label for="password" class="form-label">密码</label>
                     <div class="input-group">
                         <input type="password" class="form-control" id="password" name="password"
-                               placeholder="请输入密码" required>
+                               placeholder="请输入密码" required autocomplete="current-password">
                         <button class="btn btn-outline-secondary" type="button"
                                 onclick="togglePassword('password')" tabindex="-1">
                             <i class="bi bi-eye"></i>

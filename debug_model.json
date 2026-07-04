@@ -1,0 +1,69 @@
+{
+  "classifier": "DecisionTreeClassifier",
+  "class_labels": [
+    "正面",
+    "负面"
+  ],
+  "clf_classes_": [
+    0,
+    1
+  ],
+  "feature_count": 315,
+  "predictions": [
+    {
+      "text": "还可以",
+      "nonzero": 2,
+      "pred": 1,
+      "pred_label": "负面",
+      "proba": [
+        0.0,
+        1.0
+      ],
+      "proba_label": "负面"
+    },
+    {
+      "text": "非常好",
+      "nonzero": 2,
+      "pred": 1,
+      "pred_label": "负面",
+      "proba": [
+        0.0,
+        1.0
+      ],
+      "proba_label": "负面"
+    },
+    {
+      "text": "还不错",
+      "nonzero": 2,
+      "pred": 1,
+      "pred_label": "负面",
+      "proba": [
+        0.0,
+        1.0
+      ],
+      "proba_label": "负面"
+    },
+    {
+      "text": "一般般",
+      "nonzero": 0,
+      "pred": 1,
+      "pred_label": "负面",
+      "proba": [
+        0.0,
+        1.0
+      ],
+      "proba_label": "负面"
+    },
+    {
+      "text": "太差了",
+      "nonzero": 2,
+      "pred": 1,
+      "pred_label": "负面",
+      "proba": [
+        0.0,
+        1.0
+      ],
+      "proba_label": "负面"
+    }
+  ]
+}

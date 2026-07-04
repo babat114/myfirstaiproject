@@ -284,13 +284,14 @@ class CommentService:
         user: Optional[User] = None,
     ) -> list:
         """获取某条评论的所有可见回复"""
-        query = Comment.query.filter_by(parent_id=parent_id)
+        from sqlalchemy import select
+        stmt = select(Comment).where(Comment.parent_id == parent_id)
 
         if not (user and user.is_admin):
-            query = query.filter_by(is_visible=True)
+            stmt = stmt.where(Comment.is_visible == True)
 
-        query = query.order_by(Comment.created_at.asc())
-        return [c.to_dict() for c in query.all()]
+        stmt = stmt.order_by(Comment.created_at.asc())
+        return [c.to_dict() for c in db.session.execute(stmt).scalars().all()]
 
     @staticmethod
     def get_comment_by_id(comment_id: int) -> Optional[Comment]:

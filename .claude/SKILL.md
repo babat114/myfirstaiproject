@@ -331,6 +331,10 @@ params = parse_form_params(dict(request.form),
 24. **NLP模型质量全面修复 (v12, 6批次A-F)**: 删除80个过拟合模型(clean_overfit_models.py); NLP训练管道升级(argparse/并行/CV/数据增强/文本增强); 推理健壮修复(特征对齐/Scaler验证/labelEncoder回退/confidence修复/输入校验); 新增38个NLP测试(推理16+管道19+模型3); 全量重训练70→18成功→删除17低质量→117个高质量模型(A级62/B级46/C级9)
 25. **requirements.txt补全 (v12)**: 添加jieba/imbalanced-learn/scikit-image/torchvision 4个依赖
 26. **config.py NLP配置 (v12)**: 添加NLP_DEFAULT_MAX_FEATURES/MIN_DF/MAX_DF/BALANCE_MODE/CV_FOLDS 5个配置项
+27. **合成数据集全量清理 (v13)**: audit_datasets.py 审计 146→KEEP 31/DELETE 115; purge_synthetic.py 安全删除 (FK nullify→model→dataset); 0 NULL FK残留
+28. **真实数据集扩展 (v13)**: fetch_real_datasets.py +19 数据集 (金融/医疗/工业/环境/交通/NLP), 6个target列名修正; 55 real_*.csv 就位
+29. **批量重训练 (v13)**: smart_retrain_all.py 5批次56新模型 (--skip-existing + 自动注册CSV), 80→138 trained
+30. **常数预测器精确清理 (v13)**: cleanup_constant_predictors.py 按 unique_predictions==1 精确筛选删除14个; 假阳性 (perfect_accuracy on easy datasets) 全部保留
 
 ## NLP 文本处理管道 (v11 新增)
 
@@ -441,4 +445,79 @@ from app.services.hyperparameter_tuning import HyperparameterTuningService
 tuning_id = HyperparameterTuningService.run_auto_tuning_async(
     dataset=ds, task_type='clustering', target_column=None, cv=3)
 # 前端连接 SSE: /api/v1/stream/tuning/<tuning_id>/stream
+```
+
+## 数据集迁移项目 (v13, 2026-07-01 完成)
+
+合成数据集→真实数据集全量迁移，5 Phase 全部完成。
+
+### 迁移前后对比
+
+| 指标 | 迁移前 | 迁移后 |
+|------|--------|--------|
+| 数据集 | 146 (115 synth) | **55 (all real)** |
+| 模型 | 261 | **138** |
+| Draft | ~110 | **0** |
+| sklearn | — | **133** |
+| pytorch | — | **5** |
+| 测试 | 375 | **375** |
+
+### 新增脚本
+
+| 脚本 | 用途 | 用法 |
+|------|------|------|
+| `scripts/audit_datasets.py` | 数据集审计 (KEEP/DELETE/UNCERTAIN分类) | `python scripts/audit_datasets.py` |
+| `scripts/purge_synthetic.py` | 安全删除合成数据集 (FK→model→dataset) | `python scripts/purge_synthetic.py --dry-run` |
+| `scripts/fetch_real_datasets.py` | 多来源自动下载真实数据集 | `python scripts/fetch_real_datasets.py --verbose` |
+| `scripts/smart_retrain_all.py` | 智能批量重训练 (自动注册CSV+skip-existing) | `python scripts/smart_retrain_all.py --mode direct --skip-existing` |
+| `scripts/cleanup_drafts.py` | 清理draft模型 (FK安全解除) | `python scripts/cleanup_drafts.py` |
+| `scripts/cleanup_constant_predictors.py` | 精确删除常数预测器 (unique_pred==1) | `python scripts/cleanup_constant_predictors.py` |
+| `scripts/diagnose_model_quality.py` | 7维模型质量诊断 (Tier 1/2/3分级) | `python scripts/diagnose_model_quality.py` |
+
+### 质量诊断分级
+
+| Tier | 含义 | 当前数量 | 处理方式 |
+|------|------|---------|---------|
+| Tier 1 | 需删除 (常数预测器/完美准确率) | 9 | 9个为easy-dataset假阳性 (unique_pred≥2), 保留 |
+| Tier 2 | 高风险 (f1/accuracy gap) | 2 | ozone_level class imbalance, 可接受 |
+| Tier 3 | 需观察 (低健康分) | 5 | 持续监控 |
+| Healthy | 健康模型 | 122 | ✅ |
+
+### 常见问题修复记录 (v13)
+
+**target列名不匹配**: fetch_real_datasets.py manifest中6个数据集的target与CSV实际列名不一致:
+- `class` → `Class` (breast_wisconsin, qsar_biodeg, steel_plates)
+- `Class` → `activity` (run_or_walk)
+- `Global_Sales` → `Target` (video_game_sales)
+- `Survived` → `survived` (titanic)
+
+**draft模型累积**: smart_retrain_all.py 错误路径产生 ds_id=None 的draft模型. 使用 `cleanup_drafts.py` 清理 (FK nullify→delete).
+
+**常数预测器检测**: `diagnose_model_quality.py` 的 `constant_or_zero_var` 标签包含假阳性. 用 `unique_predictions==1` 精确筛选真正常数预测器, `unique_predictions>=2` 的保留.
+
+### 当前状态快速验证
+
+```bash
+cd ~/Desktop/myfirstaiproject
+
+# 模型/数据集统计
+python -c "
+from app import create_app; from app.models.model_record import ModelRecord; from app.models.dataset import Dataset
+from collections import Counter
+app = create_app()
+with app.app_context():
+    print(f'Datasets: {Dataset.query.count()}')
+    print(f'Models: {ModelRecord.query.count()} ({ModelRecord.query.filter_by(status=\"trained\").count()} trained)')
+    fw = Counter(m.framework for m in ModelRecord.query.all())
+    print(f'Frameworks: {dict(fw)}')
+"
+
+# 质量诊断
+python scripts/diagnose_model_quality.py
+
+# 测试
+python -m pytest tests/ -q
+
+# 重训练预览 (如需扩展)
+python scripts/smart_retrain_all.py --mode direct --skip-existing --dry-run
 ```

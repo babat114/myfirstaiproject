@@ -6,6 +6,7 @@
 """
 from flask import Blueprint, render_template, request, redirect, url_for, flash
 from flask_login import login_user, logout_user, login_required, current_user
+from urllib.parse import urlparse
 from app.services.auth_service import AuthService
 from app.utils.decorators import rate_limit
 
@@ -36,6 +37,11 @@ def login():
 
         login_user(user, remember=remember)
         next_page = request.args.get('next')
+        if next_page:
+            # 防止开放重定向: 只允许站内链接 (相对路径或同源)
+            parsed = urlparse(next_page)
+            if parsed.netloc or parsed.scheme:
+                next_page = None
         flash(f'欢迎回来，{user.username}！', 'success')
         return redirect(next_page or url_for('dashboard.index'))
 
@@ -43,6 +49,7 @@ def login():
 
 
 @auth_bp.route('/register', methods=['GET', 'POST'])
+@rate_limit(max_calls=5, period=300)  # 每IP每5分钟最多5次注册
 def register():
     """用户注册页面"""
     if current_user.is_authenticated:

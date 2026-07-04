@@ -13,13 +13,13 @@
                 <div class="mb-3">
                     <label for="username" class="form-label">用户名 <span class="text-danger">*</span></label>
                     <input type="text" class="form-control" id="username" name="username"
-                           placeholder="至少3个字符" required minlength="3">
+                           placeholder="至少3个字符" required minlength="3" autocomplete="username">
                 </div>
 
                 <div class="mb-3">
                     <label for="email" class="form-label">邮箱 <span class="text-danger">*</span></label>
                     <input type="email" class="form-control" id="email" name="email"
-                           placeholder="your@email.com" required>
+                           placeholder="your@email.com" required autocomplete="email">
                 </div>
 
                 <div class="mb-3">
@@ -29,16 +29,16 @@
                 </div>
 
                 <div class="row">
-                    <div class="col-md-6 mb-3">
+                    <div class="col-12 col-md-6 mb-3">
                         <label for="password" class="form-label">密码 <span class="text-danger">*</span></label>
                         <input type="password" class="form-control" id="password" name="password"
-                               placeholder="至少8个字符" required minlength="8">
+                               placeholder="至少8个字符" required minlength="8" autocomplete="new-password">
                         <small class="text-muted">需包含大写字母和数字</small>
                     </div>
-                    <div class="col-md-6 mb-3">
+                    <div class="col-12 col-md-6 mb-3">
                         <label for="confirm_password" class="form-label">确认密码 <span class="text-danger">*</span></label>
                         <input type="password" class="form-control" id="confirm_password"
-                               name="confirm_password" placeholder="再次输入密码" required>
+                               name="confirm_password" placeholder="再次输入密码" required autocomplete="new-password">
                     </div>
                 </div>
 

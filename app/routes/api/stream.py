@@ -140,7 +140,7 @@ def training_stream(job_id):
     """
     if not _acquire_sse_slot():
         return Response(
-            'data: {"error": "SSE 连接数已达上限，请稍后重试"}\n\n',
+            f"data: {json.dumps({'error': 'SSE 连接数已达上限，请稍后重试'}, ensure_ascii=False)}\n\n",
             mimetype='text/event-stream',
             status=503,
         )
@@ -148,13 +148,15 @@ def training_stream(job_id):
     job = TrainingService.get_job_by_id(job_id)
     if not job:
         _release_sse_slot()
-        return Response('data: {"error": "任务不存在"}\n\n',
-                        mimetype='text/event-stream')
+        return Response(
+            f"data: {json.dumps({'error': '任务不存在'}, ensure_ascii=False)}\n\n",
+            mimetype='text/event-stream')
 
     if not job.is_viewable_by(current_user):
         _release_sse_slot()
-        return Response('data: {"error": "权限不足"}\n\n',
-                        mimetype='text/event-stream')
+        return Response(
+            f"data: {json.dumps({'error': '权限不足'}, ensure_ascii=False)}\n\n",
+            mimetype='text/event-stream')
 
     from app.utils.event_bus import get_event_bus
     event_bus = get_event_bus()

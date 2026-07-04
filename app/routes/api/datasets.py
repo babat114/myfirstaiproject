@@ -50,7 +50,7 @@ def list_datasets():
         description: 数据集列表
     """
     page = request.args.get('page', 1, type=int)
-    per_page = request.args.get('per_page', 15, type=int)
+    per_page = min(request.args.get('per_page', 15, type=int), 100)
     category = request.args.get('category')
     search = request.args.get('search')
 
@@ -329,6 +329,26 @@ def analyze_dataset_by_id(dataset_id):
     return jsonify({'success': True, 'data': result})
 
 
+def _convert_numpy_types(obj):
+    """递归转换 numpy 类型为 Python 原生类型 (JSON serializable)"""
+    import numpy as np
+    if isinstance(obj, dict):
+        return {k: _convert_numpy_types(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_convert_numpy_types(v) for v in obj]
+    elif isinstance(obj, tuple):
+        return tuple(_convert_numpy_types(v) for v in obj)
+    elif isinstance(obj, (np.integer,)):
+        return int(obj)
+    elif isinstance(obj, (np.floating,)):
+        return float(obj)
+    elif isinstance(obj, (np.bool_,)):
+        return bool(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    return obj
+
+
 def _analyze_dataset_from_obj(dataset):
     """从 Dataset 对象分析并返回推荐结果 — 供 analyze_dataset / analyze_dataset_by_id 共用"""
     import os
@@ -350,7 +370,7 @@ def _analyze_dataset_from_obj(dataset):
         dataset.file_path, target_col, dataset.file_format,
         known_n_samples=dataset.row_count or None,
     )
-    return result, None
+    return _convert_numpy_types(result), None
 
 
 # 训练表单可用的算法白名单 (与 create.html 中的 ALGORITHMS 保持一致)
@@ -511,10 +531,16 @@ def auto_config(dataset_id):
             alternative_algorithms.append({'value': a, 'display': a, 'confidence': 0.5})
 
     # --- 目标列 ---
-    # 使用分析器自动检测的目标列 (最后一列)
+    # 智能检测: 跳过文本列，选择非文本列中的最后一个
     target_column = target_col
     if not target_column and analysis.get('column_names'):
-        target_column = analysis['column_names'][-1]
+        text_cols = analysis.get('text_columns', [])
+        candidates = [c for c in analysis['column_names'] if c not in text_cols]
+        target_column = candidates[-1] if candidates else analysis['column_names'][-1]
+
+    # --- 文本列: 用于 NLP/BERT 训练时指示文本输入列 ---
+    text_columns = analysis.get('text_columns', [])
+    text_colname = text_columns[0] if text_columns else ''
 
     # --- NLP 专属: 强制 Transformer 迁移学习 ---
     if is_nlp:
@@ -570,16 +596,8 @@ def auto_config(dataset_id):
             total_epochs = params.get('epochs', 10)
 
     # --- 推荐任务名称和描述 ---
-    # 算法显示名映射
-    _ALGO_DISPLAY = {
-        'random_forest': '随机森林', 'gradient_boosting': '梯度提升',
-        'logistic_regression': '逻辑回归', 'svm': 'SVM', 'knn': 'KNN',
-        'random_forest_regressor': '随机森林回归', 'linear_regression': '线性回归',
-        'svr': 'SVR', 'gradient_boosting_regressor': '梯度提升回归',
-        'kmeans': 'K-Means', 'dbscan': 'DBSCAN',
-        'agglomerative': '层次聚类', 'minibatch_kmeans': 'MiniBatchKMeans',
-    }
-    algo_display = _ALGO_DISPLAY.get(algorithm, algorithm)
+    from app.utils.algorithm_info import ALGORITHM_INFO
+    algo_display = ALGORITHM_INFO.get(algorithm, {}).get('name', algorithm)
     if ml_task_type == 'clustering':
         task_cn = '聚类'
     elif ml_task_type == 'regression':
@@ -627,6 +645,7 @@ def auto_config(dataset_id):
             'ml_task_type': ml_task_type,
             'algorithm': algorithm,
             'target_column': target_column or '',
+            'text_column': text_colname,
             'framework': framework,
             'test_size': to_python_type(params.get('test_size', 0.2)),
             'total_epochs': to_python_type(total_epochs),

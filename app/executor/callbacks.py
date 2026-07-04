@@ -5,6 +5,7 @@
 """
 import json
 import os
+import pickle
 from datetime import datetime
 from app import db, logger
 from app.models.training_job import TrainingJob
@@ -138,6 +139,50 @@ class TrainingCallback:
                         elif os.path.exists(exp_model_keras):
                             model.model_file_path = exp_model_keras
                         job.append_log(f'[模型] 已更新关联模型指标')
+
+                        # ---- 自动独立测试集评估 ----
+                        if final_metrics and job.dataset_id:
+                            try:
+                                from app.models.dataset import Dataset as DsModel
+                                ind_test = DsModel.query.filter_by(
+                                    source_dataset_id=job.dataset_id,
+                                    is_test_set=True,
+                                    status='ready'
+                                ).first()
+                                if ind_test:
+                                    from app.services.inference_service import ModelInferenceService
+                                    ind_result = ModelInferenceService.test_model_with_split(
+                                        model, test_dataset=ind_test
+                                    )
+                                    if ind_result.get('success'):
+                                        ind_metrics = {
+                                            'ind_test_accuracy': ind_result.get('accuracy'),
+                                            'ind_test_f1_macro': ind_result.get('f1_macro'),
+                                            'ind_test_f1_weighted': ind_result.get('f1_weighted'),
+                                            'test_dataset_name': ind_test.name,
+                                            'test_dataset_uuid': ind_test.uuid,
+                                            'collection_method': ind_test.collection_method,
+                                        }
+                                        model.set_independent_metrics(ind_metrics)
+                                        model.independent_test_dataset_id = ind_test.id
+                                        job.append_log(
+                                            f'[独立评估] 独立测试集 "{ind_test.name}" 评估完成: '
+                                            f'accuracy={ind_result.get("accuracy")}'
+                                        )
+                                    else:
+                                        job.append_log(
+                                            f'[独立评估] 评估失败: {ind_result.get("error", "未知错误")}'
+                                        )
+                            except Exception as e:
+                                job.append_log(f'[独立评估] 自动评估异常 (非致命): {e}')
+
+                        # 回填实际 sklearn 模型参数到 hyperparameters_json
+                        if job.framework == 'sklearn' and model.model_file_path:
+                            try:
+                                _backfill_sklearn_params_to_model(model, job)
+                            except Exception as e:
+                                logger.warning(f'回填sklearn参数失败 model_id={model.id}: {e}')
+                                job.append_log(f'[参数] 捕获sklearn参数失败: {e}')
             except Exception as e:
                 logger.error(f'更新模型指标失败: {e}')
                 job.append_log(f'[警告] 更新模型指标失败: {e}')
@@ -218,3 +263,90 @@ class TrainingCallback:
         job.append_log(f'[取消] 训练任务已取消')
         db.session.commit()
         self._publish('status_change', {'status': 'cancelled', 'message': '训练任务已取消'})
+
+
+# ═══════════════════════════════════════════════════════════════
+# 训练完成后捕获实际 sklearn 模型参数
+# ═══════════════════════════════════════════════════════════════
+
+def _backfill_sklearn_params_to_model(model, job):
+    """从保存的 .pkl 文件中提取 sklearn 估计器的实际参数，
+    合并到 ModelRecord.hyperparameters_json 中。
+
+    使 DB 中的超参数记录不再只是 {task_type, algorithm, target_column, test_size}，
+    而是包含实际的 sklearn 模型参数（如 n_estimators, max_depth, C 等）。
+    """
+    pkl_path = model.model_file_path
+    if not pkl_path or not os.path.exists(pkl_path):
+        return
+
+    with open(pkl_path, 'rb') as f:
+        bundle = pickle.load(f)
+
+    estimator = bundle.get('model') if isinstance(bundle, dict) else getattr(bundle, 'model', None)
+    if estimator is None or not hasattr(estimator, 'get_params'):
+        return
+
+    actual_params = estimator.get_params()
+
+    # 获取原始用户设定参数
+    hp = model.hyperparameters_dict if hasattr(model, 'hyperparameters_dict') else {}
+    if not hp:
+        hp = json.loads(model.hyperparameters_json) if model.hyperparameters_json else {}
+
+    # 构建合并后的超参数字典
+    merged = {
+        'task_type': hp.get('task_type', job.task_type or ''),
+        'algorithm': hp.get('algorithm', ''),
+        'target_column': hp.get('target_column', None),
+        'test_size': hp.get('test_size', 0.2),
+    }
+
+    # 保留用户显式传入的非基础参数 (如来自 ParameterGuidanceService 的数据感知参数)
+    for k, v in hp.items():
+        if k not in merged and k not in ('epochs', 'batch_size', 'val_size',
+                                          'random_state', 'ml_task_type',
+                                          'actual_params', 'param_source',
+                                          'backfilled_at', 'tuned',
+                                          'tuning_method', 'best_cv_score',
+                                          'tuning_result', 'best_params'):
+            merged[k] = v
+
+    # 过滤掉不应作为超参数的 meta keys
+    filtered = {}
+    for k, v in actual_params.items():
+        if k == 'random_state':
+            continue  # random_state 是固定种子，不是调优参数
+        # 跳过 sklearn 内部对象（如 criterion 函数、class_weight dict 转字符串等）
+        if callable(v):
+            continue
+        if hasattr(v, '__module__'):
+            try:
+                json.dumps({k: v})
+            except (TypeError, ValueError):
+                continue
+        filtered[k] = v
+
+    merged['actual_params'] = filtered
+
+    # 判断参数来源
+    from app.executor.trainers.sklearn_trainer import SklearnTrainer
+    defaults = SklearnTrainer._REGULARIZE_DEFAULTS.get(hp.get('algorithm', ''), {})
+    if hp.get('tuned'):
+        merged['param_source'] = 'hyperparameter_tuning'
+    elif defaults and any(
+        str(filtered.get(k)) == str(v) for k, v in defaults.items()
+    ):
+        merged['param_source'] = 'regularize_defaults'
+    elif 'algorithm_params' in hp:
+        merged['param_source'] = 'user_specified'
+    else:
+        merged['param_source'] = 'sklearn_defaults'
+
+    merged['backfilled_at'] = localnow().isoformat()
+
+    model.set_hyperparameters(merged)
+    job.append_log(
+        f'[参数] 已捕获实际sklearn模型参数 '
+        f'({len(filtered)} keys, source={merged["param_source"]})'
+    )

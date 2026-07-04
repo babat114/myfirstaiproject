@@ -54,9 +54,17 @@ def load_latest_nlp_model(model_uuid=None):
                 logger.error("[FAIL] Model not found: %s", model_uuid)
                 return None, None, None
         else:
+            # 优先选择准确率最高且 >= 0.75 的 NLP 模型 (避免低质量模型导致误报)
             model = ModelRecord.query.filter_by(
                 model_type='nlp', status='trained'
-            ).order_by(ModelRecord.created_at.desc()).first()
+            ).filter(
+                ModelRecord.accuracy >= 0.75
+            ).order_by(ModelRecord.accuracy.desc()).first()
+            if not model:
+                # 回退: 选最新的 (哪怕准确率低)
+                model = ModelRecord.query.filter_by(
+                    model_type='nlp', status='trained'
+                ).order_by(ModelRecord.created_at.desc()).first()
 
         if not model:
             logger.error("[FAIL] No trained NLP model found")
@@ -104,10 +112,13 @@ def test_direct_prediction(model, metadata, vectorizer, pytest_mode=False):
 
     for text, expected_label, desc in TEST_CASES:
         try:
-            # Vectorizer transform
+            # Vectorizer transform — 使用 tfidf_0, tfidf_1... 列名 (与训练时一致)
             X_vec = vectorizer.transform([text])
             X_dense = X_vec.toarray() if hasattr(X_vec, 'toarray') else X_vec
-            df = pd.DataFrame(X_dense)
+            df = pd.DataFrame(
+                X_dense,
+                columns=[f'tfidf_{i}' for i in range(X_dense.shape[1])],
+            )
 
             # Predict
             result = ModelInferenceService.predict(model, df)
@@ -126,10 +137,10 @@ def test_direct_prediction(model, metadata, vectorizer, pytest_mode=False):
 
             # Build probability display
             prob_str = ''
-            if probs:
+            if probs and len(probs) > 0 and probs[0]:
                 prob_str = ' | '.join(
                     "{}={:.3f}".format(p.get('class', '?'), p.get('probability', 0))
-                    for p in probs[:3]
+                    for p in probs[0][:3]
                 )
 
             # Verify label

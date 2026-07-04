@@ -1,5 +1,14 @@
 {% extends "base.html" %}
 {% block title %}{{ model.name }}{% endblock %}
+{% block vue_scripts %}
+<script src="https://cdn.jsdelivr.net/npm/vue@3.5.13/dist/vue.global.prod.js"></script>
+<link href="https://cdn.jsdelivr.net/npm/element-plus@2.9.1/dist/index.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/element-plus@2.9.1/dist/index.full.min.js"></script>
+<script src="{{ url_for('static', filename='js/el-enhance.js') }}"></script>
+{% endblock %}
+{% block chartjs %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+{% endblock %}
 {% from "includes/_macros.html" import status_badge %}
 
 {% block content %}
@@ -207,8 +216,6 @@
                 </div>
                 {% endif %}
                 {% endif %}
-                    </div>
-                </div>
 
                 <!-- 外部验证指标 (如有 ground truth) -->
                 {% if mm.get('test_adjusted_rand_score') is not none or mm.get('test_normalized_mutual_info_score') is not none %}
@@ -1106,11 +1113,6 @@
         errorDiv.scrollIntoView({behavior: 'smooth', block: 'nearest'});
     }
 
-    function escapeHtml(str) {
-        var div = document.createElement('div');
-        div.textContent = str;
-        return div.innerHTML;
-    }
 })();
 
 // ============ 评论区交互逻辑 ============
@@ -1248,7 +1250,7 @@
                             html += '<span class="text-muted mx-1">·</span>';
                             html += '<small class="text-muted">' + (reply.created_at || '').substring(0, 16).replace('T', ' ') + '</small>';
                             html += '<div class="mt-1">' + (isHidden ? '<em class="text-muted">[此回复已被屏蔽]</em>' :
-                                    (reply.content || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>')) + '</div>';
+                                    escapeHtml(reply.content || '').replace(/\n/g,'<br>')) + '</div>';
                             html += '</div></div></div>';
                         });
                         repliesList.innerHTML = html;
@@ -1402,12 +1404,8 @@ var ExportPanel = {
                     showCenteredMessage(label + ' 导出成功!', 'success');
                     this._setLoading(btnId, false);
                     // 保存 deploy 下载 URL
-                    if (task.result && typeof task.result === 'string' && task.result.includes('deploy')) {
-                        // 尝试获取下载链接
-                    }
-                    if (task.task_type === 'deploy' && task.result) {
-                        this._lastDeployUrl = '/api/v1/models/' + this.modelUuid + '/export/download/' +
-                            this.modelUuid.replace(/-/g, '') + '_deploy.zip';
+                    if (task.task_type === 'deploy' && task.result && task.result.zip_file) {
+                        this._lastDeployUrl = '/api/v1/models/' + this.modelUuid + '/export/download/' + task.result.zip_file;
                     }
                     return;
                 }

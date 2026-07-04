@@ -47,7 +47,7 @@ def list_comments(model_id):
     """
     user = get_current_user()
     page = request.args.get('page', 1, type=int)
-    per_page = request.args.get('per_page', 20, type=int)
+    per_page = min(request.args.get('per_page', 20, type=int), 100)
     include_hidden = request.args.get('include_hidden', '').lower() == 'true'
 
     result = CommentService.get_comments_for_model(

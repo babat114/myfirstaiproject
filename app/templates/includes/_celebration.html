@@ -1,0 +1,52 @@
+{# ============================================
+   庆祝动画组件 — 训练完成 / 预测成功
+   用法: {% include "includes/_celebration.html" %}
+   JS 触发: celebrateSuccess() / showTrainingComplete()
+   ============================================ #}
+
+{# 成功勾勾动画 (内联 SVG) #}
+<svg class="success-checkmark d-none" id="successCheckmark" viewBox="0 0 52 52">
+    <circle class="check-circle" cx="26" cy="26" r="23"/>
+    <path class="check-path" d="M14 27l7 7 16-16"/>
+</svg>
+
+{# 训练完成横幅 (默认隐藏, JS 触发) #}
+<div class="d-none" id="trainingCompleteBanner"></div>
+
+{# 新模型记录成功通知横幅 #}
+<div class="d-none" id="modelCreatedBanner"></div>
+
+<script>
+(function() {
+    // 监听 SSE training completion events
+    var sseSources = document.querySelectorAll('[data-sse-url]');
+    sseSources.forEach(function(el) {
+        var url = el.dataset.sseUrl;
+        if (!url) return;
+        var source = new EventSource(url);
+        source.addEventListener('status_change', function(e) {
+            try {
+                var data = JSON.parse(e.data);
+                if (data.status === 'completed') {
+                    var name = data.job_name || el.dataset.modelName || '';
+                    var acc = data.accuracy || '';
+                    if (acc) acc = (parseFloat(acc) * 100).toFixed(1) + '%';
+                    if (typeof showTrainingComplete === 'function') {
+                        setTimeout(function() { showTrainingComplete(name, acc); }, 300);
+                    }
+                }
+            } catch(err) {}
+        });
+        // Store for cleanup
+        if (!window._sseCleanup) window._sseCleanup = [];
+        window._sseCleanup.push(function() { source.close(); });
+    });
+
+    // Cleanup SSE on page unload
+    window.addEventListener('beforeunload', function() {
+        if (window._sseCleanup) {
+            window._sseCleanup.forEach(function(fn) { fn(); });
+        }
+    });
+})();
+</script>

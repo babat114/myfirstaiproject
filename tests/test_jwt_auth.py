@@ -135,7 +135,8 @@ class TestJWTAuthAPI:
                 )
             headers["Authorization"] = f"Bearer {token}"
         elif auth_method == "apikey":
-            headers["X-API-Key"] = test_user.api_key
+            from tests.conftest import _TEST_USER_API_KEY
+            headers["X-API-Key"] = _TEST_USER_API_KEY
 
         response = client.get('/api/auth/me', headers=headers)
         assert response.status_code == expected_status

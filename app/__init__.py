@@ -78,11 +78,17 @@ def create_app(config_name=None):
     # 注册上下文处理器
     register_context_processors(app)
 
+    # 注册安全响应头
+    register_security_headers(app)
+
     # 注册健康检查端点
     register_health_check(app)
 
     # 注册 Swagger/OpenAPI 文档
     configure_swagger(app)
+
+    # 配置静态资源合并压缩 (Flask-Assets)
+    configure_assets(app)
 
     # 注意: 数据库表通过 Flask-Migrate 管理
     # 首次部署运行: flask db upgrade
@@ -109,6 +115,32 @@ def configure_logging(app):
     log_level = getattr(logging, app.config.get('LOG_LEVEL', 'INFO'))
     app.logger.setLevel(log_level)
     app.logger.addHandler(handler)
+
+
+def configure_assets(app):
+    """配置 Flask-Assets 静态资源合并压缩 (仅生产环境)"""
+    try:
+        from flask_assets import Environment, Bundle
+        assets = Environment(app)
+        # 仅生产环境启用压缩
+        assets.debug = app.config.get('DEBUG', True)
+
+        css_bundle = Bundle(
+            'css/style.css',
+            filters='cssmin',
+            output='dist/style.min.css'
+        )
+        js_bundle = Bundle(
+            'js/main.js',
+            filters='jsmin',
+            output='dist/app.min.js'
+        )
+        assets.register('css_all', css_bundle)
+        assets.register('js_all', js_bundle)
+    except ImportError:
+        logger.warning("Flask-Assets 未安装，静态资源合并压缩已禁用")
+    except Exception as e:
+        logger.error(f"Flask-Assets 配置失败: {type(e).__name__}: {e}")
 
 
 def register_blueprints(app):
@@ -257,6 +289,42 @@ def register_error_handlers(app):
             error_color='text-muted'), e.code
 
 
+def register_security_headers(app):
+    """注册安全响应头 (CSP, HSTS, X-Frame-Options 等)"""
+
+    @app.after_request
+    def _add_security_headers(response):
+        # 防止 MIME 类型嗅探
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        # 防止点击劫持
+        response.headers['X-Frame-Options'] = 'DENY'
+        # 引用策略
+        response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+        # 权限策略
+        response.headers['Permissions-Policy'] = (
+            'camera=(), microphone=(), geolocation=(), '
+            'interest-cohort=()'
+        )
+        # HSTS (仅生产环境启用)
+        if not app.debug:
+            response.headers['Strict-Transport-Security'] = (
+                'max-age=31536000; includeSubDomains; preload'
+            )
+        # CSP: 允许本站 + CDN 的脚本/样式/字体/图片
+        response.headers['Content-Security-Policy'] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' cdn.jsdelivr.net unpkg.com; "
+            "style-src 'self' 'unsafe-inline' cdn.jsdelivr.net unpkg.com; "
+            "img-src 'self' data: blob:; "
+            "font-src 'self' cdn.jsdelivr.net; "
+            "connect-src 'self' blob:; "
+            "frame-ancestors 'none'; "
+            "base-uri 'self'; "
+            "form-action 'self'"
+        )
+        return response
+
+
 def register_health_check(app):
     """注册健康检查端点 /health 和 /healthz (Kubernetes 兼容)"""
     from flask import jsonify
@@ -271,7 +339,11 @@ def register_health_check(app):
             db.session.execute(db.text('SELECT 1'))
         except Exception as e:
             db_ok = False
-            db_error = str(e)
+            # 生产环境下仅返回通用错误信息, 不泄露数据库连接详情
+            if app.debug:
+                db_error = str(e)
+            else:
+                db_error = 'database unavailable'
 
         status_code = 200 if db_ok else 503
         return jsonify({
@@ -315,6 +387,12 @@ def register_context_processors(app):
             'model_type_labels': model_type_labels,
             'category_labels': CATEGORY_LABELS,
         }
+
+    @app.context_processor
+    def inject_algorithm_info():
+        """注入算法元数据 (中文名+描述) 到所有模板"""
+        from app.utils.algorithm_info import ALGORITHM_INFO
+        return {'algorithm_info': ALGORITHM_INFO}
 
 
 

@@ -1,5 +1,12 @@
 {% extends "base.html" %}
 {% block title %}超参数自动调优 - AI Platform{% endblock %}
+{% block vue_scripts %}
+<script src="https://cdn.jsdelivr.net/npm/vue@3.5.13/dist/vue.global.prod.js"></script>
+<link href="https://cdn.jsdelivr.net/npm/element-plus@2.9.1/dist/index.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/element-plus@2.9.1/dist/index.full.min.js"></script>
+<script src="{{ url_for('static', filename='js/el-enhance.js') }}"></script>
+{% endblock %}
+
 {% block content %}
 <div class="container-fluid px-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
@@ -125,6 +132,19 @@
                                 <input type="number" name="cv" class="form-control" value="5" min="2" max="10">
                             </div>
                         </div>
+
+                        <!-- 隐藏字段: 从创建页面传递的参数 (由 presets JS prefill 回填) -->
+                        <input type="hidden" name="job_name" id="tuning-job-name">
+                        <input type="hidden" name="description" id="tuning-description">
+                        <input type="hidden" name="framework" id="tuning-framework">
+                        <input type="hidden" name="test_size" id="tuning-test-size">
+                        <input type="hidden" name="total_epochs" id="tuning-total-epochs">
+                        <input type="hidden" name="total_steps" id="tuning-total-steps">
+                        <input type="hidden" name="gpu_count" id="tuning-gpu-count">
+                        <input type="hidden" name="cpu_cores" id="tuning-cpu-cores">
+                        <input type="hidden" name="memory_gb" id="tuning-memory-gb">
+                        <input type="hidden" name="extra_hparams_json" id="tuning-extra-hparams">
+                        <input type="hidden" name="tuning_id" id="tuning-hidden-id">
 
                         <div class="form-check mb-3">
                             <input type="checkbox" name="start_training" class="form-check-input" id="start-training" checked>
@@ -406,8 +426,29 @@ document.getElementById('tuning-form').addEventListener('submit', function(e) {
 
 function onTuningCompleteForTuningPage(meta, session) {
     if (tuningEventSource) { tuningEventSource.close(); tuningEventSource = null; }
-    // 刷新页面显示结果
-    setTimeout(function() { location.reload(); }, 1500);
+    // 检查是否需要自动创建训练任务
+    var stCheck = document.querySelector('input[name="start_training"]');
+    // 用 session 中返回的 tuning_id 自动创建任务
+    var tid = session && session.tuning_id;
+    if (!tid) tid = meta && meta.tuning_id;
+    if (tid) {
+        document.getElementById('tuning-hidden-id').value = tid;
+    }
+    if (stCheck && stCheck.checked && tid) {
+        // 提交表单创建训练任务 (action=create_job)
+        var form = document.getElementById('tuning-form');
+        var input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = 'action';
+        input.value = 'create_job';
+        form.appendChild(input);
+        form.action = '{{ url_for("training.hyperparameter_tuning") }}';
+        form.method = 'POST';
+        form.submit();
+    } else {
+        // 仅刷新页面显示结果
+        setTimeout(function() { location.reload(); }, 1500);
+    }
 }
 
 function showTuningError(msg) {
@@ -463,6 +504,47 @@ function showTuningError(msg) {
     if (p.start_training) {
         var stCheck = document.querySelector('input[name="start_training"]');
         if (stCheck) stCheck.checked = true;
+    }
+    // 回填隐藏字段 (创建页面传递的完整参数)
+    if (p.job_name) {
+        var jn = document.getElementById('tuning-job-name');
+        if (jn) jn.value = p.job_name;
+    }
+    if (p.description) {
+        var de = document.getElementById('tuning-description');
+        if (de) de.value = p.description;
+    }
+    if (p.framework) {
+        var fw = document.getElementById('tuning-framework');
+        if (fw) fw.value = p.framework;
+    }
+    if (p.test_size) {
+        var ts = document.getElementById('tuning-test-size');
+        if (ts) ts.value = p.test_size;
+    }
+    if (p.total_epochs) {
+        var te = document.getElementById('tuning-total-epochs');
+        if (te) te.value = p.total_epochs;
+    }
+    if (p.total_steps) {
+        var ts2 = document.getElementById('tuning-total-steps');
+        if (ts2) ts2.value = p.total_steps;
+    }
+    if (p.gpu_count) {
+        var gc = document.getElementById('tuning-gpu-count');
+        if (gc) gc.value = p.gpu_count;
+    }
+    if (p.cpu_cores) {
+        var cc = document.getElementById('tuning-cpu-cores');
+        if (cc) cc.value = p.cpu_cores;
+    }
+    if (p.memory_gb) {
+        var mg = document.getElementById('tuning-memory-gb');
+        if (mg) mg.value = p.memory_gb;
+    }
+    if (p.extra_hparams_json) {
+        var eh = document.getElementById('tuning-extra-hparams');
+        if (eh) eh.value = p.extra_hparams_json;
     }
 
     // 延迟自动提交 (等待列信息加载)

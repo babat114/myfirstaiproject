@@ -164,6 +164,34 @@ class ModelInferenceService:
                     logger.error(f"加载 PyTorch 模型失败: {e}")
                     return None, metadata, None, f'PyTorch 模型加载失败: {str(e)}'
 
+            elif ext == '.keras' or ext == '.h5':
+                # TensorFlow/Keras 模型 — SavedModel 或 HDF5 格式
+                try:
+                    import tensorflow as tf
+                except ImportError:
+                    return None, metadata, None, 'TensorFlow 未安装，无法加载 .keras 模型。请运行: pip install tensorflow'
+                model_obj_tf = tf.keras.models.load_model(model_path)
+
+                # Load config from model_config.pkl (same dir as model file)
+                config_path = os.path.join(os.path.dirname(model_path), 'model_config.pkl')
+                metadata = {}
+                if os.path.exists(config_path):
+                    with open(config_path, 'rb') as f:
+                        metadata = pickle.load(f)
+                # Normalize: keras_trainer 存 'TensorFlow', 统一为 'tensorflow'
+                metadata['framework'] = 'tensorflow'
+                if 'scaler' not in metadata:
+                    metadata['scaler'] = None
+                if 'label_encoders' not in metadata:
+                    metadata['label_encoders'] = {}
+                if 'feature_names' not in metadata:
+                    metadata['feature_names'] = []
+                if 'task_type' not in metadata:
+                    metadata['task_type'] = model.model_type
+
+                logger.info(f"TensorFlow 模型已加载: {model.name} ({model_path})")
+                return model_obj_tf, metadata, None, None
+
             else:
                 return None, None, None, f'不支持的模型格式: {ext}'
 
@@ -203,14 +231,32 @@ class ModelInferenceService:
                 missing = [c for c in feature_names if c not in data.columns]
                 extra = [c for c in data.columns if c not in feature_names]
 
+                # 自动 TF-IDF 向量化: 如果模型保存了 vectorizer 且输入为原始文本列
+                vectorizer = metadata.get('vectorizer') if metadata else None
+                if vectorizer is not None and missing:
+                    non_tfidf_cols = [c for c in data.columns if not str(c).startswith('tfidf_')]
+                    if non_tfidf_cols and len(non_tfidf_cols) == len(data.columns):
+                        try:
+                            text_data = data[non_tfidf_cols[0]].astype(str).fillna('')
+                            X_vec = vectorizer.transform(text_data)
+                            vec_names = [f'tfidf_{i}' for i in range(vectorizer.get_feature_names_out().shape[0])]
+                            data = pd.DataFrame(X_vec.toarray(), columns=vec_names, index=data.index)
+                            missing = [c for c in feature_names if c not in data.columns]
+                        except Exception as e:
+                            logger.warning(f"TF-IDF 向量化自动转换失败: {e}")
+
                 # NLP TF-IDF path: 智能匹配 — 仅要求 tfidf_ 列存在, 其余列填0
                 tfidf_cols = [c for c in feature_names if c.startswith('tfidf_')]
                 if tfidf_cols and len(tfidf_cols) == len(data.columns):
-                    # 纯TF-IDF输入 (如quick-predict): 自动补齐非TF-IDF列
-                    for c in feature_names:
-                        if c not in data.columns:
-                            data[c] = 0.0
-                    missing = []
+                    # 确认 data 的列名确实是 tfidf_* (而非未命名的整数列)
+                    data_col_strs = [str(c) for c in data.columns]
+                    is_tfidf_input = any(c.startswith('tfidf_') for c in data_col_strs)
+                    if is_tfidf_input:
+                        # 纯TF-IDF输入 (如quick-predict): 自动补齐非TF-IDF列
+                        for c in feature_names:
+                            if c not in data.columns:
+                                data[c] = 0.0
+                        missing = []
 
                 if missing:
                     return {'success': False, 'error': f'缺少特征列: {missing}',
@@ -220,7 +266,11 @@ class ModelInferenceService:
                 data = data[feature_names]
 
             # 处理缺失值
-            data = data.fillna(data.mean(numeric_only=True))
+            _means = data.mean(numeric_only=True)
+            if len(_means) > 0:
+                data = data.fillna(_means)
+            else:
+                data = data.fillna(0)
             for col in data.select_dtypes(include=['object']).columns:
                 data[col] = data[col].fillna(data[col].mode()[0] if len(data[col].mode()) > 0 else 'unknown')
 
@@ -310,7 +360,7 @@ class ModelInferenceService:
                         for p in predictions
                     ]
 
-            elif framework in ('pytorch', 'tensorflow'):
+            elif framework == 'pytorch':
                 X = data.values.astype('float32')
                 import torch
                 model_obj.eval()
@@ -330,6 +380,25 @@ class ModelInferenceService:
                             raw_preds = y_scaler.inverse_transform(raw_preds)
                         predictions = raw_preds.ravel().tolist()
                         proba = None
+
+            elif framework == 'tensorflow':
+                # TensorFlow/Keras 模型预测
+                import tensorflow as tf
+                X = data.values.astype('float32')
+                # Keras predict() — 分类模型末层含 softmax, 输出概率; 回归模型输出原始值
+                outputs = model_obj.predict(X, verbose=0)
+                if task_type == 'classification':
+                    # outputs shape: (n_samples, n_classes) — 已是 softmax 概率
+                    proba = outputs
+                    predictions = np.argmax(outputs, axis=1).tolist()
+                else:
+                    # 回归: 反标准化预测值到原始尺度
+                    raw_preds = outputs.reshape(-1, 1)
+                    y_scaler = (metadata or {}).get('y_scaler')
+                    if y_scaler is not None:
+                        raw_preds = y_scaler.inverse_transform(raw_preds)
+                    predictions = raw_preds.ravel().tolist()
+                    proba = None
             else:
                 X = data.values.astype('float32')
                 predictions = model_obj.predict(X)
@@ -337,8 +406,8 @@ class ModelInferenceService:
                 if task_type in ('classification',) and hasattr(model_obj, 'predict_proba'):
                     try:
                         proba = model_obj.predict_proba(X)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning(f"predict_proba 失败 (仅返回预测类别): {e}")
 
             # 格式化预测结果
             pred_list = []
@@ -415,7 +484,7 @@ class ModelInferenceService:
         tokenizer,
         metadata: dict,
         text: str,
-    ) -> dict | None:
+    ) -> Optional[dict]:
         """单文本快速预测 — 专用于 Transformer NLP 模型
 
         在 quick-predict API 中替代不存在 TransformersNLPTrainer.predict_single(),
@@ -476,9 +545,15 @@ class ModelInferenceService:
             return None
 
     @staticmethod
-    def test_model_with_split(model: ModelRecord) -> dict:
+    def test_model_with_split(model: ModelRecord, test_dataset=None) -> dict:
         """
-        使用训练时的测试集评估模型 (需要模型文件 + 原始数据集)
+        评估模型 — 支持独立测试集
+
+        Args:
+            model: 已训练的 ModelRecord
+            test_dataset: 可选, 独立测试集 Dataset 对象。
+                         若提供则使用独立测试集评估;
+                         若未提供则使用训练数据集 (向后兼容)
 
         返回完整的评估报告，包含混淆矩阵数据等
         """
@@ -488,26 +563,49 @@ class ModelInferenceService:
             confusion_matrix, classification_report,
             mean_squared_error, mean_absolute_error, r2_score
         )
+        from app.models.dataset import Dataset
 
         model_obj, metadata, tokenizer, error = ModelInferenceService.load_model(model)
         if error:
             return {'success': False, 'error': error}
 
-        # 需要原始数据集
-        train_dataset = model.training_dataset
-        if not train_dataset or not os.path.exists(train_dataset.file_path):
-            return {'success': False, 'error': '原始训练数据集不存在，无法评估。'}
+        # 确定使用哪个数据集进行评估
+        if test_dataset is not None:
+            eval_dataset = test_dataset
+            is_independent = True
+        else:
+            eval_dataset = model.training_dataset
+            is_independent = False
+
+        if not eval_dataset or not os.path.exists(eval_dataset.file_path):
+            ds_type = '独立测试' if is_independent else '原始训练'
+            return {'success': False, 'error': f'{ds_type}数据集不存在，无法评估。'}
 
         try:
             # 加载数据集
             from app.utils.data_io import load_dataframe
-            df = load_dataframe(train_dataset.file_path, train_dataset.file_format.lower())
+            df = load_dataframe(eval_dataset.file_path, eval_dataset.file_format.lower())
             if df is None:
                 return {'success': False, 'error': f'不支持的数据格式或文件已损坏'}
 
-            # 获取超参数中的 target_column
+            # 获取目标列: 优先用测试集的summary_json, 再回退到训练超参数
             hyperparams = model.hyperparameters_dict
-            target_col = hyperparams.get('target_column')
+            target_col = None
+
+            # 尝试从测试集的 summary_json 中读取 target_column
+            if is_independent and eval_dataset.summary_json:
+                try:
+                    import json as _json
+                    summary = _json.loads(eval_dataset.summary_json)
+                    target_col = summary.get('target_column')
+                except Exception:
+                    pass
+
+            # 回退到训练超参数中的 target_column
+            if not target_col:
+                target_col = hyperparams.get('target_column')
+
+            # 最后回退: 使用最后一列
             if not target_col:
                 target_col = df.columns[-1]
 
@@ -526,7 +624,16 @@ class ModelInferenceService:
             task_type = result.get('task_type', model.model_type)
 
             # 计算评估指标
-            report = {'success': True, 'task_type': task_type, 'num_samples': len(y_pred)}
+            report = {
+                'success': True,
+                'task_type': task_type,
+                'num_samples': len(y_pred),
+                'is_independent_test': is_independent,
+                'test_dataset_name': eval_dataset.name,
+                'test_dataset_uuid': eval_dataset.uuid,
+            }
+            if is_independent:
+                report['collection_method'] = getattr(eval_dataset, 'collection_method', None)
 
             if task_type == 'classification':
                 # 确保 y_true 和 y_pred 在同一个编码空间中比较

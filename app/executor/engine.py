@@ -62,6 +62,7 @@ class TrainingExecutor:
         self._pool = ThreadPoolExecutor(max_workers=self.max_workers, thread_name_prefix='trainer-')
         self._active_trainers: dict[int, object] = {}  # {job_id: trainer_instance}
         self._futures: dict[int, Future] = {}           # {job_id: Future}
+        self._trainers_lock = threading.Lock()           # 保护 _active_trainers / _futures 并发访问
         self._app = None  # 延迟绑定 Flask app
         self._shutdown_registered = False
 
@@ -118,10 +119,6 @@ class TrainingExecutor:
             logger.error(f'无法从数据库加载任务 {job.id}')
             return False
 
-        if fresh_job.id in self._active_trainers:
-            logger.warning(f'任务 {fresh_job.id} 已在运行中')
-            return False
-
         # 获取关联数据集 (仅验证存在性)
         dataset = fresh_job.dataset
         if not dataset:
@@ -141,9 +138,14 @@ class TrainingExecutor:
         dataset_id = dataset.id
         job_id = fresh_job.id
 
-        # 提交到线程池 — trainer 在工作线程中创建
-        future = self._pool.submit(self._run_wrapper, job_id, dataset_id)
-        self._futures[job_id] = future
+        # 原子化: 检查重复 + 提交到线程池 (线程安全)
+        with self._trainers_lock:
+            if job_id in self._active_trainers:
+                logger.warning(f'任务 {job_id} 已在运行中')
+                return False
+            future = self._pool.submit(self._run_wrapper, job_id, dataset_id)
+            self._futures[job_id] = future
+
         future.add_done_callback(lambda f: self._on_done(job_id, f))
 
         logger.info(f'训练任务已提交: {job_id} ({fresh_job.name}), '
@@ -152,7 +154,8 @@ class TrainingExecutor:
 
     def pause(self, job_id: int) -> bool:
         """暂停训练"""
-        trainer = self._active_trainers.get(job_id)
+        with self._trainers_lock:
+            trainer = self._active_trainers.get(job_id)
         if trainer:
             trainer.pause()
             job = db.session.get(TrainingJob, job_id)
@@ -166,7 +169,8 @@ class TrainingExecutor:
 
     def resume(self, job_id: int) -> bool:
         """恢复训练"""
-        trainer = self._active_trainers.get(job_id)
+        with self._trainers_lock:
+            trainer = self._active_trainers.get(job_id)
         if trainer:
             trainer.resume()
             job = db.session.get(TrainingJob, job_id)
@@ -180,7 +184,8 @@ class TrainingExecutor:
 
     def cancel(self, job_id: int) -> bool:
         """取消训练"""
-        trainer = self._active_trainers.get(job_id)
+        with self._trainers_lock:
+            trainer = self._active_trainers.get(job_id)
         if trainer:
             trainer.cancel()
             logger.info(f'训练已取消: {job_id}')
@@ -217,8 +222,10 @@ class TrainingExecutor:
 
     def get_queue_info(self) -> dict:
         """获取队列信息"""
+        with self._trainers_lock:
+            active_items = list(self._active_trainers.items())
         return {
-            'active_count': len(self._active_trainers),
+            'active_count': len(active_items),
             'max_workers': self.max_workers,
             'active_jobs': [
                 {
@@ -226,7 +233,7 @@ class TrainingExecutor:
                     'name': db.session.get(TrainingJob, jid).name if db.session.get(TrainingJob, jid) else 'unknown',
                     'is_paused': t.is_paused if hasattr(t, 'is_paused') else False,
                 }
-                for jid, t in self._active_trainers.items()
+                for jid, t in active_items
             ],
         }
 
@@ -250,7 +257,9 @@ class TrainingExecutor:
             pass
 
         if _db_available:
-            for jid in list(self._active_trainers.keys()):
+            with self._trainers_lock:
+                active_keys = list(self._active_trainers.keys())
+            for jid in active_keys:
                 try:
                     job = db.session.get(TrainingJob, jid)
                     if job and job.status == 'running':
@@ -343,7 +352,8 @@ class TrainingExecutor:
 
                 # 在工作线程中创建 trainer (对象绑定到此线程的 session)
                 trainer = trainer_cls(job, dataset, hyperparams)
-                self._active_trainers[job_id] = trainer
+                with self._trainers_lock:
+                    self._active_trainers[job_id] = trainer
 
                 logger.info(f'训练器已创建: {trainer_cls.__name__} (job {job_id})')
                 trainer.run()
@@ -368,13 +378,23 @@ class TrainingExecutor:
                 # 清理线程的数据库会话
                 try:
                     db.session.remove()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f'DB session cleanup failed: {e}')
+                # 清理 GPU 显存 (防止 PyTorch 训练后显存残留)
+                try:
+                    import torch
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                except Exception as e:
+                    logger.warning(f'GPU memory cleanup failed: {e}')
+                # 释放 trainer 引用以帮助 GC 回收 GPU 资源
+                trainer = None
 
     def _on_done(self, job_id: int, future: Future):
         """训练完成/失败后的清理"""
-        self._active_trainers.pop(job_id, None)
-        self._futures.pop(job_id, None)
+        with self._trainers_lock:
+            self._active_trainers.pop(job_id, None)
+            self._futures.pop(job_id, None)
 
         try:
             future.result()  # 如果有未捕获异常这里会抛出

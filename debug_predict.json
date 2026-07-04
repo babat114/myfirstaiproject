@@ -1,0 +1,158 @@
+[
+  {
+    "uuid": "1fccc560-9ce1-48c8-b37c-43f8d6e27334",
+    "text": "haikeyi",
+    "response": {
+      "data": {
+        "confidence": 1.0,
+        "input_mode": "text",
+        "input_preview": "haikeyi",
+        "model_type": "classification",
+        "note": "使用训练时保存的TF-IDF向量化器",
+        "num_samples": 1,
+        "prediction": "负面",
+        "probabilities": [
+          {
+            "class": "负面",
+            "probability": 1.0
+          },
+          {
+            "class": "正面",
+            "probability": 0.0
+          }
+        ]
+      },
+      "success": true
+    }
+  },
+  {
+    "uuid": "1fccc560-9ce1-48c8-b37c-43f8d6e27334",
+    "text": "还不错",
+    "response": {
+      "data": {
+        "confidence": 1.0,
+        "input_mode": "text",
+        "input_preview": "还不错",
+        "model_type": "classification",
+        "note": "使用训练时保存的TF-IDF向量化器",
+        "num_samples": 1,
+        "prediction": "正面",
+        "probabilities": [
+          {
+            "class": "正面",
+            "probability": 1.0
+          },
+          {
+            "class": "负面",
+            "probability": 0.0
+          }
+        ]
+      },
+      "success": true
+    }
+  },
+  {
+    "uuid": "1fccc560-9ce1-48c8-b37c-43f8d6e27334",
+    "text": "还可以",
+    "response": {
+      "data": {
+        "confidence": 1.0,
+        "input_mode": "text",
+        "input_preview": "还可以",
+        "model_type": "classification",
+        "note": "使用训练时保存的TF-IDF向量化器",
+        "num_samples": 1,
+        "prediction": "正面",
+        "probabilities": [
+          {
+            "class": "正面",
+            "probability": 1.0
+          },
+          {
+            "class": "负面",
+            "probability": 0.0
+          }
+        ]
+      },
+      "success": true
+    }
+  },
+  {
+    "uuid": "1fccc560-9ce1-48c8-b37c-43f8d6e27334",
+    "text": "一般般",
+    "response": {
+      "data": {
+        "confidence": 1.0,
+        "input_mode": "text",
+        "input_preview": "一般般",
+        "model_type": "classification",
+        "note": "使用训练时保存的TF-IDF向量化器",
+        "num_samples": 1,
+        "prediction": "负面",
+        "probabilities": [
+          {
+            "class": "负面",
+            "probability": 1.0
+          },
+          {
+            "class": "正面",
+            "probability": 0.0
+          }
+        ]
+      },
+      "success": true
+    }
+  },
+  {
+    "uuid": "1fccc560-9ce1-48c8-b37c-43f8d6e27334",
+    "text": "非常好",
+    "response": {
+      "data": {
+        "confidence": 1.0,
+        "input_mode": "text",
+        "input_preview": "非常好",
+        "model_type": "classification",
+        "note": "使用训练时保存的TF-IDF向量化器",
+        "num_samples": 1,
+        "prediction": "负面",
+        "probabilities": [
+          {
+            "class": "负面",
+            "probability": 1.0
+          },
+          {
+            "class": "正面",
+            "probability": 0.0
+          }
+        ]
+      },
+      "success": true
+    }
+  },
+  {
+    "uuid": "1fccc560-9ce1-48c8-b37c-43f8d6e27334",
+    "text": "太差了",
+    "response": {
+      "data": {
+        "confidence": 1.0,
+        "input_mode": "text",
+        "input_preview": "太差了",
+        "model_type": "classification",
+        "note": "使用训练时保存的TF-IDF向量化器",
+        "num_samples": 1,
+        "prediction": "负面",
+        "probabilities": [
+          {
+            "class": "负面",
+            "probability": 1.0
+          },
+          {
+            "class": "正面",
+            "probability": 0.0
+          }
+        ]
+      },
+      "success": true
+    }
+  }
+]

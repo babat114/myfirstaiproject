@@ -7,8 +7,9 @@
 import uuid
 import threading
 import time
-from datetime import datetime
 from typing import Optional, Callable
+
+from app._timezone import localnow
 
 
 class ExportTask:
@@ -23,7 +24,7 @@ class ExportTask:
         self.message = ''
         self.result = None          # 成功时的结果数据
         self.error = None
-        self.created_at = datetime.utcnow()
+        self.created_at = localnow()
         self.completed_at = None
 
     def to_dict(self) -> dict:
@@ -105,26 +106,35 @@ class ExportTaskTracker:
                 # 模拟进度 (实际导出通常很快, 但大模型可能需要时间)
                 self._simulate_progress(task_id, 10, 50)
 
-                success, message, result = fn(*args, **kwargs)
+                result_tuple = fn(*args, **kwargs)
+                success, message = result_tuple[0], result_tuple[1]
+                result_data = None
+                if len(result_tuple) > 2:
+                    result_data = {'path': result_tuple[2]}
+                if len(result_tuple) > 3:
+                    result_data['zip_file'] = result_tuple[3]
 
                 if success:
                     self.update_task(
                         task_id, status='completed', progress=100,
-                        message=message, result=result,
-                        completed_at=datetime.utcnow()
+                        message=message, result=result_data,
+                        completed_at=localnow()
                     )
                 else:
                     self.update_task(
                         task_id, status='failed', progress=0,
                         error=message or '导出失败',
-                        completed_at=datetime.utcnow()
+                        completed_at=localnow()
                     )
             except Exception as e:
                 self.update_task(
                     task_id, status='failed', progress=0,
                     error=str(e),
-                    completed_at=datetime.utcnow()
+                    completed_at=localnow()
                 )
+            finally:
+                from app import db
+                db.session.remove()
 
         thread = threading.Thread(target=_run, daemon=True)
         thread.start()
@@ -141,7 +151,7 @@ class ExportTaskTracker:
 
     def cleanup_old_tasks(self, max_age_seconds: int = 3600):
         """清理超过 max_age_seconds 的已完成/失败任务"""
-        now = datetime.utcnow()
+        now = localnow()
         with self._lock:
             stale = []
             for tid, task in self._tasks.items():

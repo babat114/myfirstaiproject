@@ -73,6 +73,36 @@ class TestModelService:
             assert success is True
             assert ModelService.get_model_by_id(model_id) is None
 
+    def test_delete_model_with_training_jobs(self, app, test_user):
+        """测试删除有关联训练任务的模型 — FK 应被设为 NULL 而非阻止删除"""
+        with app.app_context():
+            from app.models.training_job import TrainingJob
+            from app._timezone import localnow
+
+            model, _ = ModelService.create_model(
+                user=test_user, name='Model With Jobs'
+            )
+            # 直接创建关联的训练任务 (绕过 create_job 的自动 ModelRecord 创建)
+            job = TrainingJob(
+                name='Test Job FK',
+                task_type='training',
+                framework='sklearn',
+                owner_id=test_user.id,
+                model_id=model.id,
+            )
+            db.session.add(job)
+            db.session.commit()
+            assert job.model_id == model.id
+
+            # 删除模型 — 应成功, 训练任务的 model_id 应被置为 NULL
+            success, msg = ModelService.delete_model(model)
+            assert success is True, f'删除模型失败: {msg}'
+
+            # 验证训练任务仍然存在, 但 model_id 已被清除
+            job_after = db.session.get(TrainingJob, job.id)
+            assert job_after is not None
+            assert job_after.model_id is None
+
     def test_get_statistics(self, app, test_user):
         """测试模型统计"""
         with app.app_context():

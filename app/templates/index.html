@@ -2,176 +2,211 @@
 {% block title %}欢迎{% endblock %}
 
 {% block content %}
-<div class="row justify-content-center mt-3">
-    <div class="col-lg-10">
-        <!-- Hero -->
-        <div class="page-hero text-center">
-            <h1 class="mb-3">
-                <svg width="28" height="28" viewBox="0 0 16 16" fill="#1f2328" style="vertical-align:-5px;margin-right:6px;">
-                    <path d="M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0ZM4.5 7.5a.5.5 0 0 0 0 1h7a.5.5 0 0 0 0-1h-7Z"/>
-                </svg>
-                AI Platform
-            </h1>
-            <p class="mb-4 mx-auto" style="max-width:600px;">
-                一站式 AI 模型与数据集管理平台 — 上传数据、训练模型、实时监控、测试评估
-            </p>
-
+<!-- Hero Section -->
+<div class="hero-section text-center">
+    <div class="hero-bg-pattern"></div>
+    <div class="hero-content">
+        <div class="hero-badge reveal reveal-up">AI 模型训练管理平台</div>
+        <h1 class="hero-title reveal reveal-up reveal-delay-1">
+            从数据到模型
+            <span class="hero-highlight">一键完成</span>
+        </h1>
+        <p class="hero-desc reveal reveal-up reveal-delay-2">
+            上传数据、训练模型、实时监控、测试评估 —— 全流程一站式 AI 平台
+        </p>
+        <div class="reveal reveal-up reveal-delay-3">
             {% if not current_user.is_authenticated %}
-            <div>
-                <a href="{{ url_for('auth.register') }}" class="btn btn-success btn-lg me-2">
-                    免费注册
-                </a>
-                <a href="{{ url_for('auth.login') }}" class="btn btn-outline-secondary btn-lg">
-                    登录
-                </a>
-            </div>
+            <a href="{{ url_for('auth.register') }}" class="btn btn-success btn-lg me-2 px-4">
+                免费开始使用
+            </a>
+            <a href="{{ url_for('auth.login') }}" class="btn btn-outline-secondary btn-lg px-4">
+                登录
+            </a>
             {% else %}
-            <div>
-                <a href="{{ url_for('dashboard.index') }}" class="btn btn-success btn-lg">
-                    进入仪表盘
-                </a>
-            </div>
+            <a href="{{ url_for('dashboard.index') }}" class="btn btn-success btn-lg px-4">
+                进入仪表盘
+            </a>
             {% endif %}
         </div>
+    </div>
+</div>
 
-        <!-- Workflow -->
-        <div class="text-center mb-4">
-            <h3 class="fw-bold">工作流程</h3>
-            <p class="text-muted">从数据到模型只需四步</p>
+<!-- Platform Stats Bar -->
+<div class="stats-bar reveal reveal-up">
+    <div class="row g-0 text-center">
+        <div class="col-3 stat-bar-item">
+            <div class="stat-bar-value">138</div>
+            <div class="stat-bar-label">预训练模型</div>
         </div>
+        <div class="col-3 stat-bar-item">
+            <div class="stat-bar-value">55</div>
+            <div class="stat-bar-label">真实数据集</div>
+        </div>
+        <div class="col-3 stat-bar-item">
+            <div class="stat-bar-value">5+</div>
+            <div class="stat-bar-label">训练框架</div>
+        </div>
+        <div class="col-3 stat-bar-item">
+            <div class="stat-bar-value">API</div>
+            <div class="stat-bar-label">RESTful 接口</div>
+        </div>
+    </div>
+</div>
 
-        <div class="row g-4 mb-5">
-            <div class="col-md-3 reveal reveal-up reveal-delay-1">
-                <div class="card h-100 text-center p-3">
-                    <div class="mb-3" style="font-size:36px;color:var(--color-text-tertiary);">
-                        <svg width="36" height="36" viewBox="0 0 16 16" fill="#656d76">
-                            <path d="M2.75 14A1.75 1.75 0 0 1 1 12.25v-8.5C1 2.784 1.784 2 2.75 2h10.5c.966 0 1.75.784 1.75 1.75v8.5A1.75 1.75 0 0 1 13.25 14H2.75ZM2 3.75v8.5c0 .414.336.75.75.75h10.5a.75.75 0 0 0 .75-.75v-8.5a.75.75 0 0 0-.75-.75H2.75a.75.75 0 0 0-.75.75Zm2.5 2.5h7V7h-7V6.25Zm0 3.5h4v.75h-4v-.75Z"/>
-                        </svg>
+<!-- Workflow -->
+<div class="section-header reveal reveal-up">
+    <h2 class="section-title">工作流程</h2>
+    <p class="text-muted">四步完成从数据到模型的全流程</p>
+</div>
+
+<div class="row g-4 mb-5">
+    <div class="col-6 col-md-3 reveal reveal-up reveal-delay-1">
+        <div class="card workflow-card h-100">
+            <div class="workflow-step">1</div>
+            <div class="workflow-icon">
+                <i class="bi bi-upload"></i>
+            </div>
+            <h5>上传数据集</h5>
+            <p class="text-muted small">支持 CSV、Excel、JSON、Parquet，自动解析列信息与数据预览</p>
+        </div>
+    </div>
+    <div class="col-6 col-md-3 reveal reveal-up reveal-delay-2">
+        <div class="card workflow-card h-100">
+            <div class="workflow-step">2</div>
+            <div class="workflow-icon">
+                <i class="bi bi-sliders"></i>
+            </div>
+            <h5>配置训练</h5>
+            <p class="text-muted small">选择算法与框架，设置超参数，GridSearch/AutoML 自动调优</p>
+        </div>
+    </div>
+    <div class="col-6 col-md-3 reveal reveal-up reveal-delay-3">
+        <div class="card workflow-card h-100">
+            <div class="workflow-step">3</div>
+            <div class="workflow-icon">
+                <i class="bi bi-play-circle"></i>
+            </div>
+            <h5>实时训练</h5>
+            <p class="text-muted small">进度条、Loss/Accuracy 曲线、日志滚动，支持暂停恢复</p>
+        </div>
+    </div>
+    <div class="col-6 col-md-3 reveal reveal-up reveal-delay-4">
+        <div class="card workflow-card h-100">
+            <div class="workflow-step">4</div>
+            <div class="workflow-icon">
+                <i class="bi bi-graph-up"></i>
+            </div>
+            <h5>测试评估</h5>
+            <p class="text-muted small">混淆矩阵、特征重要性、模型对比、一键预测与导出</p>
+        </div>
+    </div>
+</div>
+
+<!-- Core Features -->
+<div class="section-header reveal reveal-up">
+    <h2 class="section-title">核心功能</h2>
+    <p class="text-muted">强大的工具集，助力 AI 开发全流程</p>
+</div>
+
+<div class="row g-4 mb-5">
+    <div class="col-md-4 reveal reveal-left reveal-delay-1">
+        <div class="card feature-card h-100">
+            <div class="feature-card-icon">
+                <i class="bi bi-database"></i>
+            </div>
+            <h5>数据集管理</h5>
+            <p class="text-muted small">上传、组织和管理训练数据集。支持多种格式，自动分析列信息，缺失值检测与数据预览。</p>
+            <ul class="feature-list">
+                <li><i class="bi bi-check2"></i> 自动解析行列数</li>
+                <li><i class="bi bi-check2"></i> 缺失值智能检测</li>
+                <li><i class="bi bi-check2"></i> 数据预览表格</li>
+                <li><i class="bi bi-check2"></i> 公开/私有权限控制</li>
+            </ul>
+        </div>
+    </div>
+    <div class="col-md-4 reveal reveal-up reveal-delay-2">
+        <div class="card feature-card h-100">
+            <div class="feature-card-icon">
+                <i class="bi bi-cpu"></i>
+            </div>
+            <h5>模型训练</h5>
+            <p class="text-muted small">一键训练分类/回归模型。支持 sklearn、PyTorch、TensorFlow、Transformers 等多种框架。</p>
+            <ul class="feature-list">
+                <li><i class="bi bi-check2"></i> 5+ 分类 &amp; 4 种回归</li>
+                <li><i class="bi bi-check2"></i> PyTorch / TF / BERT</li>
+                <li><i class="bi bi-check2"></i> GPU 自动加速</li>
+                <li><i class="bi bi-check2"></i> 暂停/恢复/取消</li>
+            </ul>
+        </div>
+    </div>
+    <div class="col-md-4 reveal reveal-right reveal-delay-3">
+        <div class="card feature-card h-100">
+            <div class="feature-card-icon">
+                <i class="bi bi-graph-up"></i>
+            </div>
+            <h5>可视化与分析</h5>
+            <p class="text-muted small">丰富的可视化工具帮助理解模型表现。实时曲线、混淆矩阵、特征重要性分析等。</p>
+            <ul class="feature-list">
+                <li><i class="bi bi-check2"></i> 实时训练曲线</li>
+                <li><i class="bi bi-check2"></i> 混淆矩阵热力图</li>
+                <li><i class="bi bi-check2"></i> 特征重要性分析</li>
+                <li><i class="bi bi-check2"></i> 模型对比雷达图</li>
+            </ul>
+        </div>
+    </div>
+</div>
+
+<!-- AI Diagnosis & AutoML -->
+<div class="section-header reveal reveal-up">
+    <h2 class="section-title">智能进阶</h2>
+    <p class="text-muted">AI 驱动的诊断与自动调优</p>
+</div>
+
+<div class="row g-4 mb-5">
+    <div class="col-md-6 reveal reveal-left reveal-delay-1">
+        <div class="card advance-card h-100">
+            <div class="row g-0 align-items-center">
+                <div class="col-3 text-center">
+                    <div class="advance-icon">
+                        <i class="bi bi-heart-pulse"></i>
                     </div>
-                    <h5>上传数据集</h5>
-                    <p class="text-muted small">支持 CSV、Excel、JSON 等格式，自动解析列信息</p>
                 </div>
-            </div>
-            <div class="col-md-3 reveal reveal-up reveal-delay-2">
-                <div class="card h-100 text-center p-3">
-                    <div class="mb-3" style="font-size:36px;color:var(--color-text-tertiary);">
-                        <svg width="36" height="36" viewBox="0 0 16 16" fill="#656d76">
-                            <path d="M8 1.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5ZM4 4a4 4 0 1 1 8 0 4 4 0 0 1-8 0Zm-2 9.5a6 6 0 0 1 12 0 .75.75 0 0 1-1.5 0 4.5 4.5 0 0 0-9 0 .75.75 0 0 1-1.5 0Z"/>
-                        </svg>
+                <div class="col-9">
+                    <div class="card-body">
+                        <h5>AI 智能诊断</h5>
+                        <p class="text-muted small mb-0">自动分析训练结果，生成健康度评分、问题检测与参数优化建议</p>
                     </div>
-                    <h5>配置训练</h5>
-                    <p class="text-muted small">选择算法（随机森林/SVM/KNN等），设置超参数</p>
                 </div>
             </div>
-            <div class="col-md-3 reveal reveal-up reveal-delay-3">
-                <div class="card h-100 text-center p-3">
-                    <div class="mb-3" style="font-size:36px;color:var(--color-text-tertiary);">
-                        <svg width="36" height="36" viewBox="0 0 16 16" fill="#656d76">
-                            <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14Zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16ZM6.271 5.055a.5.5 0 0 1 .52.038l3.5 2.5a.5.5 0 0 1 0 .814l-3.5 2.5A.5.5 0 0 1 6 10.5v-5a.5.5 0 0 1 .271-.445Z"/>
-                        </svg>
+        </div>
+    </div>
+    <div class="col-md-6 reveal reveal-right reveal-delay-2">
+        <div class="card advance-card h-100">
+            <div class="row g-0 align-items-center">
+                <div class="col-3 text-center">
+                    <div class="advance-icon">
+                        <i class="bi bi-robot"></i>
                     </div>
-                    <h5>实时训练</h5>
-                    <p class="text-muted small">实时进度条、Loss/Accuracy 曲线、日志滚动</p>
                 </div>
-            </div>
-            <div class="col-md-3 reveal reveal-up reveal-delay-4">
-                <div class="card h-100 text-center p-3">
-                    <div class="mb-3" style="font-size:36px;color:var(--color-text-tertiary);">
-                        <svg width="36" height="36" viewBox="0 0 16 16" fill="#656d76">
-                            <path d="M4 1.75v1.5a.75.75 0 0 1-1.5 0v-1.5a.75.75 0 0 1 1.5 0ZM8 12.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm0 1.5a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm5.5-10.5v1.5a.75.75 0 0 0 1.5 0v-1.5a.75.75 0 0 0-1.5 0Z"/>
-                        </svg>
+                <div class="col-9">
+                    <div class="card-body">
+                        <h5>AutoML 全算法对比</h5>
+                        <p class="text-muted small mb-0">遍历所有算法自动排名，GridSearchCV/RandomSearch 超参数调优</p>
                     </div>
-                    <h5>测试评估</h5>
-                    <p class="text-muted small">混淆矩阵、特征重要性、模型对比、一键预测</p>
-                </div>
-            </div>
-        </div>
-
-        <!-- Core Features -->
-        <div class="text-center mb-4">
-            <h3 class="fw-bold">核心功能</h3>
-        </div>
-
-        <div class="row g-4 mb-5">
-            <div class="col-md-4 reveal reveal-left reveal-delay-1">
-                <div class="card h-100 p-4">
-                    <h5 class="fw-bold mb-2">
-                        <i class="bi bi-database me-1" style="color:var(--color-text-secondary);"></i> 数据集管理
-                    </h5>
-                    <p class="text-muted small">上传、组织和管理训练数据集。支持 CSV/Excel/JSON/Parquet 格式，自动分析列信息和数据预览。</p>
-                    <ul class="list-unstyled small text-muted">
-                        <li><i class="bi bi-check2" style="color:#1f883d;"></i> 自动解析行列数</li>
-                        <li><i class="bi bi-check2" style="color:#1f883d;"></i> 缺失值检测</li>
-                        <li><i class="bi bi-check2" style="color:#1f883d;"></i> 数据预览表格</li>
-                        <li><i class="bi bi-check2" style="color:#1f883d;"></i> 公开/私有权限</li>
-                    </ul>
-                </div>
-            </div>
-            <div class="col-md-4 reveal reveal-up reveal-delay-2">
-                <div class="card h-100 p-4">
-                    <h5 class="fw-bold mb-2">
-                        <i class="bi bi-cpu me-1" style="color:var(--color-text-secondary);"></i> 模型训练
-                    </h5>
-                    <p class="text-muted small">一键训练分类/回归模型。支持随机森林、逻辑回归、SVM、KNN、梯度提升等算法。</p>
-                    <ul class="list-unstyled small text-muted">
-                        <li><i class="bi bi-check2" style="color:#1f883d;"></i> 5+ 分类算法</li>
-                        <li><i class="bi bi-check2" style="color:#1f883d;"></i> 4 种回归算法</li>
-                        <li><i class="bi bi-check2" style="color:#1f883d;"></i> PyTorch 神经网络</li>
-                        <li><i class="bi bi-check2" style="color:#1f883d;"></i> 暂停/恢复/取消</li>
-                    </ul>
-                </div>
-            </div>
-            <div class="col-md-4 reveal reveal-right reveal-delay-3">
-                <div class="card h-100 p-4">
-                    <h5 class="fw-bold mb-2">
-                        <i class="bi bi-graph-up me-1" style="color:var(--color-text-secondary);"></i> 可视化与分析
-                    </h5>
-                    <p class="text-muted small">丰富的可视化工具帮助理解模型表现。实时训练曲线、混淆矩阵、特征重要性等。</p>
-                    <ul class="list-unstyled small text-muted">
-                        <li><i class="bi bi-check2" style="color:#1f883d;"></i> 实时训练曲线</li>
-                        <li><i class="bi bi-check2" style="color:#1f883d;"></i> 混淆矩阵热力图</li>
-                        <li><i class="bi bi-check2" style="color:#1f883d;"></i> 特征重要性分析</li>
-                        <li><i class="bi bi-check2" style="color:#1f883d;"></i> 模型对比雷达图</li>
-                    </ul>
-                </div>
-            </div>
-        </div>
-
-        <!-- Platform Stats -->
-        <div class="text-center mb-4">
-            <h3 class="fw-bold">平台能力</h3>
-        </div>
-
-        <div class="row g-3 mb-5 text-center">
-            <div class="col-6 col-md-3 reveal reveal-scale reveal-delay-1">
-                <div class="card hover-lift p-4 h-100">
-                    <i class="bi bi-cpu-fill fs-1" style="color:var(--color-text-tertiary);"></i>
-                    <h4 class="fw-bold mt-2">5+</h4>
-                    <small class="text-muted">分类算法</small>
-                </div>
-            </div>
-            <div class="col-6 col-md-3 reveal reveal-scale reveal-delay-2">
-                <div class="card hover-lift p-4 h-100">
-                    <i class="bi bi-file-earmark-text fs-1" style="color:var(--color-text-tertiary);"></i>
-                    <h4 class="fw-bold mt-2">5</h4>
-                    <small class="text-muted">支持数据格式</small>
-                </div>
-            </div>
-            <div class="col-6 col-md-3 reveal reveal-scale reveal-delay-3">
-                <div class="card hover-lift p-4 h-100">
-                    <i class="bi bi-graph-up-arrow fs-1" style="color:var(--color-text-tertiary);"></i>
-                    <h4 class="fw-bold mt-2">实时</h4>
-                    <small class="text-muted">训练监控</small>
-                </div>
-            </div>
-            <div class="col-6 col-md-3 reveal reveal-scale reveal-delay-4">
-                <div class="card hover-lift p-4 h-100">
-                    <i class="bi bi-shield-check fs-1" style="color:var(--color-text-tertiary);"></i>
-                    <h4 class="fw-bold mt-2">RESTful</h4>
-                    <small class="text-muted">API 接口</small>
                 </div>
             </div>
         </div>
     </div>
 </div>
+
+<!-- Call to Action -->
+{% if not current_user.is_authenticated %}
+<div class="cta-section text-center reveal reveal-up">
+    <h3 class="fw-bold mb-2">准备好开始了吗？</h3>
+    <p class="text-muted mb-4">免费注册，立即体验 AI 模型训练全流程</p>
+    <a href="{{ url_for('auth.register') }}" class="btn btn-success btn-lg px-5">
+        免费注册
+    </a>
+</div>
+{% endif %}
 {% endblock %}

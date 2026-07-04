@@ -39,11 +39,17 @@ class User(UserMixin, db.Model):
     is_active = db.Column(db.Boolean, default=True, nullable=False)
     is_verified = db.Column(db.Boolean, default=False, nullable=False)
 
-    # API 密钥
+    # API 密钥 (SHA256 哈希存储, 原始密钥仅在生成时返回一次)
     api_key = db.Column(db.String(128), unique=True, nullable=True)
 
     # JWT Refresh Token 版本 — 改密码时递增, 使所有已签发 Refresh Token 失效
     token_version = db.Column(db.Integer, default=1, nullable=False)
+
+    # 账号锁定 — 连续登录失败 ≥ MAX_FAILED_ATTEMPTS 后锁定 LOCKOUT_DURATION 分钟
+    MAX_FAILED_ATTEMPTS = 5
+    LOCKOUT_DURATION = 15  # 分钟
+    failed_login_attempts = db.Column(db.Integer, default=0, nullable=False)
+    locked_until = db.Column(db.DateTime, nullable=True)
 
     # 时间戳
     created_at = db.Column(db.DateTime, default=lambda: localnow(), nullable=False)
@@ -99,6 +105,25 @@ class User(UserMixin, db.Model):
     def can_delete(self) -> bool:
         return self.role == 'admin'
 
+    @property
+    def is_locked(self) -> bool:
+        """检查账号是否处于锁定状态"""
+        if self.locked_until and self.locked_until > localnow():
+            return True
+        return False
+
+    def reset_lockout(self):
+        """重置登录失败计数和锁定状态 (成功登录后调用)"""
+        self.failed_login_attempts = 0
+        self.locked_until = None
+
+    def record_failed_attempt(self):
+        """记录一次登录失败, 超过阈值则锁定"""
+        self.failed_login_attempts = (self.failed_login_attempts or 0) + 1
+        if self.failed_login_attempts >= self.MAX_FAILED_ATTEMPTS:
+            from datetime import timedelta
+            self.locked_until = localnow() + timedelta(minutes=self.LOCKOUT_DURATION)
+
     # ============ 统计属性 ============
 
     @property
@@ -135,7 +160,10 @@ class User(UserMixin, db.Model):
             'last_login_at': self.last_login_at.isoformat() if self.last_login_at else None,
         }
         if include_private:
-            data['api_key'] = self.api_key
+            # 注意: api_key 已哈希存储, 原始密钥仅在生成/重新生成时返回一次
+            data['failed_login_attempts'] = self.failed_login_attempts
+            data['locked_until'] = self.locked_until.isoformat() if self.locked_until else None
+            data['is_locked'] = self.is_locked
         return data
 
     def __repr__(self):

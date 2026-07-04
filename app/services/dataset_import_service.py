@@ -281,9 +281,13 @@ class DatasetImportService:
             file_path = os.path.join(upload_dir, filename)
             df.to_csv(file_path, index=False)
 
-            # 计算文件大小和哈希
+            # 计算文件大小和哈希 (分块读取，避免大文件 OOM)
             file_size = os.path.getsize(file_path)
-            file_hash = hashlib.md5(open(file_path, 'rb').read()).hexdigest()
+            _md5 = hashlib.md5()
+            with open(file_path, 'rb') as _f:
+                for _chunk in iter(lambda: _f.read(8192), b''):
+                    _md5.update(_chunk)
+            file_hash = _md5.hexdigest()
 
             # 生成摘要
             summary = {
@@ -535,6 +539,37 @@ class DatasetImportService:
         """
         try:
             import requests
+            from urllib.parse import urlparse
+            import ipaddress
+
+            # SSRF 防护: 验证 URL 不指向内网/私有地址
+            _SSRF_BLOCKED = [
+                ipaddress.ip_network('127.0.0.0/8'),
+                ipaddress.ip_network('10.0.0.0/8'),
+                ipaddress.ip_network('172.16.0.0/12'),
+                ipaddress.ip_network('192.168.0.0/16'),
+                ipaddress.ip_network('169.254.0.0/16'),
+                ipaddress.ip_network('0.0.0.0/8'),
+                ipaddress.ip_network('100.64.0.0/10'),
+                ipaddress.ip_network('224.0.0.0/4'),
+                ipaddress.ip_network('240.0.0.0/4'),
+            ]
+            parsed = urlparse(url)
+            if parsed.scheme not in ('http', 'https'):
+                return None, '仅支持 HTTP/HTTPS 协议的 URL。'
+            hostname = parsed.hostname
+            if not hostname:
+                return None, '无法解析 URL 中的主机名。'
+            # 尝试解析为 IP — 若为内网/私有/环回/链路本地/多播地址则拒绝
+            try:
+                addr = ipaddress.ip_address(hostname)
+                if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_multicast:
+                    return None, '不允许访问内网或私有地址。'
+                for net in _SSRF_BLOCKED:
+                    if addr in net:
+                        return None, '不允许访问受限网络地址。'
+            except ValueError:
+                pass  # hostname 不是 IP 地址 (域名), 允许
 
             resp = requests.get(url, timeout=30, stream=True)
             resp.raise_for_status()
@@ -548,10 +583,12 @@ class DatasetImportService:
             os.makedirs(upload_dir, exist_ok=True)
             file_path = os.path.join(upload_dir, filename)
 
-            # 保存文件
+            # 保存文件 (分块写入 + 分块哈希, 避免大文件 OOM)
+            file_hash = hashlib.md5()
             with open(file_path, 'wb') as f:
                 for chunk in resp.iter_content(chunk_size=8192):
                     f.write(chunk)
+                    file_hash.update(chunk)
 
             # 解析数据
             if ext == 'csv':

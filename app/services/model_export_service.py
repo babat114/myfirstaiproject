@@ -310,13 +310,13 @@ services:
             return False, '缺少依赖: pip install tf2onnx', None
 
     @staticmethod
-    def generate_deployment_package(model: ModelRecord) -> Tuple[bool, str, Optional[str]]:
+    def generate_deployment_package(model: ModelRecord) -> Tuple[bool, str, Optional[str], Optional[str]]:
         """生成完整部署包 (Dockerfile + serve.py + requirements.txt + docker-compose.yml + README.md)
 
         所有文件打包到一个目录，方便一键部署。
 
         Returns:
-            (success, message, package_dir_path)
+            (success, message, package_dir_path, zip_filename)
         """
         from app.services.inference_service import ModelInferenceService
 
@@ -358,25 +358,26 @@ services:
                 copied_files.append(f'model{ext}_config.pkl')
 
             # 复制 PyTorch .pt
-            pt_path = model_path.replace('.pkl', '.pt')
+            _base, _ = os.path.splitext(model_path)
+            pt_path = _base + '.pt'
             if os.path.exists(pt_path) and pt_path != model_path:
                 shutil.copy2(pt_path, os.path.join(package_dir, 'model.pt'))
                 copied_files.append('model.pt')
 
             # 复制 Keras .keras
-            keras_path = model_path.replace('.pkl', '.keras')
+            keras_path = _base + '.keras'
             if os.path.exists(keras_path) and keras_path != model_path:
                 shutil.copy2(keras_path, os.path.join(package_dir, 'model.keras'))
                 copied_files.append('model.keras')
 
             # 复制 .h5
-            h5_path = model_path.replace('.pkl', '.h5')
+            h5_path = _base + '.h5'
             if os.path.exists(h5_path) and h5_path != model_path:
                 shutil.copy2(h5_path, os.path.join(package_dir, 'model.h5'))
                 copied_files.append('model.h5')
 
             # 复制 ONNX (如果已导出)
-            onnx_path = model_path.replace('.pkl', '.onnx').replace('.pt', '.onnx')
+            onnx_path = _base + '.onnx'
             if os.path.exists(onnx_path) and onnx_path != model_path:
                 shutil.copy2(onnx_path, os.path.join(package_dir, 'model.onnx'))
                 copied_files.append('model.onnx')
@@ -419,9 +420,41 @@ services:
         with open(os.path.join(package_dir, 'README.md'), 'w', encoding='utf-8') as f:
             f.write(readme)
 
+        # 7. metadata.json — 完整模型元数据 (支持双向导入, 保留所有DB字段 + 推理信息)
+        meta_export = model.to_dict(include_files=True)
+        meta_export['exported_at'] = localnow().isoformat()
+        meta_export['export_tool_version'] = '2.0'
+        # 补充推理元数据 (from InferenceService load_model)
+        if metadata:
+            meta_export['_inference_meta'] = {
+                'task_type': metadata.get('task_type'),
+                'algorithm': metadata.get('algorithm'),
+                'feature_names': metadata.get('feature_names', []),
+                'class_labels': metadata.get('class_labels', []),
+                'has_scaler': metadata.get('scaler') is not None,
+                'has_vectorizer': metadata.get('vectorizer') is not None,
+                'label_encoders_keys': list((metadata.get('label_encoders') or {}).keys()),
+            }
+        # 移除不适合序列化的对象
+        meta_export.pop('metrics', None)
+        meta_export.pop('hyperparameters', None)
+        meta_export['metrics'] = model.metrics_dict
+        meta_export['hyperparameters'] = model.hyperparameters_dict
+        with open(os.path.join(package_dir, 'metadata.json'), 'w', encoding='utf-8') as f:
+            json.dump(meta_export, f, ensure_ascii=False, default=str, indent=2)
+        copied_files.append('metadata.json')
+
+        # 8. 打包为 .zip (供下载)
+        import re as _re
+        safe_name = _re.sub(r'[^\w\-]', '_', model.name)
+        zip_base = os.path.join('experiments', 'exports', model.uuid, f'{safe_name}_deploy')
+        shutil.make_archive(zip_base, 'zip', package_dir)
+        zip_file = f'{safe_name}_deploy.zip'
+        logger.info(f"部署包 zip 已生成: {zip_base}.zip")
+
         file_count = len(os.listdir(package_dir))
         logger.info(f"部署包已生成: {package_dir} ({file_count} 个文件)")
-        return True, f'部署包已生成 ({file_count} 个文件)', package_dir
+        return True, f'部署包已生成 ({file_count} 个文件)', package_dir, zip_file
 
     @staticmethod
     def _generate_requirements(framework: str) -> str:
@@ -614,6 +647,7 @@ python serve.py
         info = {
             'onnx_available': False,
             'deploy_available': False,
+            'metadata_available': False,
             'onnx_path': None,
             'deploy_dir': None,
             'framework': model.framework or 'sklearn',
@@ -627,6 +661,17 @@ python serve.py
             if onnx_files:
                 info['onnx_available'] = True
                 info['onnx_path'] = os.path.join(export_dir, onnx_files[0])
+
+            # 检查 metadata.json
+            meta_path = os.path.join(export_dir, 'metadata.json')
+            if os.path.exists(meta_path):
+                info['metadata_available'] = True
+            else:
+                # 老版本可能在 deploy/ 内
+                deploy_dir = os.path.join(export_dir, 'deploy')
+                meta_path2 = os.path.join(deploy_dir, 'metadata.json') if os.path.exists(deploy_dir) else None
+                if meta_path2 and os.path.exists(meta_path2):
+                    info['metadata_available'] = True
 
             deploy_dir = os.path.join(export_dir, 'deploy')
             if os.path.exists(deploy_dir):

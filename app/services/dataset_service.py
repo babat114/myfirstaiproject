@@ -488,6 +488,7 @@ def _analyze_dataset_file(dataset, file_path: str, file_ext: str):
         'dtypes': {col: str(dtype) for col, dtype in df.dtypes.items()},
         'missing_values': {col: int(df[col].isna().sum()) for col in df.columns if df[col].isna().sum() > 0},
         'sample_rows': 5,
+        'target_column': None,  # 上传时未指定，后续可通过编辑或 auto-config 设置
     }
     dataset.summary_json = json.dumps(summary, ensure_ascii=False)
 

@@ -4,6 +4,7 @@
 ============================================
 """
 import pytest
+from app import db
 from app.services.auth_service import AuthService
 
 
@@ -84,6 +85,52 @@ class TestPasswordManagement:
             assert success == expect_success
             if expect_success:
                 assert test_user.check_password(new_password)
+
+    @pytest.mark.parametrize("password,expect_valid", [
+        ("Ab12345!",   False),  # 9 chars — too short
+        ("Ab1234567!", True),   # 10 chars — minimum (A,b,1,2,3,4,5,6,7,! = 10)
+        ("Abcdefgh1!", True),   # 10 chars with mixed case + digit + special
+        ("abcdefgh1!", False),  # no uppercase
+        ("ABCDEFGH1!", False),  # no lowercase
+        ("Abcdefghij", False),  # no digit
+        ("Abcdefgh1",  False),  # no special char
+    ])
+    def test_password_strength_boundary(self, app, password, expect_valid):
+        """参数化: 密码强度边界条件 (10字符/大小写/数字/特殊字符)"""
+        with app.app_context():
+            error = AuthService._validate_password_strength(password)
+            assert (error is None) == expect_valid, f'password={password}: {error}'
+
+    def test_account_lockout(self, app, test_user):
+        """测试连续登录失败 → 账号锁定 → 正确密码也无法登录"""
+        from app.models.user import User
+
+        with app.app_context():
+            # 连续失败 MAX_FAILED_ATTEMPTS 次
+            for i in range(User.MAX_FAILED_ATTEMPTS):
+                user, error = AuthService.login('testuser', 'WrongPass1!')
+                assert user is None, f'Attempt {i+1}: expected None user, got error={error}'
+                assert error is not None
+
+            # 第 MAX_FAILED_ATTEMPTS + 1 次 — 应该被锁定 (不再接受任何登录)
+            user_locked, error_locked = AuthService.login('testuser', 'WrongPass1!')
+            assert user_locked is None
+            assert error_locked is not None
+            # 锁定消息包含 "锁定" (locked)
+            assert '锁' in error_locked or 'lock' in error_locked.lower()
+
+            # 正确密码也无法登录 (锁定状态)
+            user_correct, error_correct = AuthService.login('testuser', 'Test123456')
+            assert user_correct is None
+
+            # 重置锁定后可以登录 (在同 app_context 中重新查用户确保有最新状态)
+            from app.models.user import User
+            fresh_user = db.session.get(User, test_user.id)
+            fresh_user.reset_lockout()
+            db.session.commit()
+            user_ok, error_ok = AuthService.login('testuser', 'Test123456')
+            assert user_ok is not None, f'Login after unlock failed: {error_ok}'
+            assert error_ok is None
 
 
 class TestLoginPage:

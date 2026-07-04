@@ -1868,6 +1868,8 @@ class HyperparameterTuningService:
             except Exception as e:
                 tracker.add_log(tuning_id, f'异常: {str(e)}')
                 tracker.fail(tuning_id, str(e))
+            finally:
+                db.session.remove()
 
         thread = threading.Thread(target=_bg_run, daemon=True, name=f'tuning-{tuning_id}')
         thread.start()
@@ -1921,6 +1923,8 @@ class HyperparameterTuningService:
                     tracker.fail(tuning_id, result.get('error', '未知错误'))
             except Exception as e:
                 tracker.fail(tuning_id, str(e))
+            finally:
+                db.session.remove()
 
         thread = threading.Thread(target=_bg_run, daemon=True, name=f'tuning-{tuning_id}')
         thread.start()
@@ -2109,6 +2113,8 @@ class HyperparameterTuningService:
                 logger.error(f'AutoML 失败: {e}', exc_info=True)
                 tracker.add_log(tuning_id, f'异常: {str(e)}')
                 tracker.fail(tuning_id, str(e))
+            finally:
+                db.session.remove()
 
         thread = threading.Thread(target=_bg_run, daemon=True,
                                   name=f'autotune-{tuning_id}')

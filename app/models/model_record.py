@@ -89,6 +89,14 @@ class ModelRecord(AccessControlMixin, db.Model):
     training_job_id = db.Column(db.Integer, db.ForeignKey('training_jobs.id'), nullable=True)
     training_duration_seconds = db.Column(db.Integer, nullable=True)
 
+    # --- 独立测试集评估 ---
+    independent_test_dataset_id = db.Column(
+        db.Integer, db.ForeignKey('datasets.id'), nullable=True
+    )
+    independent_accuracy = db.Column(db.Float, nullable=True)
+    independent_f1_score = db.Column(db.Float, nullable=True)
+    independent_metrics_json = db.Column(db.Text, nullable=True)
+
     # 状态和可见性
     status = db.Column(
         db.Enum('draft', 'trained', 'deployed', 'archived', 'failed',
@@ -133,12 +141,21 @@ class ModelRecord(AccessControlMixin, db.Model):
                         name='ck_mae_nonnegative'),
         CheckConstraint('r2 IS NULL OR r2 <= 1.0',
                         name='ck_r2_upper'),
+        # 性能索引 — leaderboard排序 + 列表过滤
+        db.Index('ix_model_records_accuracy', 'accuracy'),
+        db.Index('ix_model_records_f1_score', 'f1_score'),
+        db.Index('ix_model_records_r2', 'r2'),
+        db.Index('ix_model_records_model_type', 'model_type'),
+        db.Index('ix_model_records_framework', 'framework'),
     )
 
     # 关联关系
     owner = db.relationship('User', back_populates='model_records')
     training_dataset = db.relationship('Dataset', foreign_keys=[training_dataset_id])
     training_job = db.relationship('TrainingJob', foreign_keys=[training_job_id])
+    independent_test_dataset = db.relationship(
+        'Dataset', foreign_keys=[independent_test_dataset_id]
+    )
 
     # ============ 属性 ============
 
@@ -240,6 +257,38 @@ class ModelRecord(AccessControlMixin, db.Model):
                     setattr(self, attr, float(metrics[full]))
                     break  # test_ 前缀优先, 找到即停
 
+    @property
+    def independent_metrics_dict(self) -> dict:
+        """获取独立测试集评估指标字典"""
+        if self.independent_metrics_json:
+            try:
+                return json.loads(self.independent_metrics_json)
+            except (json.JSONDecodeError, TypeError):
+                return {}
+        return {}
+
+    def set_independent_metrics(self, metrics: dict):
+        """
+        设置独立测试集评估指标
+
+        存储策略:
+        - independent_accuracy: 独立测试集准确率
+        - independent_f1_score: 独立测试集F1
+        - independent_metrics_json: 完整指标
+        """
+        self.independent_metrics_json = json.dumps(metrics, ensure_ascii=False)
+        # 提取关键指标到类型化列
+        for key, attr in [
+            ('ind_test_accuracy', 'independent_accuracy'),
+            ('accuracy', 'independent_accuracy'),
+            ('ind_test_f1_weighted', 'independent_f1_score'),
+            ('ind_test_f1_macro', 'independent_f1_score'),
+            ('f1_weighted', 'independent_f1_score'),
+            ('f1_macro', 'independent_f1_score'),
+        ]:
+            if key in metrics and getattr(self, attr) is None:
+                setattr(self, attr, float(metrics[key]))
+
     def set_hyperparameters(self, params: dict):
         """设置超参数"""
         self.hyperparameters_json = json.dumps(params, ensure_ascii=False)
@@ -261,7 +310,7 @@ class ModelRecord(AccessControlMixin, db.Model):
             'framework': self.framework,
             'status': self.status,
             'is_public': self.is_public,
-            # 分类指标
+            # 分类指标 (训练集切分评估)
             'accuracy': self.accuracy,
             'precision': self.precision,
             'recall': self.recall,
@@ -271,6 +320,11 @@ class ModelRecord(AccessControlMixin, db.Model):
             'r2': self.r2,
             'mse': self.mse,
             'mae': self.mae,
+            # 独立测试集评估
+            'independent_test_dataset_id': self.independent_test_dataset_id,
+            'independent_accuracy': self.independent_accuracy,
+            'independent_f1_score': self.independent_f1_score,
+            'independent_metrics': self.independent_metrics_dict,
             'metrics': self.metrics_dict,
             'hyperparameters': self.hyperparameters_dict,
             'training_duration_seconds': self.training_duration_seconds,

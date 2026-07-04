@@ -1,8 +1,19 @@
 {% extends "base.html" %}
 {% block title %}测试模型 - {{ model.name }}{% endblock %}
+{% block vue_scripts %}
+<script src="https://cdn.jsdelivr.net/npm/vue@3.5.13/dist/vue.global.prod.js"></script>
+<link href="https://cdn.jsdelivr.net/npm/element-plus@2.9.1/dist/index.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/element-plus@2.9.1/dist/index.full.min.js"></script>
+<script src="{{ url_for('static', filename='js/el-enhance.js') }}"></script>
+{% endblock %}
+{% block chartjs %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+{% endblock %}
+{% block head_meta %}
+<meta name="model-uuid" content="{{ model.uuid }}">
+{% endblock %}
 
 {% block content %}
-<meta name="model-uuid" content="{{ model.uuid }}">
 
 <nav aria-label="breadcrumb">
     <ol class="breadcrumb">
@@ -35,6 +46,91 @@
     <!-- 左侧: 操作面板 -->
     <div class="col-lg-5">
 
+        <!-- 输入指导提示卡 (根据模型类型动态展示) -->
+        {% if hints %}
+        <div class="card mb-3 border-info model-hint-card">
+            <div class="card-header bg-info bg-opacity-10 d-flex justify-content-between align-items-center"
+                 data-bs-toggle="collapse" data-bs-target="#hintCollapse" role="button" aria-expanded="false">
+                <h6 class="mb-0"><i class="bi bi-info-circle-fill text-info"></i> 输入指导</h6>
+                <div class="d-flex gap-2 align-items-center">
+                    {% if hints.domain != 'general' %}
+                    <span class="badge bg-info">{{ hints.domain_label }}</span>
+                    {% endif %}
+                    {% if hints.classes %}
+                    <span class="badge bg-secondary">{{ hints.classes|join(' / ') }}</span>
+                    {% endif %}
+                    <i class="bi bi-chevron-down small text-muted"></i>
+                </div>
+            </div>
+            <div class="collapse" id="hintCollapse">
+                <div class="card-body pt-0">
+                    <!-- 能力标签 -->
+                    {% if hints.capabilities %}
+                    <div class="mb-2">
+                        <small class="text-muted fw-bold">能力:</small>
+                        {% for cap in hints.capabilities %}
+                        <span class="badge bg-light text-dark me-1 mb-1">{{ cap }}</span>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+
+                    <!-- 输入指导 -->
+                    {% if hints.input_guide %}
+                    <div class="mb-2">
+                        <small class="text-muted fw-bold">输入要求:</small>
+                        <p class="small mb-1 text-muted">{{ hints.input_guide.note }}</p>
+                        {% if hints.input_guide.type == 'text' %}
+                        <div class="d-flex flex-wrap gap-1 small mb-1">
+                            <span class="badge bg-light text-dark">
+                                <i class="bi bi-text-paragraph"></i> 建议 {{ hints.input_guide.min_length }}–{{ hints.input_guide.max_length }} 字
+                            </span>
+                            {% if hints.algorithm %}
+                            <span class="badge bg-light text-dark">
+                                <i class="bi bi-cpu"></i> {{ hints.algorithm }}
+                            </span>
+                            {% endif %}
+                            {% if hints.framework %}
+                            <span class="badge bg-light text-dark">
+                                <i class="bi bi-box"></i> {{ hints.framework }}
+                            </span>
+                            {% endif %}
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% endif %}
+
+                    <!-- 示例输入快捷填充 -->
+                    {% if hints.input_guide.examples %}
+                    <div class="mb-2">
+                        <small class="text-muted fw-bold">快捷示例:</small>
+                        <div class="d-flex flex-wrap gap-1 mt-1">
+                        {% for ex in hints.input_guide.examples[:3] %}
+                            <button class="btn btn-outline-info btn-sm example-fill-btn"
+                                    data-text="{{ ex }}"
+                                    title="点击填充此示例文本">
+                                <i class="bi bi-lightning"></i> 示例{{ loop.index }}
+                            </button>
+                        {% endfor %}
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    <!-- 局限/注意事项 -->
+                    {% if hints.limitations %}
+                    <div class="mt-2">
+                        <small class="text-warning fw-bold"><i class="bi bi-exclamation-triangle"></i> 注意:</small>
+                        <ul class="small text-muted mb-0 ps-3">
+                            {% for lim in hints.limitations %}
+                            <li>{{ lim }}</li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
         {% if model.model_type == 'nlp' %}
         <!-- NLP 模型: 文本输入区 -->
         <div class="card mb-4 border-primary">
@@ -52,7 +148,7 @@
                     <input type="hidden" name="action" value="predict_text">
                     <div class="mb-3">
                         <textarea name="text_input" class="form-control" rows="6" id="nlpTextInput"
-                            placeholder="在此输入文本内容...&#10;例如: 这部电影非常精彩，演员表现出色，剧情扣人心弦。">{{ request.form.get('text_input', '') }}</textarea>
+                            placeholder="{{ hints.input_guide.placeholder|default('在此输入文本内容...')|e }}">{{ request.form.get('text_input', '') }}</textarea>
                     </div>
                     <!-- 实时预测开关 -->
                     <div class="d-flex align-items-center mb-2">
@@ -69,10 +165,12 @@
                     </div>
                     <div class="d-flex justify-content-between align-items-center">
                         <small class="text-muted">
-                            <i class="bi bi-info-circle"></i> 文本将通过 TF-IDF 转为特征向量后预测
+                            <i class="bi bi-info-circle"></i>
+                            {{ hints.input_guide.note|default('文本将通过 TF-IDF 转为特征向量后预测') }}
                         </small>
                         <button type="submit" class="btn btn-primary">
-                            <i class="bi bi-send"></i> 分析情感
+                            <i class="bi bi-send"></i>
+                            {% if hints.classes %}预测: {{ hints.classes|join(' / ') }}{% else %}分析情感{% endif %}
                         </button>
                     </div>
                 </form>
@@ -81,7 +179,8 @@
         </div>
         {% endif %}
 
-        <!-- 图像上传区 (通用 — 所有模型类型均可使用) -->
+        <!-- 图像上传区 (仅 CV 和通用模型) -->
+        {% if model.model_type in ('computer_vision', 'general') or not model.model_type %}
         <div class="card mb-4 border-success">
             <div class="card-header bg-success bg-opacity-10">
                 <h6 class="mb-0"><i class="bi bi-image"></i> 上传图像 (通用)</h6>
@@ -120,6 +219,7 @@
                 {% endif %}
             </div>
         </div>
+        {% endif %}
 
         {% if model.model_type not in ('nlp', 'computer_vision') %}
         <!-- 通用模型: 手动输入特征值 -->
@@ -414,9 +514,10 @@
 </div>
 {% endblock %}
 
+{% include "includes/_celebration.html" %}
 {% block extra_js %}
 <script>
-// ============ 图像上传拖拽与预览 (CV 模型) ============
+// ============ 图像上传拖拽与预览 + 缩放灯箱 ============
 (function() {
     const dropZone = document.getElementById('imageDropZone');
     const fileInput = document.getElementById('imageFileInput');
@@ -424,7 +525,9 @@
 
     // 点击触发文件选择
     dropZone.addEventListener('click', function(e) {
-        if (e.target.tagName !== 'BUTTON') fileInput.click();
+        if (e.target.tagName !== 'BUTTON' && !e.target.closest('.img-preview')) {
+            fileInput.click();
+        }
     });
 
     // 拖拽高亮
@@ -458,11 +561,272 @@
         if (!file.type.match(/^image\//)) return;
         var reader = new FileReader();
         reader.onload = function(e) {
-            dropZone.innerHTML = '<img src="' + e.target.result + '" class="img-preview" alt="预览">' +
-                '<p class="text-muted small mt-2">点击或拖拽更换图像</p>';
+            var dataUrl = e.target.result;
+            dropZone.innerHTML = '<img src="' + dataUrl + '" class="img-preview" alt="预览" ' +
+                'title="点击预览图可放大查看" style="cursor:zoom-in;">' +
+                '<p class="text-muted small mt-2">点击或拖拽更换图像 | 点击图片放大</p>';
+            // 绑定点击缩放
+            var previewImg = dropZone.querySelector('.img-preview');
+            if (previewImg) {
+                previewImg.addEventListener('click', function(ev) {
+                    ev.stopPropagation();
+                    ImageZoom.open(dataUrl);
+                });
+            }
         };
         reader.readAsDataURL(file);
     }
+
+    // 如果初始有预览图 (服务端渲染), 也绑定缩放
+    var existingPreview = dropZone.querySelector('.img-preview');
+    if (existingPreview) {
+        existingPreview.style.cursor = 'zoom-in';
+        existingPreview.title = '点击预览图可放大查看';
+        existingPreview.addEventListener('click', function(ev) {
+            ev.stopPropagation();
+            ImageZoom.open(existingPreview.src);
+        });
+    }
+})();
+
+
+// ============ 图片缩放灯箱控制器 ============
+var ImageZoom = (function() {
+    var overlay = null;
+    var wrap = null;
+    var img = null;
+    var badge = null;
+    var scale = 1;
+    var panX = 0, panY = 0;
+    var dragStartX = 0, dragStartY = 0;
+    var panStartX = 0, panStartY = 0;
+    var isDragging = false;
+    var MIN_SCALE = 0.25;
+    var MAX_SCALE = 8;
+    var ZOOM_STEP = 0.25;
+
+    function open(dataUrl) {
+        // 移除已有灯箱
+        close(true);
+
+        // 创建 DOM
+        overlay = document.createElement('div');
+        overlay.className = 'image-lightbox-overlay';
+
+        wrap = document.createElement('div');
+        wrap.className = 'lightbox-img-wrap';
+
+        img = document.createElement('img');
+        img.src = dataUrl;
+        img.alt = '图片预览';
+        img.draggable = false;
+        // 图片加载完成后居中
+        img.onload = function() {
+            resetView();
+        };
+
+        // 工具栏
+        var toolbar = document.createElement('div');
+        toolbar.className = 'lightbox-toolbar';
+        toolbar.innerHTML =
+            '<button id="lboxZoomIn" title="放大 (+)" aria-label="放大"><i class="bi bi-zoom-in"></i></button>' +
+            '<button id="lboxZoomOut" title="缩小 (-)" aria-label="缩小"><i class="bi bi-zoom-out"></i></button>' +
+            '<button id="lboxReset" title="重置 (0)" aria-label="重置"><i class="bi bi-arrow-clockwise"></i></button>' +
+            '<button id="lboxClose" title="关闭 (Esc)" aria-label="关闭"><i class="bi bi-x-lg"></i></button>';
+
+        // 缩放比例徽章
+        badge = document.createElement('div');
+        badge.className = 'lightbox-zoom-badge';
+        updateBadge();
+
+        wrap.appendChild(img);
+        overlay.appendChild(wrap);
+        overlay.appendChild(toolbar);
+        overlay.appendChild(badge);
+        document.body.appendChild(overlay);
+
+        // 防止 body 滚动
+        document.body.style.overflow = 'hidden';
+
+        // 绑定事件
+        bindEvents();
+    }
+
+    function bindEvents() {
+        // 点击背景关闭
+        overlay.addEventListener('click', function(e) {
+            if (e.target === overlay) close();
+        });
+
+        // 鼠标滚轮缩放
+        overlay.addEventListener('wheel', function(e) {
+            e.preventDefault();
+            var rect = img.getBoundingClientRect();
+            var cx = e.clientX - (rect.left + rect.width / 2);
+            var cy = e.clientY - (rect.top + rect.height / 2);
+
+            var delta = e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP;
+            var oldScale = scale;
+            var newScale = clamp(oldScale + delta, MIN_SCALE, MAX_SCALE);
+            if (newScale === oldScale) return;
+
+            // 以鼠标位置为中心缩放
+            var scaleRatio = newScale / oldScale;
+            panX = cx - scaleRatio * (cx - panX);
+            panY = cy - scaleRatio * (cy - panY);
+            scale = newScale;
+            applyTransform();
+            updateBadge();
+        }, { passive: false });
+
+        // 拖拽平移 (鼠标)
+        wrap.addEventListener('mousedown', function(e) {
+            if (e.button !== 0) return;
+            isDragging = true;
+            dragStartX = e.clientX;
+            dragStartY = e.clientY;
+            panStartX = panX;
+            panStartY = panY;
+            wrap.style.cursor = 'grabbing';
+            wrap.style.transition = 'none';
+            e.preventDefault();
+        });
+        window.addEventListener('mousemove', function(e) {
+            if (!isDragging) return;
+            panX = panStartX + (e.clientX - dragStartX);
+            panY = panStartY + (e.clientY - dragStartY);
+            applyTransform();
+        });
+        window.addEventListener('mouseup', function() {
+            if (!isDragging) return;
+            isDragging = false;
+            wrap.style.cursor = scale > 1 ? 'grab' : 'default';
+            wrap.style.transition = 'transform 0.08s ease-out';
+        });
+
+        // 触摸支持 (双指缩放 + 单指拖动)
+        var lastTouchDist = 0;
+        var lastTouchScale = 1;
+        wrap.addEventListener('touchstart', function(e) {
+            if (e.touches.length === 1) {
+                isDragging = true;
+                dragStartX = e.touches[0].clientX;
+                dragStartY = e.touches[0].clientY;
+                panStartX = panX;
+                panStartY = panY;
+                wrap.style.transition = 'none';
+            } else if (e.touches.length === 2) {
+                isDragging = false;
+                lastTouchDist = getTouchDist(e.touches);
+                lastTouchScale = scale;
+            }
+        }, { passive: false });
+        wrap.addEventListener('touchmove', function(e) {
+            if (e.touches.length === 1 && isDragging) {
+                panX = panStartX + (e.touches[0].clientX - dragStartX);
+                panY = panStartY + (e.touches[0].clientY - dragStartY);
+                applyTransform();
+            } else if (e.touches.length === 2) {
+                var dist = getTouchDist(e.touches);
+                var newScale = clamp(lastTouchScale * (dist / lastTouchDist), MIN_SCALE, MAX_SCALE);
+                scale = newScale;
+                applyTransform();
+                updateBadge();
+            }
+        }, { passive: false });
+        wrap.addEventListener('touchend', function() {
+            isDragging = false;
+            wrap.style.transition = 'transform 0.08s ease-out';
+        });
+        function getTouchDist(touches) {
+            var dx = touches[0].clientX - touches[1].clientX;
+            var dy = touches[0].clientY - touches[1].clientY;
+            return Math.sqrt(dx * dx + dy * dy);
+        }
+
+        // 工具栏按钮
+        document.getElementById('lboxZoomIn').addEventListener('click', function(e) {
+            e.stopPropagation();
+            zoomIn();
+        });
+        document.getElementById('lboxZoomOut').addEventListener('click', function(e) {
+            e.stopPropagation();
+            zoomOut();
+        });
+        document.getElementById('lboxReset').addEventListener('click', function(e) {
+            e.stopPropagation();
+            resetView();
+        });
+        document.getElementById('lboxClose').addEventListener('click', function(e) {
+            e.stopPropagation();
+            close();
+        });
+
+        // 键盘快捷键
+        function onKeyDown(e) {
+            switch (e.key) {
+                case 'Escape': close(); break;
+                case '+': case '=': zoomIn(); break;
+                case '-': zoomOut(); break;
+                case '0': resetView(); break;
+                case 'ArrowLeft':  panX -= 40; applyTransform(); break;
+                case 'ArrowRight': panX += 40; applyTransform(); break;
+                case 'ArrowUp':    panY -= 40; applyTransform(); break;
+                case 'ArrowDown':  panY += 40; applyTransform(); break;
+            }
+        }
+        window.addEventListener('keydown', onKeyDown);
+        // 存储清理函数
+        overlay._cleanup = function() {
+            window.removeEventListener('keydown', onKeyDown);
+        };
+    }
+
+    function zoomIn() {
+        scale = clamp(scale + ZOOM_STEP, MIN_SCALE, MAX_SCALE);
+        applyTransform();
+        updateBadge();
+    }
+    function zoomOut() {
+        scale = clamp(scale - ZOOM_STEP, MIN_SCALE, MAX_SCALE);
+        applyTransform();
+        updateBadge();
+    }
+    function resetView() {
+        scale = 1;
+        panX = 0;
+        panY = 0;
+        applyTransform();
+        updateBadge();
+    }
+
+    function applyTransform() {
+        if (!wrap) return;
+        wrap.style.transform = 'translate(' + panX + 'px, ' + panY + 'px) scale(' + scale + ')';
+        if (!isDragging) {
+            wrap.style.cursor = scale > 1 ? 'grab' : 'default';
+        }
+    }
+
+    function updateBadge() {
+        if (!badge) return;
+        badge.textContent = Math.round(scale * 100) + '%';
+    }
+
+    function close(silent) {
+        if (!overlay) return;
+        if (overlay._cleanup) overlay._cleanup();
+        document.body.style.overflow = '';
+        overlay.remove();
+        overlay = null; wrap = null; img = null; badge = null;
+        scale = 1; panX = 0; panY = 0; isDragging = false;
+    }
+
+    function clamp(v, min, max) {
+        return Math.max(min, Math.min(max, v));
+    }
+
+    return { open: open, close: close };
 })();
 
 
@@ -609,6 +973,10 @@ var TestPage = {
             if (data.success && data.data) {
                 this._renderQuickPredictResult(data.data);
                 this._updateLiveStatus('idle');
+                // 预测成功 → 庆祝动效 (仅非实时模式触发)
+                if (typeof celebrateSuccess === 'function' && !this._liveMode) {
+                    celebrateSuccess('.predict-result-card');
+                }
             } else {
                 this._updateLiveStatus('idle');
                 // 实时模式下不弹错误 — 静默降级
@@ -1604,6 +1972,41 @@ var TestPage = {
 })();
 {% endif %}
 
+
+// ============ 示例填充按钮 ============
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.example-fill-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var text = btn.getAttribute('data-text');
+            var textarea = document.getElementById('nlpTextInput');
+            if (textarea && text) {
+                textarea.value = text;
+                textarea.focus();
+                // 滚动到输入区
+                textarea.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                // 如果开启了实时预测，触发预测
+                if (TestPage._livePredictEnabled) {
+                    TestPage._debouncedPredict(textarea);
+                }
+                // 高亮闪烁效果
+                textarea.style.transition = 'none';
+                textarea.style.boxShadow = '0 0 0 0.25rem rgba(13,202,240,0.5)';
+                setTimeout(function() {
+                    textarea.style.transition = 'box-shadow 0.6s ease-out';
+                    textarea.style.boxShadow = '';
+                }, 100);
+            }
+        });
+    });
+
+    // 自动展开提示卡 (首次访问)
+    var hintCollapse = document.getElementById('hintCollapse');
+    if (hintCollapse && !sessionStorage.getItem('hintCardSeen')) {
+        var bsCollapse = new bootstrap.Collapse(hintCollapse, { toggle: false });
+        bsCollapse.show();
+        sessionStorage.setItem('hintCardSeen', '1');
+    }
+});
 
 // ============ 启动 ============
 document.addEventListener('DOMContentLoaded', function() {

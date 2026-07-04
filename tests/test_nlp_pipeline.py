@@ -101,6 +101,40 @@ class TestTFIDFPipeline:
         assert X.shape[1] > 0, "char ngram应产生非零特征"
         assert X.nnz > 0
 
+    def test_combined_tokenizer_short_text(self):
+        """合并分词器 (jieba+char unigram) 对短文本产生 nnz > 0"""
+        try:
+            import jieba  # noqa: F401
+        except ImportError:
+            pytest.skip("jieba 未安装")
+
+        from app.utils.nlp_preprocessing import combined_tokenize, create_vectorizer_config
+
+        # 短文本 — jieba 无法分词的极端情况
+        short_texts = ["垃圾", "勉强", "烂", "好", "非常好推荐"]
+        config = create_vectorizer_config(nlp_max_features=50, nlp_min_df=1)
+        vec = TfidfVectorizer(**config)
+        X = vec.fit_transform(short_texts)
+
+        # 每个文本至少命中 1 个特征
+        for i, text in enumerate(short_texts):
+            row_nnz = X[i].nnz
+            assert row_nnz > 0, f"'{text}' produced nnz=0 with combined tokenizer"
+
+        # pickle roundtrip 验证 (combined_tokenize 是模块级函数，可序列化)
+        import tempfile, os
+        pkl_path = os.path.join(tempfile.gettempdir(), 'test_combined_vec.pkl')
+        try:
+            with open(pkl_path, 'wb') as f:
+                pickle.dump(vec, f)
+            with open(pkl_path, 'rb') as f:
+                vec2 = pickle.load(f)
+            X2 = vec2.transform(short_texts)
+            np.testing.assert_array_almost_equal(X.toarray(), X2.toarray())
+        finally:
+            if os.path.exists(pkl_path):
+                os.unlink(pkl_path)
+
     def test_max_features_cap(self):
         """小数据集 → max_features 自适应不超过 n_samples // 2"""
         small_texts = ["好", "差", "还行", "不错"]  # 4 samples

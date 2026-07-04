@@ -6,9 +6,10 @@
 """
 import os
 import uuid
-from datetime import datetime
 from app import db
+from app.models.mixins import AccessControlMixin
 from app._timezone import localnow
+from sqlalchemy import CheckConstraint
 
 
 # 数据集分类映射 (数据库值 → 中文标签 + 图标)
@@ -27,7 +28,7 @@ CATEGORY_LABELS = {
 }
 
 
-class Dataset(db.Model):
+class Dataset(AccessControlMixin, db.Model):
     """数据集模型 — 存储上传数据集的文件路径、元数据和统计信息
 
     数据集类别 (category) — 11种细分:
@@ -91,6 +92,16 @@ class Dataset(db.Model):
     # 唯一标识符 (用于 API)
     uuid = db.Column(db.String(36), unique=True, nullable=False, default=lambda: str(uuid.uuid4()))
 
+    # --- 独立测试集支持 ---
+    # 标记此数据集是否为独立测试集 (而非训练数据)
+    is_test_set = db.Column(db.Boolean, default=False, nullable=False, index=True)
+    # 关联到源训练数据集 (一个训练集可以有多个独立测试集)
+    source_dataset_id = db.Column(
+        db.Integer, db.ForeignKey('datasets.id'), nullable=True, index=True
+    )
+    # 测试集采集方式: web_scraped / synthetic / openml_diff / url / manual
+    collection_method = db.Column(db.String(50), nullable=True)
+
     # 外键
     owner_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
 
@@ -103,12 +114,25 @@ class Dataset(db.Model):
         nullable=False
     )
 
+    # 表级约束: 文件大小非负
+    __table_args__ = (
+        CheckConstraint('file_size IS NULL OR file_size >= 0',
+                        name='ck_file_size_nonnegative'),
+    )
+
     # 关联关系
     owner = db.relationship('User', back_populates='datasets')
     training_jobs = db.relationship(
         'TrainingJob',
         back_populates='dataset',
         lazy='dynamic'
+    )
+    # 自引用: 独立测试集 → 源训练集
+    source_dataset = db.relationship(
+        'Dataset',
+        remote_side='Dataset.id',
+        backref=db.backref('test_sets', lazy='dynamic'),
+        foreign_keys=[source_dataset_id]
     )
 
     # ============ 属性 ============
@@ -175,10 +199,14 @@ class Dataset(db.Model):
             'column_count': self.column_count,
             'status': self.status,
             'is_public': self.is_public,
+            'is_test_set': self.is_test_set,
+            'source_dataset_id': self.source_dataset_id,
+            'collection_method': self.collection_method,
             'summary_json': self.summary_json,
             'owner_id': self.owner_id,
             'owner_name': self.owner.username if self.owner else None,
             'training_job_count': self.training_jobs.count(),
+            'test_set_count': self.test_sets.count() if not self.is_test_set else 0,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }
@@ -189,16 +217,5 @@ class Dataset(db.Model):
     def __repr__(self):
         return f'<Dataset {self.name} v{self.version}>'
 
-    # ============ 权限检查 ============
-
-    def is_viewable_by(self, user) -> bool:
-        """检查用户是否有权查看此数据集"""
-        if user is None:
-            return self.is_public
-        return self.is_public or self.owner_id == user.id or user.is_admin
-
-    def is_editable_by(self, user) -> bool:
-        """检查用户是否有权编辑此数据集"""
-        if user is None:
-            return False
-        return self.owner_id == user.id or user.is_admin
+    # ============ 权限检查 (继承自 AccessControlMixin) ============
+    # is_viewable_by / is_editable_by 由 AccessControlMixin 提供

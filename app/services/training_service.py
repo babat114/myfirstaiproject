@@ -13,6 +13,7 @@ from app.models.training_job import TrainingJob
 from app.models.dataset import Dataset
 from app.models.model_record import ModelRecord
 from app.models.user import User
+from app.utils.algorithm_info import ALGORITHM_INFO
 from app.utils.cache import dashboard_cache
 from app.utils.helpers import paginate_query, sanitize_service_error
 from sqlalchemy.orm import joinedload
@@ -75,10 +76,22 @@ class TrainingService:
         })
 
         try:
-            # 创建关联的模型记录
+            # 创建关联的模型记录 — 使用增强描述 (应用场景+使用方式+算法原理)
+            from app.services.model_recommender import generate_enhanced_description
+            dataset_name = dataset.name if dataset_id and dataset else ''
+            model_description = generate_enhanced_description(
+                dataset_name=dataset_name,
+                task_type=ml_task_type,
+                algorithm=algorithm,
+                target_column=target_column or '',
+                model_name=name,
+                class_labels=[],
+                feature_names=[],
+            )
+
             model = ModelRecord(
                 name=f'{name} - 模型',
-                description=f'为训练任务 "{name}" 自动创建的模型记录',
+                description=model_description,
                 model_type=model_type or ml_task_type,
                 framework=framework or 'sklearn',
                 owner_id=user.id,
@@ -528,7 +541,26 @@ class TrainingService:
             if avg_row:
                 avg_duration = round(float(avg_row), 1)
         except Exception:
-            avg_duration = None
+            # SQLite 不支持 TIMESTAMPDIFF, 回退到 Python 计算
+            try:
+                completed_jobs = db.session.execute(
+                    _filtered_query(TrainingJob.started_at, TrainingJob.completed_at)
+                    .filter(
+                        TrainingJob.status == 'completed',
+                        TrainingJob.started_at.isnot(None),
+                        TrainingJob.completed_at.isnot(None),
+                    )
+                ).all()
+                durations = []
+                for started_at, completed_at in completed_jobs:
+                    if started_at and completed_at:
+                        delta = (completed_at - started_at).total_seconds()
+                        if delta >= 0:
+                            durations.append(delta)
+                if durations:
+                    avg_duration = round(float(sum(durations) / len(durations)), 1)
+            except Exception:
+                avg_duration = None
 
         running = status_counts.get('running', 0)
         queued = status_counts.get('queued', 0)

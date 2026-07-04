@@ -183,7 +183,9 @@ class TransformersNLPTrainer(BaseTrainer):
         self.callback.on_log(f'训练集: {len(X_train)}, 验证集: {len(X_val)}, 测试集: {len(X_test)}')
 
         # Tokenize
-        self._tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+        self._tokenizer = AutoTokenizer.from_pretrained(
+            self.model_name, local_files_only=True
+        )
         train_enc = self._tokenizer(
             X_train, truncation=True, padding='max_length',
             max_length=self.max_length, return_tensors='pt'
@@ -232,6 +234,7 @@ class TransformersNLPTrainer(BaseTrainer):
             num_labels=num_classes,
             id2label=self._id2label,
             label2id=self._label2id,
+            local_files_only=True,
         )
         self._model = self._model.to(self._device)
 
@@ -365,15 +368,19 @@ class TransformersNLPTrainer(BaseTrainer):
         result = {
             'test_accuracy': round(float(accuracy_score(all_labels, all_preds)), 4),
         }
-        try:
-            result['test_precision_weighted'] = round(float(precision_score(all_labels, all_preds, average='weighted', zero_division=0)), 4)
-            result['test_recall_weighted'] = round(float(recall_score(all_labels, all_preds, average='weighted', zero_division=0)), 4)
-            result['test_f1_weighted'] = round(float(f1_score(all_labels, all_preds, average='weighted', zero_division=0)), 4)
-            result['test_precision_macro'] = round(float(precision_score(all_labels, all_preds, average='macro', zero_division=0)), 4)
-            result['test_recall_macro'] = round(float(recall_score(all_labels, all_preds, average='macro', zero_division=0)), 4)
-            result['test_f1_macro'] = round(float(f1_score(all_labels, all_preds, average='macro', zero_division=0)), 4)
-        except Exception:
-            pass
+        for name, func in [
+            ('precision_weighted', lambda: precision_score(all_labels, all_preds, average='weighted', zero_division=0)),
+            ('recall_weighted', lambda: recall_score(all_labels, all_preds, average='weighted', zero_division=0)),
+            ('f1_weighted', lambda: f1_score(all_labels, all_preds, average='weighted', zero_division=0)),
+            ('precision_macro', lambda: precision_score(all_labels, all_preds, average='macro', zero_division=0)),
+            ('recall_macro', lambda: recall_score(all_labels, all_preds, average='macro', zero_division=0)),
+            ('f1_macro', lambda: f1_score(all_labels, all_preds, average='macro', zero_division=0)),
+        ]:
+            full_name = f'test_{name}'
+            try:
+                result[full_name] = round(float(func()), 4)
+            except Exception:
+                pass
 
         if self._stopped_early:
             result['early_stopped'] = True
@@ -507,8 +514,25 @@ class TransformersNLPTrainer(BaseTrainer):
             text_col = max(str_cols, key=lambda c: df[c].astype(str).str.len().mean())
             # 确保和目标列不同
             if text_col == target_col:
-                others = [c for c in str_cols if c != target_col]
-                if others:
-                    text_col = max(others, key=lambda c: df[c].astype(str).str.len().mean())
+                # 尝试在其他字符串列中找文本列
+                others_str = [c for c in str_cols if c != target_col]
+                if others_str:
+                    text_col = max(others_str, key=lambda c: df[c].astype(str).str.len().mean())
+                else:
+                    # 没有其他字符串列: 检查 target_col 是否真的是数值标签(而非文本)
+                    if target_col in df.columns and df[target_col].dtype != 'object':
+                        # target 是数值列, 当前 str_cols 只有 text_col 一个 — 用 text_col 做文本, 用 target_col 做目标
+                        pass  # text_col, target_col 保持不变, 但纠正目标列判定
+                    else:
+                        # target_col 也是字符串且没有其他字符串列 — 尝试用数值列做目标
+                        num_cols = df.select_dtypes(include=[np.number]).columns
+                        if len(num_cols) > 0:
+                            # 选择唯一值最少的数值列作为目标列
+                            target_col = min(num_cols, key=lambda c: df[c].nunique())
+                        else:
+                            raise ValueError(
+                                f'无法区分文本列和目标列: 文本列="{text_col}" 与目标列="{target_col}" 相同。'
+                                f'请明确指定 text_column 和 target_column 参数。'
+                            )
 
         return text_col, target_col

@@ -1,5 +1,14 @@
 {% extends "base.html" %}
 {% block title %}仪表盘{% endblock %}
+{% block vue_scripts %}
+<script src="https://cdn.jsdelivr.net/npm/vue@3.5.13/dist/vue.global.prod.js"></script>
+<link href="https://cdn.jsdelivr.net/npm/element-plus@2.9.1/dist/index.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/element-plus@2.9.1/dist/index.full.min.js"></script>
+<script src="{{ url_for('static', filename='js/el-enhance.js') }}"></script>
+{% endblock %}
+{% block chartjs %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+{% endblock %}
 
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4 reveal reveal-up">
@@ -20,16 +29,14 @@
 <!-- Stats Cards -->
 <div class="row g-3 mb-4">
     <div class="col-xl-3 col-md-6">
-        <div class="card border-start border-primary h-100">
+        <div class="card border-start border-primary h-100 stat-card card-hoverable">
             <div class="card-body">
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
                         <h6 class="text-muted text-uppercase small fw-semibold">数据集</h6>
-                        <h2 class="fw-bold mb-0">{{ dataset_stats.total_count }}</h2>
+                        <h2 class="fw-bold mb-0"><span class="count-up" data-target="{{ dataset_stats.total_count }}">{{ dataset_stats.total_count }}</span></h2>
                     </div>
-                    <div class="rounded-circle bg-opacity-10 p-2">
-                        <i class="bi bi-database fs-4" style="color:var(--color-text-tertiary);"></i>
-                    </div>
+                    <i class="bi bi-database stat-icon" style="color:var(--color-accent-emphasis);"></i>
                 </div>
                 <small class="text-muted">{{ dataset_stats.total_size_gb }} GB · {{ dataset_stats.public_count }} 公开</small>
             </div>
@@ -37,16 +44,14 @@
     </div>
 
     <div class="col-xl-3 col-md-6">
-        <div class="card border-start border-success h-100">
+        <div class="card border-start border-success h-100 stat-card card-hoverable">
             <div class="card-body">
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
                         <h6 class="text-muted text-uppercase small fw-semibold">模型</h6>
-                        <h2 class="fw-bold mb-0">{{ model_stats.total_count }}</h2>
+                        <h2 class="fw-bold mb-0"><span class="count-up" data-target="{{ model_stats.total_count }}">{{ model_stats.total_count }}</span></h2>
                     </div>
-                    <div class="rounded-circle bg-opacity-10 p-2">
-                        <i class="bi bi-cpu fs-4" style="color:var(--color-text-tertiary);"></i>
-                    </div>
+                    <i class="bi bi-cpu stat-icon" style="color:var(--color-success-emphasis);"></i>
                 </div>
                 <small class="text-muted">{{ model_stats.deployed_count }} 已部署 · 最高准确率 {{ "%.1f"|format((model_stats.max_accuracy or 0) * 100) }}%</small>
             </div>
@@ -54,16 +59,14 @@
     </div>
 
     <div class="col-xl-3 col-md-6">
-        <div class="card border-start border-info h-100">
+        <div class="card border-start border-info h-100 stat-card card-hoverable">
             <div class="card-body">
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
                         <h6 class="text-muted text-uppercase small fw-semibold">训练任务</h6>
-                        <h2 class="fw-bold mb-0">{{ job_stats.total_count }}</h2>
+                        <h2 class="fw-bold mb-0"><span class="count-up" data-target="{{ job_stats.total_count }}">{{ job_stats.total_count }}</span></h2>
                     </div>
-                    <div class="rounded-circle bg-opacity-10 p-2">
-                        <i class="bi bi-play-circle fs-4" style="color:var(--color-text-tertiary);"></i>
-                    </div>
+                    <i class="bi bi-play-circle stat-icon" style="color:var(--color-info-emphasis);"></i>
                 </div>
                 <small class="text-muted">
                     {% if job_stats.running_count %}<span class="text-warning fw-semibold">{{ job_stats.running_count }} 运行中</span> · {% endif %}

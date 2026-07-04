@@ -89,8 +89,8 @@ class Config:
     # 日志配置
     LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO')
 
-    # CORS 配置 — 生产环境从环境变量读取允许的来源
-    CORS_ORIGINS = os.environ.get('CORS_ORIGINS', '*').split(',')
+    # CORS 配置 — 生产环境必须显式设置允许的来源
+    CORS_ORIGINS = os.environ.get('CORS_ORIGINS', 'http://localhost:5000').split(',')
 
     # 训练执行引擎配置
     TRAINING_MAX_WORKERS = int(os.environ.get('TRAINING_MAX_WORKERS', '2'))
@@ -107,6 +107,19 @@ class Config:
     NLP_DEFAULT_BALANCE_MODE = os.environ.get('NLP_DEFAULT_BALANCE_MODE', 'smote')
     NLP_DEFAULT_CV_FOLDS = int(os.environ.get('NLP_DEFAULT_CV_FOLDS', '5'))
     NLP_MAX_TEST_SENTENCES = int(os.environ.get('NLP_MAX_TEST_SENTENCES', '10'))
+
+    # ── 看门狗告警通知 (v1.0) ──
+    # SMTP 邮件 (不配置则静默跳过)
+    WATCHDOG_SMTP_HOST = os.environ.get('WATCHDOG_SMTP_HOST', '')
+    WATCHDOG_SMTP_PORT = int(os.environ.get('WATCHDOG_SMTP_PORT', '587'))
+    WATCHDOG_SMTP_USER = os.environ.get('WATCHDOG_SMTP_USER', '')
+    WATCHDOG_SMTP_PASSWORD = os.environ.get('WATCHDOG_SMTP_PASSWORD', '')
+    WATCHDOG_SMTP_FROM_EMAIL = os.environ.get('WATCHDOG_SMTP_FROM_EMAIL', '')
+    WATCHDOG_SMTP_TO_EMAILS = os.environ.get('WATCHDOG_SMTP_TO_EMAILS', '')  # 逗号分隔
+    # Webhook (兼容 钉钉/企业微信/飞书/Slack)
+    WATCHDOG_WEBHOOK_URL = os.environ.get('WATCHDOG_WEBHOOK_URL', '')
+    # 同类型告警最小间隔 (秒), 防轰炸
+    WATCHDOG_ALERT_COOLDOWN = int(os.environ.get('WATCHDOG_ALERT_COOLDOWN', '3600'))
 
 
 class DevelopmentConfig(Config):

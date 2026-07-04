@@ -160,9 +160,16 @@ def update_user(user_id):
 
     # 可更新的字段
     updatable = {'full_name', 'bio', 'organization', 'role', 'is_active', 'is_verified'}
+    # 角色值白名单校验 (防止写入无效角色破坏权限检查)
+    VALID_ROLES = {'admin', 'researcher', 'viewer'}
     try:
         for field, value in data.items():
             if field in updatable and hasattr(user, field):
+                if field == 'role' and value not in VALID_ROLES:
+                    return jsonify({
+                        'success': False,
+                        'message': f'无效的角色值: {value}。有效值: {", ".join(sorted(VALID_ROLES))}',
+                    }), 400
                 setattr(user, field, value)
 
         user.updated_at = localnow()

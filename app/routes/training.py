@@ -104,36 +104,35 @@ def create_job():
                      or algorithm == 'auto')
         if auto_tune:
 
-            # AutoML (algorithm='auto') 需要遍历多种算法, 耗时较长,
-            # 重定向到专用调优页面以使用异步 SSE 进度推送
-            if algorithm == 'auto':
-                session['_tuning_presets'] = {
+            # 统一构建 presets: 包含创建页面的全部字段, 避免跳转后丢失
+            def _build_presets(algo):
+                return {
                     'dataset_id': dataset_id,
                     'task_type': ml_task_type,
                     'target_column': target_column,
                     'tuning_method': request.form.get('tuning_method', 'random'),
                     'n_iter': request.form.get('n_iter', 30, type=int) if request.form.get('n_iter') else 30,
                     'cv': request.form.get('tuning_cv', 5, type=int) if request.form.get('tuning_cv') else 5,
-                    'algorithm': 'auto',
+                    'algorithm': algo,
                     'start_training': request.form.get('start_immediately') == 'on',
                     'job_name': name,
+                    'description': description,
+                    'framework': framework,
+                    'test_size': test_size,
+                    'total_epochs': total_epochs,
+                    'total_steps': total_steps,
+                    'gpu_count': gpu_count,
+                    'cpu_cores': cpu_cores,
+                    'memory_gb': memory_gb,
+                    'extra_hparams_json': json.dumps(extra_hparams) if extra_hparams else '{}',
                 }
+
+            if algorithm == 'auto':
+                session['_tuning_presets'] = _build_presets('auto')
                 flash('已切换到 AutoML 智能调优模式 — 正在遍历所有适用算法, 请耐心等待实时进度...', 'info')
                 return redirect(url_for('training.hyperparameter_tuning', auto_start='1'))
 
-            # 单算法调优: 也重定向到调优页面使用异步 SSE 进度推送
-            # (不再同步执行 GridSearchCV — 会阻塞 Flask worker 数分钟)
-            session['_tuning_presets'] = {
-                'dataset_id': dataset_id,
-                'task_type': ml_task_type,
-                'target_column': target_column,
-                'tuning_method': request.form.get('tuning_method', 'random'),
-                'n_iter': request.form.get('n_iter', 30, type=int) if request.form.get('n_iter') else 30,
-                'cv': request.form.get('tuning_cv', 5, type=int) if request.form.get('tuning_cv') else 5,
-                'algorithm': algorithm,
-                'start_training': request.form.get('start_immediately') == 'on',
-                'job_name': name,
-            }
+            session['_tuning_presets'] = _build_presets(algorithm)
             flash(f'已切换到 {algorithm} 自动调优模式 — 正在使用异步实时进度搜索最佳参数...', 'info')
             return redirect(url_for('training.hyperparameter_tuning', auto_start='1'))
 
@@ -445,6 +444,7 @@ def gridsearch_retrain(job_id):
         flash(f'正在对 {algorithm} 运行 GridSearchCV 自动调优...', 'info')
 
     tuning_result = None
+    search_mode = 'GridSearch'
     try:
         tuning_result = HyperparameterTuningService.run_grid_search(
             dataset=job.dataset, algorithm=algorithm, task_type=ml_task_type,
@@ -452,19 +452,22 @@ def gridsearch_retrain(job_id):
         )
     except Exception as e:
         logger.warning(f'GridSearch failed, falling back to RandomSearch: {e}')
+        flash(f'GridSearchCV 搜索失败 ({str(e)})，已自动降级为 RandomSearch 快速搜索', 'warning')
 
     if not tuning_result or not tuning_result.get('success'):
+        search_mode = 'RandomSearch'
+        flash('正在使用 RandomSearch 进行快速参数搜索...', 'info')
         try:
             tuning_result = HyperparameterTuningService.run_random_search(
                 dataset=job.dataset, algorithm=algorithm, task_type=ml_task_type,
                 target_column=target_column, n_iter=20, cv=3, n_jobs=2,
             )
         except Exception as e:
-            flash(f'GridSearchCV 调优失败: {str(e)}', 'danger')
+            flash(f'超参数调优失败: {str(e)}', 'danger')
             return redirect(url_for('training.job_detail', job_id=job.id))
 
     if not tuning_result or not tuning_result.get('success'):
-        flash(f'GridSearchCV 调优失败: {tuning_result.get("error", "未知错误")}', 'danger')
+        flash(f'超参数调优失败: {tuning_result.get("error", "未知错误")}', 'danger')
         return redirect(url_for('training.job_detail', job_id=job.id))
 
     best_params = tuning_result['best_params']
@@ -477,19 +480,14 @@ def gridsearch_retrain(job_id):
     success, error = TrainingService.retrain_job(job, new_params=retrain_params)
 
     if success:
-        if job.model:
-            hp = job.model.hyperparameters_dict
-            hp['tuning_result'] = {
-                'best_params': best_params,
-                'best_cv_score': best_score,
-                'search_time': tuning_result.get('search_time'),
-            }
-            job.model.set_hyperparameters(hp)
-            db.session.commit()
-        flash(f'GridSearchCV 优化完成! 最佳CV分数: {best_score:.4f}, '
+        TrainingService.apply_tuning_hyperparameters(
+            job, best_params, best_score,
+            search_time=tuning_result.get('search_time'),
+        )
+        flash(f'{search_mode} 优化完成! 最佳CV分数: {best_score:.4f}, '
               f'最佳参数: {best_params}. 已使用最优参数重新训练!', 'success')
     else:
-        flash(f'GridSearchCV 调优完成({best_score:.4f}), 但重训失败: {error}', 'warning')
+        flash(f'{search_mode} 调优完成({best_score:.4f}), 但重训失败: {error}', 'warning')
 
     return redirect(url_for('training.job_detail', job_id=job.id))
 
@@ -533,15 +531,11 @@ def apply_tuning_result(job_id):
 
     success, error = TrainingService.retrain_job(job, new_params=retrain_params)
 
-    if success and job.model:
-        hp = job.model.hyperparameters_dict
-        hp['tuning_result'] = {
-            'best_params': best_params,
-            'best_cv_score': best_score,
-            'search_time': session.get('elapsed_seconds'),
-        }
-        job.model.set_hyperparameters(hp)
-        db.session.commit()
+    if success:
+        TrainingService.apply_tuning_hyperparameters(
+            job, best_params, best_score,
+            search_time=session.get('elapsed_seconds'),
+        )
 
     if success:
         return jsonify({
@@ -606,6 +600,63 @@ def hyperparameter_tuning():
         n_iter = request.form.get('n_iter', 30, type=int)
         cv = request.form.get('cv', 5, type=int)
         start_training = request.form.get('start_training') == 'on'
+        action = request.form.get('action', '')
+
+        # ── 调优完成 → 创建训练任务 ──
+        if action == 'create_job':
+            from app.services.training_service import TrainingService
+            tuning_id = request.form.get('tuning_id', '')
+            tracker = HyperparameterTuningService.get_tuning_tracker()
+            tsession = tracker.get(tuning_id) if tuning_id else None
+            if not tsession or tsession['status'] != 'completed':
+                error = '调优尚未完成或不存在。'
+            else:
+                best_params = tsession.get('result', {}).get('best_params', tsession.get('best_params_so_far', {}))
+                best_score = tsession.get('result', {}).get('best_score', tsession.get('best_score_so_far'))
+                job_name = request.form.get('job_name', '').strip() or f'{algorithm} (调优最佳)'
+                description = request.form.get('description', '').strip() or f'调优自动创建, best_score={best_score}'
+                framework = request.form.get('framework', 'sklearn').strip() or 'sklearn'
+                test_size = request.form.get('test_size', 0.2, type=float)
+                total_epochs = request.form.get('total_epochs', 10, type=int)
+                total_steps = request.form.get('total_steps', 0, type=int)
+                gpu_count = request.form.get('gpu_count', 0, type=int)
+                cpu_cores = request.form.get('cpu_cores', 1, type=int)
+                memory_gb = request.form.get('memory_gb', 4.0, type=float)
+                extra_hparams = {}
+                try:
+                    extra_hparams = json.loads(request.form.get('extra_hparams_json', '{}'))
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+                if best_params:
+                    if isinstance(extra_hparams, dict):
+                        extra_hparams.update(best_params)
+
+                job, job_error = TrainingService.create_job(
+                    user=current_user,
+                    name=job_name,
+                    dataset_id=dataset_id,
+                    description=description,
+                    task_type='training',
+                    framework=framework,
+                    total_epochs=max(total_epochs, 1),
+                    total_steps=total_steps,
+                    gpu_count=gpu_count,
+                    cpu_cores=cpu_cores,
+                    memory_gb=memory_gb,
+                    ml_task_type=task_type,
+                    algorithm=algorithm,
+                    target_column=target_column,
+                    test_size=test_size,
+                    hyperparameters=extra_hparams if extra_hparams else None,
+                )
+                if job_error:
+                    error = job_error
+                else:
+                    success, start_error = TrainingService.start_job(job)
+                    flash(f'调优完成！已自动创建训练任务 "{job.name}" (best_score={best_score})', 'success')
+                    return redirect(url_for('training.job_detail', job_id=job.id))
+
         is_ajax = (request.headers.get('X-Requested-With') == 'XMLHttpRequest'
                    or request.args.get('async') == '1')
 

@@ -1,5 +1,14 @@
 {% extends "base.html" %}
 {% block title %}{{ job.name }} - 训练详情{% endblock %}
+{% block vue_scripts %}
+<script src="https://cdn.jsdelivr.net/npm/vue@3.5.13/dist/vue.global.prod.js"></script>
+<link href="https://cdn.jsdelivr.net/npm/element-plus@2.9.1/dist/index.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/element-plus@2.9.1/dist/index.full.min.js"></script>
+<script src="{{ url_for('static', filename='js/el-enhance.js') }}"></script>
+{% endblock %}
+{% block chartjs %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+{% endblock %}
 
 {% block content %}
 <nav aria-label="breadcrumb">
@@ -359,6 +368,7 @@
                     </div>
                     {# 日志 #}
                     <div id="amlLogBox" class="small mb-2 terminal-output">
+                    </div>
                 </div>
                 {# 结果对比表 #}
                 <div id="amlResultArea" style="display:none;">
@@ -545,6 +555,7 @@
 </form>
 {% endblock %}
 
+{% include "includes/_celebration.html" %}
 {% block extra_js %}
 <script>
 // ============ 训练详情页 — 实时进度监控 + Chart.js 可视化 ============
@@ -1988,6 +1999,19 @@ function onTrainingFinished(status) {
     document.getElementById('logStatus').textContent = status === 'completed' ? '已完成' : '已结束';
     document.getElementById('liveIndicator').classList.add('d-none');
     document.getElementById('progressBar').classList.remove('progress-bar-animated');
+
+    // 训练成功 → 庆祝动画
+    if (status === 'completed') {
+        var modelNameEl = document.getElementById('trainModelName');
+        if (typeof showTrainingComplete === 'function') {
+            setTimeout(function() {
+                showTrainingComplete(
+                    modelNameEl ? modelNameEl.textContent : '',
+                    document.getElementById('trainAccuracy')?.textContent || ''
+                );
+            }, 500);
+        }
+    }
 
     // 显示 AI 调参建议卡片 (服务器端仅 completed/failed 渲染，运行中为隐藏态)
     showGuidanceCard();

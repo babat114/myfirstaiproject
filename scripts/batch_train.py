@@ -15,7 +15,8 @@ import time
 # 使用共享基础设施 (sys.path + argparse)
 # ═══════════════════════════════════════════════════════════════
 from _common import (
-    PROJECT_ROOT, create_base_parser, app_context, STANDARD_JOBS
+    PROJECT_ROOT, create_base_parser, app_context, STANDARD_JOBS,
+    generate_data_aware_params,
 )
 
 from app import db
@@ -69,8 +70,17 @@ def _get_or_create_dataset(app, admin, cfg: dict) -> Dataset:
     return ds
 
 
-def _create_job(admin, ds: Dataset, cfg: dict):
-    """创建训练任务。"""
+def _create_job(admin, ds: Dataset, cfg: dict, app=None):
+    """创建训练任务 — 使用数据感知参数。"""
+    # 生成数据感知超参数
+    if '--no-data-aware' not in sys.argv:
+        hyperparams = generate_data_aware_params(
+            ds.file_path, cfg['algo'], cfg['task'], cfg['target'],
+            framework='sklearn', test_size=0.2, verbose=True,
+        )
+    else:
+        hyperparams = None
+
     job, error = TrainingService.create_job(
         user=admin,
         name=cfg['name'],
@@ -82,6 +92,7 @@ def _create_job(admin, ds: Dataset, cfg: dict):
         algorithm=cfg['algo'],
         target_column=cfg['target'],
         test_size=0.2,
+        hyperparameters=hyperparams,  # 传入数据感知参数
     )
     return job, error
 
@@ -188,12 +199,10 @@ def _run_direct_mode(app, admin, jobs: list, dry_run: bool = False):
             results.append({'name': cfg['name'], 'result': f'创建失败: {error}'})
             continue
 
-        hyperparams = {
-            'task_type': cfg['task'],
-            'algorithm': cfg['algo'],
-            'target_column': cfg['target'],
-            'test_size': 0.2,
-        }
+        hyperparams = generate_data_aware_params(
+            ds.file_path, cfg['algo'], cfg['task'], cfg['target'],
+            framework='sklearn', test_size=0.2, verbose=True,
+        )
         trainer = SklearnTrainer(job, ds, hyperparams)
 
         try:

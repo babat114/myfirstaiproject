@@ -178,14 +178,8 @@ def parse_form_params(form_data: dict, int_fields: set = None, float_fields: set
             except (ValueError, TypeError):
                 pass
         else:
-            # 智能推断
-            try:
-                if '.' in val:
-                    result[key] = float(val)
-                else:
-                    result[key] = int(val)
-            except (ValueError, TypeError):
-                result[key] = val  # 保持字符串
+            # 保持字符串 — 避免误转 "00123" → 123、ID字段丢失前导零
+            result[key] = val
     return result
 
 
@@ -266,3 +260,46 @@ def sanitize_service_error(error: Exception, log_message: str = None) -> str:
     else:
         _logger.error(detail)
     return sanitize_error(error)
+
+
+def paginate_query(query, page: int = 1, per_page: int = 20,
+                   item_key: str = 'items',
+                   transform_fn: callable = None) -> dict:
+    """通用分页辅助 — 消除 5 个 Service 中重复的分页返回构造逻辑
+
+    支持两种查询对象:
+      - flask_sqlalchemy.BaseQuery (Model.query 风格): query.paginate(...)
+      - sqlalchemy.Select (stmt 风格, 由 db.paginate(...) 处理)
+
+    Args:
+        query: Flask-SQLAlchemy Query 或 SQLAlchemy Select 对象
+        page: 当前页码
+        per_page: 每页条数
+        item_key: 返回字典中 items 列表的键名 (如 'comments', 'users')
+        transform_fn: 对每个 item 应用的转换函数 (如 Model.to_dict), None 则直接返回
+
+    Returns:
+        {'items': [...], 'total': int, 'pages': int, 'current_page': int, 'has_next': bool, 'has_prev': bool}
+    """
+    from sqlalchemy import Select
+    from app import db as _app_db
+
+    if isinstance(query, Select):
+        pagination = _app_db.paginate(query, page=page, per_page=per_page, error_out=False)
+    else:
+        pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+
+    items = pagination.items
+    if transform_fn:
+        items = [transform_fn(i) for i in items]
+    else:
+        items = list(items)
+
+    return {
+        item_key: items,
+        'total': pagination.total,
+        'pages': pagination.pages,
+        'current_page': page,
+        'has_next': pagination.has_next,
+        'has_prev': pagination.has_prev,
+    }

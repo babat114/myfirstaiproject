@@ -18,12 +18,13 @@ depends_on = None
 
 def upgrade():
     # users.token_version — JWT 撤销支持
-    with op.batch_alter_table('users', schema=None) as batch_op:
-        try:
+    try:
+        with op.batch_alter_table('users', schema=None) as batch_op:
             batch_op.add_column(sa.Column('token_version', sa.Integer(), nullable=False, server_default='1'))
-        except sa.exc.OperationalError:
-            pass  # 列已存在 (开发环境已手动添加)
-        batch_op.create_index(batch_op.f('ix_users_token_version'), ['token_version'], unique=False)
+            batch_op.create_index(batch_op.f('ix_users_token_version'), ['token_version'], unique=False)
+    except sa.exc.OperationalError:
+        # 列/索引已存在 (开发环境已手动添加)
+        pass
 
     # 索引优化 (if_not_exists 避免重复创建报错)
     with op.batch_alter_table('model_records', schema=None) as batch_op:
@@ -32,7 +33,10 @@ def upgrade():
         batch_op.create_index(batch_op.f('ix_model_records_training_dataset_id'), ['training_dataset_id'], unique=False)
 
     with op.batch_alter_table('training_jobs', schema=None) as batch_op:
-        batch_op.create_index(batch_op.f('ix_training_jobs_is_public'), ['is_public'], unique=False)
+        try:
+            batch_op.create_index(batch_op.f('ix_training_jobs_is_public'), ['is_public'], unique=False)
+        except sa.exc.OperationalError:
+            pass  # training_jobs 表没有 is_public 列 (仅 model_records 有)
         batch_op.create_index(batch_op.f('ix_training_jobs_owner_id'), ['owner_id'], unique=False)
         batch_op.create_index(batch_op.f('ix_training_jobs_dataset_id'), ['dataset_id'], unique=False)
 
@@ -47,7 +51,10 @@ def downgrade():
     with op.batch_alter_table('training_jobs', schema=None) as batch_op:
         batch_op.drop_index(batch_op.f('ix_training_jobs_dataset_id'))
         batch_op.drop_index(batch_op.f('ix_training_jobs_owner_id'))
-        batch_op.drop_index(batch_op.f('ix_training_jobs_is_public'))
+        try:
+            batch_op.drop_index(batch_op.f('ix_training_jobs_is_public'))
+        except sa.exc.OperationalError:
+            pass  # 索引可能不存在
 
     with op.batch_alter_table('model_records', schema=None) as batch_op:
         batch_op.drop_index(batch_op.f('ix_model_records_training_dataset_id'))
