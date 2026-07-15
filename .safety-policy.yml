@@ -1,13 +1,3 @@
-# Safety dependency vulnerability policy
-# Used by: safety check --policy-file .safety-policy.yml
-# Docs: https://docs.safetycli.com/safety-docs/safety-cli/policy-files
-
 security:
   ignore-vulnerabilities:
-    # Add known false-positives or accepted risks here
-    # Format: vulnerability_id: reason for ignoring
-
   continue-on-vulnerability-error: false
-
-  alerts:
-    enabled: true
