@@ -1,2 +1,0 @@
-app/services\parameter_guidance_service.py:738:24: F841 local variable '_test_key' is assigned to but never used
-app/services\parameter_guidance_service.py:1355:9: F841 local variable '_KNN_ALGOS' is assigned to but never used
