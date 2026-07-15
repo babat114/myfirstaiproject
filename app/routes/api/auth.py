@@ -4,6 +4,7 @@ JWT 认证 API
 RESTful 认证接口 — 登录获取 Token、刷新 Token
 ============================================
 """
+
 from flask import Blueprint, jsonify, request
 
 from app.services.auth_service import AuthService
@@ -76,20 +77,24 @@ def login():
     password = data.get('password', '')
 
     if not login_id or not password:
-        return jsonify({
-            'success': False,
-            'message': '请提供 login_id 和 password。',
-        }), 400
+        return jsonify(
+            {
+                'success': False,
+                'message': '请提供 login_id 和 password。',
+            }
+        ), 400
 
     tokens, error, status = AuthService.login_jwt(login_id, password)
     if error:
         return jsonify({'success': False, 'message': error}), status
 
-    return jsonify({
-        'success': True,
-        'message': '登录成功。',
-        'data': tokens,
-    })
+    return jsonify(
+        {
+            'success': True,
+            'message': '登录成功。',
+            'data': tokens,
+        }
+    )
 
 
 @auth_api_bp.route('/refresh', methods=['POST'])
@@ -127,20 +132,24 @@ def refresh():
     refresh_token = data.get('refresh_token', '').strip()
 
     if not refresh_token:
-        return jsonify({
-            'success': False,
-            'message': '请提供 refresh_token。',
-        }), 400
+        return jsonify(
+            {
+                'success': False,
+                'message': '请提供 refresh_token。',
+            }
+        ), 400
 
     tokens, error, status = AuthService.refresh_jwt(refresh_token)
     if error:
         return jsonify({'success': False, 'message': error}), status
 
-    return jsonify({
-        'success': True,
-        'message': 'Token 已刷新。',
-        'data': tokens,
-    })
+    return jsonify(
+        {
+            'success': True,
+            'message': 'Token 已刷新。',
+            'data': tokens,
+        }
+    )
 
 
 @auth_api_bp.route('/me', methods=['GET'])
@@ -165,7 +174,9 @@ def me():
     if not user:
         return jsonify({'success': False, 'message': '未认证。'}), 401
 
-    return jsonify({
-        'success': True,
-        'data': user.to_dict(include_private=True),
-    })
+    return jsonify(
+        {
+            'success': True,
+            'data': user.to_dict(include_private=True),
+        }
+    )

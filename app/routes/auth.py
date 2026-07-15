@@ -4,6 +4,7 @@
 处理用户注册、登录、注销和个人资料
 ============================================
 """
+
 from urllib.parse import urlparse
 
 from flask import Blueprint, flash, redirect, render_template, request, url_for

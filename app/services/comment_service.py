@@ -4,6 +4,7 @@
 评论的增删查 + 自动内容审核
 ============================================
 """
+
 import re
 
 from sqlalchemy.orm import joinedload
@@ -20,10 +21,11 @@ from app.utils.helpers import paginate_query
 _BANNED_PATTERNS: list[str] = [
     # 英文攻击性词汇
     # 无歧义的词用子串匹配 (捕获 fuckyou/shithead/bullshit 等拼接形式)
-    r'fuck',           # 无合法英文单词包含 "fuck"
-    r'cunt',           # 无合法英文单词包含 "cunt"
-    r'nigger', r'nigga',  # 种族歧视
-    r'faggot',         # 恐同
+    r'fuck',  # 无合法英文单词包含 "fuck"
+    r'cunt',  # 无合法英文单词包含 "cunt"
+    r'nigger',
+    r'nigga',  # 种族歧视
+    r'faggot',  # 恐同
     # 有极小歧义的词用词边界 (避免误伤 shitake/damning/assassin 等)
     r'\b(shit|shitty|shithead|shitstorm|shitbag|shitface|bullshit|dipshit)\b',
     r'\b(damn|damned|damnit|goddamn)\b',
@@ -37,30 +39,64 @@ _BANNED_PATTERNS: list[str] = [
     r'\b(chink|chinks)\b',
     r'\b(retard|retards|retarded)\b',
     # 中文敏感词 — 人身攻击 / 辱骂
-    r'傻逼', r'蠢货', r'白痴', r'脑残', r'智障',
-    r'去死', r'滚蛋', r'垃圾',
-    r'草泥马', r'操你', r'日你', r'艹',
-    r'他妈的', r'你妈的', r'你妈', r'他妈', r'特么', r'你大爷',
-    r'狗日的', r'王八蛋', r'龟儿子',
+    r'傻逼',
+    r'蠢货',
+    r'白痴',
+    r'脑残',
+    r'智障',
+    r'去死',
+    r'滚蛋',
+    r'垃圾',
+    r'草泥马',
+    r'操你',
+    r'日你',
+    r'艹',
+    r'他妈的',
+    r'你妈的',
+    r'你妈',
+    r'他妈',
+    r'特么',
+    r'你大爷',
+    r'狗日的',
+    r'王八蛋',
+    r'龟儿子',
     # 拼音/缩写绕过
-    r'\bcnm\b', r'\bnmsl\b', r'\bsb\b', r'\btmd\b', r'\bmlgb\b',
-    r'\bwcnm\b', r'\bcnmb\b',
+    r'\bcnm\b',
+    r'\bnmsl\b',
+    r'\bsb\b',
+    r'\btmd\b',
+    r'\bmlgb\b',
+    r'\bwcnm\b',
+    r'\bcnmb\b',
     # 色情/低俗
-    r'裸聊', r'约炮', r'一夜情', r'性交', r'做爱',
-    r'黄色', r'色情', r'av\b', r'成人电影',
+    r'裸聊',
+    r'约炮',
+    r'一夜情',
+    r'性交',
+    r'做爱',
+    r'黄色',
+    r'色情',
+    r'av\b',
+    r'成人电影',
     # 赌博/诈骗
-    r'赌博', r'博彩', r'彩票.*加', r'赌场',
-    r'兼职.*日结', r'刷单', r'返利.*联系',
+    r'赌博',
+    r'博彩',
+    r'彩票.*加',
+    r'赌场',
+    r'兼职.*日结',
+    r'刷单',
+    r'返利.*联系',
     # 广告/spam 模式
-    r'加微信', r'加Q\w*:', r'加群', r'联系Q\w*:',
+    r'加微信',
+    r'加Q\w*:',
+    r'加群',
+    r'联系Q\w*:',
     r'http[s]?://(?!([^/]*\.)?(github|gitee|arxiv|kaggle|huggingface|pytorch|tensorflow)\.)',
     r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}.*(?:联系|合作|推广|广告)',
 ]
 
 # 编译正则 (忽略大小写)
-_COMPILED_PATTERNS = [
-    re.compile(p, re.IGNORECASE) for p in _BANNED_PATTERNS
-]
+_COMPILED_PATTERNS = [re.compile(p, re.IGNORECASE) for p in _BANNED_PATTERNS]
 
 
 class CommentService:
@@ -150,10 +186,7 @@ class CommentService:
             db.session.commit()
 
             if not is_clean:
-                logger.warning(
-                    f'评论被自动屏蔽: user={user.username}, '
-                    f'model={model_id}, reason={reason}'
-                )
+                logger.warning(f'评论被自动屏蔽: user={user.username}, model={model_id}, reason={reason}')
                 return comment, '您的评论包含不当内容，已被系统自动屏蔽。如有疑问请联系管理员。'
 
             logger.info(f'评论发表成功: user={user.username}, model={model_id}')
@@ -162,6 +195,7 @@ class CommentService:
         except Exception as e:
             db.session.rollback()
             from app.utils.helpers import sanitize_service_error
+
             return None, sanitize_service_error(e, '添加评论失败')
 
     @staticmethod
@@ -207,6 +241,7 @@ class CommentService:
         except Exception as e:
             db.session.rollback()
             from app.utils.helpers import sanitize_service_error
+
             return False, sanitize_service_error(e, '删除评论失败')
 
     @staticmethod
@@ -233,6 +268,7 @@ class CommentService:
         except Exception as e:
             db.session.rollback()
             from app.utils.helpers import sanitize_service_error
+
             return False, sanitize_service_error(e, '恢复评论失败')
 
     @staticmethod
@@ -284,6 +320,7 @@ class CommentService:
     ) -> list:
         """获取某条评论的所有可见回复"""
         from sqlalchemy import select
+
         stmt = select(Comment).where(Comment.parent_id == parent_id)
 
         if not (user and user.is_admin):

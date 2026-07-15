@@ -7,6 +7,7 @@ Techniques:
   1. Synonym replacement: small curated Chinese sentiment synonym dictionary
   2. Random character deletion: delete 10-20% of characters randomly
 """
+
 import random
 
 # ===================================================================

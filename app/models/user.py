@@ -4,6 +4,7 @@
 管理用户账户、角色和认证信息
 ============================================
 """
+
 from flask_login import UserMixin
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -31,11 +32,7 @@ class User(UserMixin, db.Model):
     organization = db.Column(db.String(200), nullable=True)
 
     # 角色和状态
-    role = db.Column(
-        db.Enum('admin', 'researcher', 'viewer', name='user_roles'),
-        default='researcher',
-        nullable=False
-    )
+    role = db.Column(db.Enum('admin', 'researcher', 'viewer', name='user_roles'), default='researcher', nullable=False)
     is_active = db.Column(db.Boolean, default=True, nullable=False)
     is_verified = db.Column(db.Boolean, default=False, nullable=False)
 
@@ -53,33 +50,13 @@ class User(UserMixin, db.Model):
 
     # 时间戳
     created_at = db.Column(db.DateTime, default=lambda: localnow(), nullable=False)
-    updated_at = db.Column(
-        db.DateTime,
-        default=lambda: localnow(),
-        onupdate=lambda: localnow(),
-        nullable=False
-    )
+    updated_at = db.Column(db.DateTime, default=lambda: localnow(), onupdate=lambda: localnow(), nullable=False)
     last_login_at = db.Column(db.DateTime, nullable=True)
 
     # 关联关系
-    datasets = db.relationship(
-        'Dataset',
-        back_populates='owner',
-        lazy='dynamic',
-        cascade='all, delete-orphan'
-    )
-    model_records = db.relationship(
-        'ModelRecord',
-        back_populates='owner',
-        lazy='dynamic',
-        cascade='all, delete-orphan'
-    )
-    training_jobs = db.relationship(
-        'TrainingJob',
-        back_populates='owner',
-        lazy='dynamic',
-        cascade='all, delete-orphan'
-    )
+    datasets = db.relationship('Dataset', back_populates='owner', lazy='dynamic', cascade='all, delete-orphan')
+    model_records = db.relationship('ModelRecord', back_populates='owner', lazy='dynamic', cascade='all, delete-orphan')
+    training_jobs = db.relationship('TrainingJob', back_populates='owner', lazy='dynamic', cascade='all, delete-orphan')
 
     # ============ 密码管理 ============
 
@@ -120,6 +97,7 @@ class User(UserMixin, db.Model):
         self.failed_login_attempts = (self.failed_login_attempts or 0) + 1
         if self.failed_login_attempts >= self.MAX_FAILED_ATTEMPTS:
             from datetime import timedelta
+
             self.locked_until = localnow() + timedelta(minutes=self.LOCKOUT_DURATION)
 
     # ============ 统计属性 ============
@@ -172,4 +150,5 @@ class User(UserMixin, db.Model):
 def load_user(user_id: str) -> User | None:
     """Flask-Login 用户加载器"""
     from app import db
+
     return db.session.get(User, int(user_id))

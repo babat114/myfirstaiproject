@@ -2,6 +2,7 @@
 训练执行引擎
 基于 ThreadPoolExecutor 的轻量级训练调度器
 """
+
 import atexit
 import contextlib
 import json
@@ -54,14 +55,15 @@ class TrainingExecutor:
         # 从 Flask 配置读取 max_workers (默认 2)
         try:
             from flask import current_app
+
             self.max_workers = current_app.config.get('TRAINING_MAX_WORKERS', 2)
         except RuntimeError:
             self.max_workers = 2
 
         self._pool = ThreadPoolExecutor(max_workers=self.max_workers, thread_name_prefix='trainer-')
         self._active_trainers: dict[int, object] = {}  # {job_id: trainer_instance}
-        self._futures: dict[int, Future] = {}           # {job_id: Future}
-        self._trainers_lock = threading.Lock()           # 保护 _active_trainers / _futures 并发访问
+        self._futures: dict[int, Future] = {}  # {job_id: Future}
+        self._trainers_lock = threading.Lock()  # 保护 _active_trainers / _futures 并发访问
         self._app = None  # 延迟绑定 Flask app
         self._shutdown_registered = False
 
@@ -76,6 +78,7 @@ class TrainingExecutor:
             return self._app
         try:
             from flask import current_app
+
             self._app = current_app._get_current_object()
             return self._app
         except RuntimeError:
@@ -145,8 +148,7 @@ class TrainingExecutor:
 
         future.add_done_callback(lambda f: self._on_done(job_id, f))
 
-        logger.info(f'训练任务已提交: {job_id} ({fresh_job.name}), '
-                    f'活跃任务: {len(self._active_trainers) + 1}')
+        logger.info(f'训练任务已提交: {job_id} ({fresh_job.name}), 活跃任务: {len(self._active_trainers) + 1}')
         return True
 
     def pause(self, job_id: int) -> bool:
@@ -208,11 +210,11 @@ class TrainingExecutor:
             'current_step': job.current_step,
             'total_steps': job.total_steps,
             'duration_display': job.duration_display,
-            'metrics_history': full_history,        # 完整历史 → 前端增量对比
+            'metrics_history': full_history,  # 完整历史 → 前端增量对比
             'final_metrics': job.final_metrics_json,
             'error_message': job.error_message,
             'log_tail': _tail_log(job.log_text, 100),  # 最近100行
-            'log_full': job.log_text or '',             # 全量日志(用于首次填充)
+            'log_full': job.log_text or '',  # 全量日志(用于首次填充)
             'is_finished': job.is_finished,
             'is_running': job.is_running,
         }
@@ -248,6 +250,7 @@ class TrainingExecutor:
         _db_available = False
         try:
             from sqlalchemy import text
+
             db.session.execute(text('SELECT 1'))
             _db_available = True
         except Exception:
@@ -281,28 +284,35 @@ class TrainingExecutor:
 
         # ── 纠错: KMeans 参数 algorithm=lloyd/elkan 会覆盖 ML 算法名 kmeans ──
         from app.utils.algorithm_helpers import fix_kmeans_algorithm
+
         algorithm = fix_kmeans_algorithm(algorithm, hyperparams, job.model)
 
         # Transformer 迁移学习
         if algorithm.startswith('transformer'):
             from app.executor.trainers.transformers_nlp_trainer import TransformersNLPTrainer
+
             return TransformersNLPTrainer
         # mlp → PyTorch
         if algorithm == 'mlp':
             from app.executor.trainers.pytorch_trainer import PyTorchTrainer
+
             return PyTorchTrainer
         # 视觉数据 → PyTorch
         if dataset_category == 'vision':
             from app.executor.trainers.pytorch_trainer import PyTorchTrainer
+
             return PyTorchTrainer
         if 'pytorch' in framework or 'torch' in framework:
             from app.executor.trainers.pytorch_trainer import PyTorchTrainer
+
             return PyTorchTrainer
         if 'tensorflow' in framework or 'keras' in framework or 'tf' in framework:
             from app.executor.trainers.keras_trainer import KerasTrainer
+
             return KerasTrainer
         # 默认 sklearn
         from app.executor.trainers.sklearn_trainer import SklearnTrainer
+
         return SklearnTrainer
 
     def _run_wrapper(self, job_id: int, dataset_id: int):
@@ -374,6 +384,7 @@ class TrainingExecutor:
                 # 清理 GPU 显存 (防止 PyTorch 训练后显存残留)
                 try:
                     import torch
+
                     if torch.cuda.is_available():
                         torch.cuda.empty_cache()
                 except Exception as e:
@@ -404,6 +415,7 @@ def _tail_log(log_text: str | None, lines: int = 50) -> str:
 
 
 # ============ 全局单例获取 ============
+
 
 def get_executor() -> 'TrainingExecutor':
     """获取全局 TrainingExecutor 单例 (委托给 __new__ 的双重检查锁)"""

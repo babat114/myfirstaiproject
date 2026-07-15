@@ -4,6 +4,7 @@
 管理上传的数据集及其元数据
 ============================================
 """
+
 import os
 import uuid
 
@@ -15,17 +16,17 @@ from app.models.mixins import AccessControlMixin
 
 # 数据集分类映射 (数据库值 → 中文标签 + 图标)
 CATEGORY_LABELS = {
-    'classification':  '分类数据',
-    'regression':      '回归数据',
-    'clustering':      '聚类数据',
-    'nlp':             '自然语言处理',
-    'vision':          '计算机视觉',
-    'time_series':     '时间序列',
-    'biology':         '生物医学',
-    'finance':         '金融经济',
-    'synthetic':       '合成数据',
-    'tabular':         '通用表格',
-    'other':           '其他',
+    'classification': '分类数据',
+    'regression': '回归数据',
+    'clustering': '聚类数据',
+    'nlp': '自然语言处理',
+    'vision': '计算机视觉',
+    'time_series': '时间序列',
+    'biology': '生物医学',
+    'finance': '金融经济',
+    'synthetic': '合成数据',
+    'tabular': '通用表格',
+    'other': '其他',
 }
 
 
@@ -68,12 +69,7 @@ class Dataset(AccessControlMixin, db.Model):
     # 元数据
     version = db.Column(db.String(20), default='1.0.0')
     tags = db.Column(db.String(500), nullable=True)  # 逗号分隔的标签
-    category = db.Column(
-        db.String(50),
-        default='other',
-        nullable=False,
-        index=True
-    )
+    category = db.Column(db.String(50), default='other', nullable=False, index=True)
 
     # 统计信息
     row_count = db.Column(db.Integer, default=0)
@@ -86,7 +82,7 @@ class Dataset(AccessControlMixin, db.Model):
         db.Enum('uploading', 'ready', 'processing', 'error', name='dataset_status'),
         default='uploading',
         nullable=False,
-        index=True
+        index=True,
     )
     is_public = db.Column(db.Boolean, default=False, nullable=False, index=True)
 
@@ -97,9 +93,7 @@ class Dataset(AccessControlMixin, db.Model):
     # 标记此数据集是否为独立测试集 (而非训练数据)
     is_test_set = db.Column(db.Boolean, default=False, nullable=False, index=True)
     # 关联到源训练数据集 (一个训练集可以有多个独立测试集)
-    source_dataset_id = db.Column(
-        db.Integer, db.ForeignKey('datasets.id'), nullable=True, index=True
-    )
+    source_dataset_id = db.Column(db.Integer, db.ForeignKey('datasets.id'), nullable=True, index=True)
     # 测试集采集方式: web_scraped / synthetic / openml_diff / url / manual
     collection_method = db.Column(db.String(50), nullable=True)
 
@@ -108,32 +102,20 @@ class Dataset(AccessControlMixin, db.Model):
 
     # 时间戳
     created_at = db.Column(db.DateTime, default=lambda: localnow(), nullable=False)
-    updated_at = db.Column(
-        db.DateTime,
-        default=lambda: localnow(),
-        onupdate=lambda: localnow(),
-        nullable=False
-    )
+    updated_at = db.Column(db.DateTime, default=lambda: localnow(), onupdate=lambda: localnow(), nullable=False)
 
     # 表级约束: 文件大小非负
-    __table_args__ = (
-        CheckConstraint('file_size IS NULL OR file_size >= 0',
-                        name='ck_file_size_nonnegative'),
-    )
+    __table_args__ = (CheckConstraint('file_size IS NULL OR file_size >= 0', name='ck_file_size_nonnegative'),)
 
     # 关联关系
     owner = db.relationship('User', back_populates='datasets')
-    training_jobs = db.relationship(
-        'TrainingJob',
-        back_populates='dataset',
-        lazy='dynamic'
-    )
+    training_jobs = db.relationship('TrainingJob', back_populates='dataset', lazy='dynamic')
     # 自引用: 独立测试集 → 源训练集
     source_dataset = db.relationship(
         'Dataset',
         remote_side='Dataset.id',
         backref=db.backref('test_sets', lazy='dynamic'),
-        foreign_keys=[source_dataset_id]
+        foreign_keys=[source_dataset_id],
     )
 
     # ============ 属性 ============
@@ -172,8 +154,7 @@ class Dataset(AccessControlMixin, db.Model):
 
     # ============ 方法 ============
 
-    def update_statistics(self, row_count: int = None, column_count: int = None,
-                          summary: str = None):
+    def update_statistics(self, row_count: int = None, column_count: int = None, summary: str = None):
         """更新数据集统计信息 (不提交 — 由调用方服务层控制)"""
         if row_count is not None:
             self.row_count = row_count

@@ -4,6 +4,7 @@
 数据集管理的页面路由
 ============================================
 """
+
 import contextlib
 import json
 import os
@@ -46,12 +47,14 @@ def _get_data_preview(dataset, max_rows=20):
             dtype_str = str(df[col].dtype)
             missing = int(df[col].isna().sum())
             unique = int(df[col].nunique())
-            columns_info.append({
-                'name': col,
-                'dtype': dtype_str,
-                'missing': missing,
-                'unique': unique,
-            })
+            columns_info.append(
+                {
+                    'name': col,
+                    'dtype': dtype_str,
+                    'missing': missing,
+                    'unique': unique,
+                }
+            )
 
         return {
             'columns': columns_info,
@@ -175,7 +178,9 @@ def dataset_detail(dataset_id):
     summary = {}
     if dataset.summary_json:
         with contextlib.suppress(json.JSONDecodeError, TypeError):
-            summary = json.loads(dataset.summary_json) if isinstance(dataset.summary_json, str) else dataset.summary_json
+            summary = (
+                json.loads(dataset.summary_json) if isinstance(dataset.summary_json, str) else dataset.summary_json
+            )
 
     return render_template(
         'datasets/detail.html',
@@ -222,6 +227,7 @@ def edit_dataset(dataset_id):
 def import_datasets():
     """公开数据集导入页面"""
     from app.services.dataset_import_service import DatasetImportService
+
     page = request.args.get('page', 1, type=int)
     category = request.args.get('category')
     search = request.args.get('search', '').strip().lower()
@@ -232,7 +238,8 @@ def import_datasets():
     # 搜索过滤
     if search:
         all_datasets = [
-            d for d in all_datasets
+            d
+            for d in all_datasets
             if search in d['name'].lower() or search in d['description'].lower() or search in d['key'].lower()
         ]
 
@@ -256,7 +263,7 @@ def import_datasets():
             'current_page': page,
             'has_next': page < pages,
             'has_prev': page > 1,
-        }
+        },
     )
 
 
@@ -265,6 +272,7 @@ def import_datasets():
 def do_import_dataset(dataset_key):
     """执行公开数据集导入"""
     from app.services.dataset_import_service import DatasetImportService
+
     name = request.form.get('name', '').strip() or None
     dataset, error = DatasetImportService.import_dataset(current_user, dataset_key, name=name)
     if error:
@@ -279,6 +287,7 @@ def do_import_dataset(dataset_key):
 def import_from_url():
     """从 URL 导入数据集"""
     from app.services.dataset_import_service import DatasetImportService
+
     url = request.form.get('url', '').strip()
     name = request.form.get('name', '').strip()
     target_column = request.form.get('target_column', '').strip() or None

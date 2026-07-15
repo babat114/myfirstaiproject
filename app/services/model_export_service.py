@@ -4,6 +4,7 @@
 支持 ONNX 格式转换、Docker 部署配置生成
 ============================================
 """
+
 import json
 import os
 import shutil
@@ -133,7 +134,7 @@ if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
 '''
 
-    DOCKERFILE_TEMPLATE = '''# Auto-generated Dockerfile for {model_name}
+    DOCKERFILE_TEMPLATE = """# Auto-generated Dockerfile for {model_name}
 # Framework: {framework} | Task: {task_type}
 
 FROM python:3.10-slim
@@ -161,9 +162,9 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \\
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"
 
 CMD ["python", "serve.py"]
-'''
+"""
 
-    DOCKER_COMPOSE_TEMPLATE = '''version: "3.8"
+    DOCKER_COMPOSE_TEMPLATE = """version: "3.8"
 services:
   {service_name}:
     build: .
@@ -180,7 +181,7 @@ services:
       timeout: 3s
       retries: 3
       start_period: 10s
-'''
+"""
 
     @staticmethod
     def export_onnx(model: ModelRecord) -> tuple[bool, str, str | None]:
@@ -209,26 +210,20 @@ services:
         try:
             if framework == 'sklearn':
                 # sklearn → ONNX (skl2onnx)
-                return ModelExportService._export_sklearn_onnx(
-                    model_obj, metadata, feature_count, onnx_path
-                )
+                return ModelExportService._export_sklearn_onnx(model_obj, metadata, feature_count, onnx_path)
             elif framework == 'pytorch':
                 # PyTorch → ONNX
-                return ModelExportService._export_pytorch_onnx(
-                    model_obj, metadata, feature_count, onnx_path
-                )
+                return ModelExportService._export_pytorch_onnx(model_obj, metadata, feature_count, onnx_path)
             elif framework in ('tensorflow', 'keras', 'tf'):
                 # TensorFlow → ONNX (tf2onnx)
-                return ModelExportService._export_tf_onnx(
-                    model, metadata, feature_count, onnx_path
-                )
+                return ModelExportService._export_tf_onnx(model, metadata, feature_count, onnx_path)
             else:
                 return False, f'框架 "{framework}" 暂不支持 ONNX 导出', None
 
         except ImportError as e:
             return False, f'缺少依赖: {str(e)}。请运行: pip install skl2onnx onnx', None
         except Exception as e:
-            logger.error(f"ONNX 导出失败: {e}", exc_info=True)
+            logger.error(f'ONNX 导出失败: {e}', exc_info=True)
             return False, f'导出失败: {str(e)}', None
 
     @staticmethod
@@ -244,12 +239,13 @@ services:
         except Exception:
             # 如果 convert_sklearn 不支持，尝试使用通用的 to_onnx
             from skl2onnx import to_onnx
+
             onx = to_onnx(model_obj, initial_types=initial_type)
 
         with open(onnx_path, 'wb') as f:
             f.write(onx.SerializeToString())
 
-        logger.info(f"sklearn 模型已导出为 ONNX: {onnx_path}")
+        logger.info(f'sklearn 模型已导出为 ONNX: {onnx_path}')
         return True, f'ONNX 导出成功: {os.path.basename(onnx_path)}', onnx_path
 
     @staticmethod
@@ -274,10 +270,10 @@ services:
             dynamic_axes={
                 'float_input': {0: 'batch_size'},
                 'output': {0: 'batch_size'},
-            }
+            },
         )
 
-        logger.info(f"PyTorch 模型已导出为 ONNX: {onnx_path}")
+        logger.info(f'PyTorch 模型已导出为 ONNX: {onnx_path}')
         return True, f'ONNX 导出成功: {os.path.basename(onnx_path)}', onnx_path
 
     @staticmethod
@@ -298,7 +294,7 @@ services:
 
             tf2onnx.convert.from_keras(loaded_model, input_signature=spec, output_path=output_path)
 
-            logger.info(f"TensorFlow 模型已导出为 ONNX: {onnx_path}")
+            logger.info(f'TensorFlow 模型已导出为 ONNX: {onnx_path}')
             return True, f'ONNX 导出成功: {os.path.basename(onnx_path)}', onnx_path
         except ImportError:
             return False, '缺少依赖: pip install tf2onnx', None
@@ -408,9 +404,7 @@ services:
             f.write(compose)
 
         # 6. README.md (Task 13)
-        readme = ModelExportService.generate_model_readme(
-            model, framework, task_type, metadata
-        )
+        readme = ModelExportService.generate_model_readme(model, framework, task_type, metadata)
         with open(os.path.join(package_dir, 'README.md'), 'w', encoding='utf-8') as f:
             f.write(readme)
 
@@ -440,14 +434,15 @@ services:
 
         # 8. 打包为 .zip (供下载)
         import re as _re
+
         safe_name = _re.sub(r'[^\w\-]', '_', model.name)
         zip_base = os.path.join('experiments', 'exports', model.uuid, f'{safe_name}_deploy')
         shutil.make_archive(zip_base, 'zip', package_dir)
         zip_file = f'{safe_name}_deploy.zip'
-        logger.info(f"部署包 zip 已生成: {zip_base}.zip")
+        logger.info(f'部署包 zip 已生成: {zip_base}.zip')
 
         file_count = len(os.listdir(package_dir))
-        logger.info(f"部署包已生成: {package_dir} ({file_count} 个文件)")
+        logger.info(f'部署包已生成: {package_dir} ({file_count} 个文件)')
         return True, f'部署包已生成 ({file_count} 个文件)', package_dir, zip_file
 
     @staticmethod
@@ -466,8 +461,9 @@ services:
         return reqs
 
     @staticmethod
-    def generate_model_readme(model: ModelRecord, framework: str = None,
-                              task_type: str = None, metadata: dict = None) -> str:
+    def generate_model_readme(
+        model: ModelRecord, framework: str = None, task_type: str = None, metadata: dict = None
+    ) -> str:
         """生成模型部署 README.md (Task 13)
 
         Args:
@@ -488,7 +484,7 @@ services:
         target_le = label_encoders.get('__target__')
 
         # API 端点示例
-        api_example = '''```bash
+        api_example = """```bash
 # 健康检查
 curl http://localhost:8000/health
 
@@ -501,34 +497,34 @@ curl -X POST http://localhost:8000/predict \\
 curl -X POST http://localhost:8000/predict \\
   -H "Content-Type: application/json" \\
   -d '{"features": [[1.0, 2.5], [3.0, 4.5], [5.0, 6.5]]}'
-```'''
+```"""
 
         # 类别标签 (分类模型)
         classes_section = ''
         if target_le and hasattr(target_le, 'classes_'):
             classes = list(target_le.classes_)
-            classes_section = f'''
+            classes_section = f"""
 ## 类别标签
 
 | 索引 | 类别 |
 |------|------|
 {chr(10).join(f'| {i} | `{c}` |' for i, c in enumerate(classes))}
-'''
+"""
 
         # 特征列表
         features_section = ''
         if feature_names:
             max_show = 20
             shown = feature_names[:max_show]
-            features_section = f'''
+            features_section = f"""
 ## 输入特征
 
 共 **{len(feature_names)}** 个特征:
 
 | # | 特征名 |
 |---|--------|
-{chr(10).join(f'| {i+1} | `{name}` |' for i, name in enumerate(shown))}
-'''
+{chr(10).join(f'| {i + 1} | `{name}` |' for i, name in enumerate(shown))}
+"""
             if len(feature_names) > max_show:
                 features_section += f'\n*... 还有 {len(feature_names) - max_show} 个特征未列出*\n'
 
@@ -549,12 +545,12 @@ curl -X POST http://localhost:8000/predict \\
 
 | 指标 | 值 |
 |------|-----|
-| Accuracy | {f"{model.accuracy * 100:.2f}%" if model.accuracy is not None else '-'} |
-| Precision | {f"{model.precision:.4f}" if model.precision is not None else '-'} |
-| Recall | {f"{model.recall:.4f}" if model.recall is not None else '-'} |
-| F1 Score | {f"{model.f1_score:.4f}" if model.f1_score is not None else '-'} |
-| R² | {f"{model.r2:.4f}" if model.r2 is not None else '-'} |
-| MSE | {f"{model.mse:.4f}" if model.mse is not None else '-'} |
+| Accuracy | {f'{model.accuracy * 100:.2f}%' if model.accuracy is not None else '-'} |
+| Precision | {f'{model.precision:.4f}' if model.precision is not None else '-'} |
+| Recall | {f'{model.recall:.4f}' if model.recall is not None else '-'} |
+| F1 Score | {f'{model.f1_score:.4f}' if model.f1_score is not None else '-'} |
+| R² | {f'{model.r2:.4f}' if model.r2 is not None else '-'} |
+| MSE | {f'{model.mse:.4f}' if model.mse is not None else '-'} |
 {features_section}
 {classes_section}
 ## 快速部署
@@ -650,8 +646,7 @@ python serve.py
 
         # 检查 ONNX 导出
         if os.path.exists(export_dir):
-            onnx_files = [f for f in os.listdir(export_dir)
-                         if f.endswith('.onnx')]
+            onnx_files = [f for f in os.listdir(export_dir) if f.endswith('.onnx')]
             if onnx_files:
                 info['onnx_available'] = True
                 info['onnx_path'] = os.path.join(export_dir, onnx_files[0])

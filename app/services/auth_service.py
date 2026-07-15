@@ -4,6 +4,7 @@
 处理用户注册、登录、API密钥管理
 ============================================
 """
+
 import hashlib
 import secrets
 
@@ -18,8 +19,7 @@ class AuthService:
     """用户认证服务类"""
 
     @staticmethod
-    def _validate_password_strength(password: str, username: str = None,
-                                     email: str = None) -> str | None:
+    def _validate_password_strength(password: str, username: str = None, email: str = None) -> str | None:
         """验证密码强度，返回错误消息或 None
 
         要求: 10+ 字符, 含大小写+数字+特殊字符, 不包含用户名/邮箱
@@ -45,8 +45,7 @@ class AuthService:
         return None
 
     @staticmethod
-    def register(username: str, email: str, password: str,
-                 full_name: str = None) -> tuple[User | None, str | None]:
+    def register(username: str, email: str, password: str, full_name: str = None) -> tuple[User | None, str | None]:
         """
         注册新用户
 
@@ -86,12 +85,13 @@ class AuthService:
             db.session.add(user)
             db.session.commit()
 
-            logger.info(f"新用户注册: {username} ({email})")
+            logger.info(f'新用户注册: {username} ({email})')
             return user, None
 
         except Exception as e:
             db.session.rollback()
             from app.utils.helpers import sanitize_service_error
+
             return None, sanitize_service_error(e, '注册用户失败')
 
     @staticmethod
@@ -108,9 +108,7 @@ class AuthService:
         """
         # 查找用户 (支持用户名或邮箱登录, SQLAlchemy 2.0 风格)
         user = db.session.execute(
-            db.select(User).filter(
-                or_(User.username == login_id, User.email == login_id)
-            )
+            db.select(User).filter(or_(User.username == login_id, User.email == login_id))
         ).scalar_one_or_none()
 
         if not user:
@@ -138,7 +136,7 @@ class AuthService:
         user.last_login_at = localnow()
         db.session.commit()
 
-        logger.info(f"用户登录: {user.username}")
+        logger.info(f'用户登录: {user.username}')
         return user, None
 
     @staticmethod
@@ -167,11 +165,11 @@ class AuthService:
         except Exception as e:
             db.session.rollback()
             from app.utils.helpers import sanitize_service_error
+
             return False, sanitize_service_error(e, '更新用户资料失败')
 
     @staticmethod
-    def change_password(user: User, old_password: str,
-                        new_password: str) -> tuple[bool, str | None]:
+    def change_password(user: User, old_password: str, new_password: str) -> tuple[bool, str | None]:
         """
         修改密码
 
@@ -189,7 +187,7 @@ class AuthService:
         user.token_version = (user.token_version or 0) + 1  # 使所有旧 Refresh Token 失效
         db.session.commit()
 
-        logger.info(f"用户 {user.username} 修改了密码 (token_version={user.token_version})")
+        logger.info(f'用户 {user.username} 修改了密码 (token_version={user.token_version})')
         return True, None
 
     @staticmethod
@@ -216,13 +214,10 @@ class AuthService:
             User 或 None
         """
         key_hash = AuthService._hash_api_key(api_key)
-        return db.session.execute(
-            db.select(User).filter_by(api_key=key_hash, is_active=True)
-        ).scalar_one_or_none()
+        return db.session.execute(db.select(User).filter_by(api_key=key_hash, is_active=True)).scalar_one_or_none()
 
     @staticmethod
-    def list_users(page: int = 1, per_page: int = 20,
-                   role: str = None, search: str = None) -> dict:
+    def list_users(page: int = 1, per_page: int = 20, role: str = None, search: str = None) -> dict:
         """
         获取用户列表 (管理员功能)
 
@@ -309,7 +304,7 @@ class AuthService:
     @staticmethod
     def _generate_api_key() -> str:
         """生成唯一的 API 密钥"""
-        return f"ak_{secrets.token_hex(24)}"
+        return f'ak_{secrets.token_hex(24)}'
 
     @staticmethod
     def _hash_api_key(key: str) -> str:
@@ -322,7 +317,7 @@ class AuthService:
         try:
             db.session.delete(user)
             db.session.commit()
-            logger.info(f"用户 {user.username} 已被删除")
+            logger.info(f'用户 {user.username} 已被删除')
             return True
         except Exception as e:
             db.session.rollback()

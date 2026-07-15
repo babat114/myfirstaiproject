@@ -5,6 +5,7 @@
 支持 sklearn / PyTorch / HuggingFace Transformers 模型
 ============================================
 """
+
 import json
 import os
 import pickle
@@ -85,7 +86,9 @@ class ModelInferenceService:
                                 for entry in os.listdir(exp_path):
                                     if entry.endswith('_nlp_model'):
                                         candidate = os.path.join(exp_path, entry)
-                                        if os.path.isdir(candidate) and os.path.exists(os.path.join(candidate, 'config.json')):
+                                        if os.path.isdir(candidate) and os.path.exists(
+                                            os.path.join(candidate, 'config.json')
+                                        ):
                                             nlp_dir = candidate
                                             break
                             if nlp_dir:
@@ -96,6 +99,7 @@ class ModelInferenceService:
             if nlp_dir:
                 try:
                     from transformers import AutoModelForSequenceClassification, AutoTokenizer
+
                     hf_model = AutoModelForSequenceClassification.from_pretrained(nlp_dir)
                     tokenizer = AutoTokenizer.from_pretrained(nlp_dir)
                     meta_path = os.path.join(nlp_dir, 'metadata.json')
@@ -106,15 +110,17 @@ class ModelInferenceService:
                     metadata['framework'] = 'transformers'
                     metadata['task_type'] = metadata.get('task_type', 'classification')
                     metadata['algorithm'] = metadata.get('model_name', 'transformer')
-                    logger.info(f"HuggingFace 模型已加载: {model.name} ({nlp_dir})")
+                    logger.info(f'HuggingFace 模型已加载: {model.name} ({nlp_dir})')
                     return hf_model, metadata, tokenizer, None
                 except ImportError:
-                    return None, None, None, (
-                        'HuggingFace transformers 未安装，无法加载 NLP 模型。'
-                        '请运行: pip install transformers'
+                    return (
+                        None,
+                        None,
+                        None,
+                        ('HuggingFace transformers 未安装，无法加载 NLP 模型。请运行: pip install transformers'),
                     )
                 except Exception as e:
-                    logger.error(f"加载 HuggingFace 模型失败: {e}")
+                    logger.error(f'加载 HuggingFace 模型失败: {e}')
                     return None, None, None, f'HuggingFace NLP 模型加载失败: {str(e)}'
 
             return None, None, None, '模型文件不存在。请先上传模型文件或完成训练。'
@@ -141,7 +147,7 @@ class ModelInferenceService:
                     model_obj = bundle
                     metadata = {'task_type': model.model_type}
 
-                logger.info(f"sklearn 模型已加载: {model.name} ({model_path})")
+                logger.info(f'sklearn 模型已加载: {model.name} ({model_path})')
                 return model_obj, metadata, None, None
 
             elif ext == '.pt' or ext == '.pth':
@@ -153,15 +159,16 @@ class ModelInferenceService:
                         metadata = pickle.load(f)
                 try:
                     from app.executor.trainers.pytorch_trainer import load_mlp_model
+
                     model_obj, metadata_pt = load_mlp_model(model_path, config_path)
                     metadata.update(metadata_pt)
                     metadata['framework'] = 'pytorch'
-                    logger.info(f"PyTorch 模型已加载: {model.name} ({model_path})")
+                    logger.info(f'PyTorch 模型已加载: {model.name} ({model_path})')
                     return model_obj, metadata, None, None
                 except ImportError:
                     return None, metadata, None, 'PyTorch 未安装，无法加载模型。请运行: pip install torch'
                 except Exception as e:
-                    logger.error(f"加载 PyTorch 模型失败: {e}")
+                    logger.error(f'加载 PyTorch 模型失败: {e}')
                     return None, metadata, None, f'PyTorch 模型加载失败: {str(e)}'
 
             elif ext == '.keras' or ext == '.h5':
@@ -169,7 +176,12 @@ class ModelInferenceService:
                 try:
                     import tensorflow as tf
                 except ImportError:
-                    return None, metadata, None, 'TensorFlow 未安装，无法加载 .keras 模型。请运行: pip install tensorflow'
+                    return (
+                        None,
+                        metadata,
+                        None,
+                        'TensorFlow 未安装，无法加载 .keras 模型。请运行: pip install tensorflow',
+                    )
                 model_obj_tf = tf.keras.models.load_model(model_path)
 
                 # Load config from model_config.pkl (same dir as model file)
@@ -189,14 +201,14 @@ class ModelInferenceService:
                 if 'task_type' not in metadata:
                     metadata['task_type'] = model.model_type
 
-                logger.info(f"TensorFlow 模型已加载: {model.name} ({model_path})")
+                logger.info(f'TensorFlow 模型已加载: {model.name} ({model_path})')
                 return model_obj_tf, metadata, None, None
 
             else:
                 return None, None, None, f'不支持的模型格式: {ext}'
 
         except Exception as e:
-            logger.error(f"加载模型失败: {e}")
+            logger.error(f'加载模型失败: {e}')
             return None, None, None, f'模型加载失败: {str(e)}'
 
     @staticmethod
@@ -243,7 +255,7 @@ class ModelInferenceService:
                             data = pd.DataFrame(X_vec.toarray(), columns=vec_names, index=data.index)
                             missing = [c for c in feature_names if c not in data.columns]
                         except Exception as e:
-                            logger.warning(f"TF-IDF 向量化自动转换失败: {e}")
+                            logger.warning(f'TF-IDF 向量化自动转换失败: {e}')
 
                 # NLP TF-IDF path: 智能匹配 — 仅要求 tfidf_ 列存在, 其余列填0
                 tfidf_cols = [c for c in feature_names if c.startswith('tfidf_')]
@@ -259,10 +271,9 @@ class ModelInferenceService:
                         missing = []
 
                 if missing:
-                    return {'success': False, 'error': f'缺少特征列: {missing}',
-                            'predictions': [], 'probabilities': []}
+                    return {'success': False, 'error': f'缺少特征列: {missing}', 'predictions': [], 'probabilities': []}
                 if extra:
-                    logger.warning(f"多余的特征列将被忽略: {extra}")
+                    logger.warning(f'多余的特征列将被忽略: {extra}')
                 data = data[feature_names]
 
             # 处理缺失值
@@ -282,15 +293,14 @@ class ModelInferenceService:
                         unknown_vals = [x for x in data[col].unique() if x not in known_classes]
                         if unknown_vals:
                             logger.warning(
-                                f'未知类别值被映射到默认值 "{le.classes_[0]}": '
-                                f'{unknown_vals[:5]}... (列={col})'
+                                f'未知类别值被映射到默认值 "{le.classes_[0]}": {unknown_vals[:5]}... (列={col})'
                             )
                         data[col] = data[col].apply(
                             lambda x, known_classes=known_classes, le=le: x if x in known_classes else le.classes_[0]
                         )
                         data[col] = le.transform(data[col])
                     except Exception as e:
-                        logger.warning(f"编码列 {col} 失败: {e}")
+                        logger.warning(f'编码列 {col} 失败: {e}')
 
             # 标准化
             scaler = metadata.get('scaler') if metadata else None
@@ -299,9 +309,12 @@ class ModelInferenceService:
                 if len(num_cols) > 0:
                     expected = getattr(scaler, 'n_features_in_', len(num_cols))
                     if len(num_cols) != expected:
-                        return {'success': False,
-                                'error': f'Scaler维度不匹配: 模型期望{expected}个数值列, 输入有{len(num_cols)}个',
-                                'predictions': [], 'probabilities': []}
+                        return {
+                            'success': False,
+                            'error': f'Scaler维度不匹配: 模型期望{expected}个数值列, 输入有{len(num_cols)}个',
+                            'predictions': [],
+                            'probabilities': [],
+                        }
                     data[num_cols] = scaler.transform(data[num_cols])
 
             # 预测 - 根据框架类型选择不同路径
@@ -323,7 +336,8 @@ class ModelInferenceService:
                         return {
                             'success': False,
                             'error': 'NLP 模型需要文本输入，但数据中未找到文本列。',
-                            'predictions': [], 'probabilities': [],
+                            'predictions': [],
+                            'probabilities': [],
                         }
 
                 max_length = metadata.get('max_length', 256)
@@ -352,14 +366,12 @@ class ModelInferenceService:
                 # id2label 映射
                 id2label = metadata.get('id2label', {})
                 if id2label:
-                    predictions = [
-                        id2label.get(str(p), id2label.get(p, str(p)))
-                        for p in predictions
-                    ]
+                    predictions = [id2label.get(str(p), id2label.get(p, str(p))) for p in predictions]
 
             elif framework == 'pytorch':
                 X = data.values.astype('float32')
                 import torch
+
                 model_obj.eval()
                 with torch.no_grad():
                     X_tensor = torch.tensor(X)
@@ -403,7 +415,7 @@ class ModelInferenceService:
                     try:
                         proba = model_obj.predict_proba(X)
                     except Exception as e:
-                        logger.warning(f"predict_proba 失败 (仅返回预测类别): {e}")
+                        logger.warning(f'predict_proba 失败 (仅返回预测类别): {e}')
 
             # 格式化预测结果
             pred_list = []
@@ -433,9 +445,7 @@ class ModelInferenceService:
                     # 构建类别名列表供概率展示使用
                     decoded_labels = [str(c) for c in target_le.classes_]
                 except Exception as e:
-                    logger.warning(
-                        f'Label inverse_transform failed (labels may show as numbers): {e}'
-                    )
+                    logger.warning(f'Label inverse_transform failed (labels may show as numbers): {e}')
 
             # 提取概率 (分类任务)
             probabilities = None
@@ -452,10 +462,12 @@ class ModelInferenceService:
                                 if decoded_labels is not None and int(idx) < len(decoded_labels)
                                 else str(idx)
                             )
-                            probs_list.append({
-                                'class': class_label,
-                                'probability': round(float(proba[i][idx]), 4),
-                            })
+                            probs_list.append(
+                                {
+                                    'class': class_label,
+                                    'probability': round(float(proba[i][idx]), 4),
+                                }
+                            )
                         probabilities.append(probs_list)
                 except Exception:
                     pass
@@ -470,9 +482,8 @@ class ModelInferenceService:
             }
 
         except Exception as e:
-            logger.error(f"预测失败: {e}", exc_info=True)
-            return {'success': False, 'error': f'预测失败: {str(e)}',
-                    'predictions': [], 'probabilities': []}
+            logger.error(f'预测失败: {e}', exc_info=True)
+            return {'success': False, 'error': f'预测失败: {str(e)}', 'predictions': [], 'probabilities': []}
 
     @staticmethod
     def predict_single(
@@ -522,10 +533,12 @@ class ModelInferenceService:
             probabilities = []
             for i, idx_val in enumerate(top_indices.tolist()):
                 label = id2label.get(str(idx_val), id2label.get(idx_val, str(idx_val)))
-                probabilities.append({
-                    'class': str(label),
-                    'probability': round(float(top_probs[i]), 4),
-                })
+                probabilities.append(
+                    {
+                        'class': str(label),
+                        'probability': round(float(top_probs[i]), 4),
+                    }
+                )
 
             best_label = probabilities[0]['class'] if probabilities else 'unknown'
             best_conf = probabilities[0]['probability'] if probabilities else 0.0
@@ -537,7 +550,7 @@ class ModelInferenceService:
             }
 
         except Exception as e:
-            logger.error(f"predict_single 失败: {e}", exc_info=True)
+            logger.error(f'predict_single 失败: {e}', exc_info=True)
             return None
 
     @staticmethod
@@ -565,7 +578,6 @@ class ModelInferenceService:
             recall_score,
         )
 
-
         model_obj, metadata, tokenizer, error = ModelInferenceService.load_model(model)
         if error:
             return {'success': False, 'error': error}
@@ -585,6 +597,7 @@ class ModelInferenceService:
         try:
             # 加载数据集
             from app.utils.data_io import load_dataframe
+
             df = load_dataframe(eval_dataset.file_path, eval_dataset.file_format.lower())
             if df is None:
                 return {'success': False, 'error': '不支持的数据格式或文件已损坏'}
@@ -597,6 +610,7 @@ class ModelInferenceService:
             if is_independent and eval_dataset.summary_json:
                 try:
                     import json as _json
+
                     summary = _json.loads(eval_dataset.summary_json)
                     target_col = summary.get('target_column')
                 except Exception:
@@ -640,6 +654,7 @@ class ModelInferenceService:
                 # 确保 y_true 和 y_pred 在同一个编码空间中比较
                 import numpy as np
                 from sklearn.preprocessing import LabelEncoder
+
                 if y_true.dtype == 'object' or isinstance(y_true.iloc[0], str):
                     le = LabelEncoder()
                     all_labels = np.unique(list(y_true.astype(str)) + [str(p) for p in y_pred])
@@ -659,13 +674,25 @@ class ModelInferenceService:
                 report['accuracy'] = round(float(accuracy_score(y_true_enc, y_pred_enc)), 4)
                 try:
                     # weighted 平均
-                    report['precision_weighted'] = round(float(precision_score(y_true_enc, y_pred_enc, average='weighted', zero_division=0)), 4)
-                    report['recall_weighted'] = round(float(recall_score(y_true_enc, y_pred_enc, average='weighted', zero_division=0)), 4)
-                    report['f1_weighted'] = round(float(f1_score(y_true_enc, y_pred_enc, average='weighted', zero_division=0)), 4)
+                    report['precision_weighted'] = round(
+                        float(precision_score(y_true_enc, y_pred_enc, average='weighted', zero_division=0)), 4
+                    )
+                    report['recall_weighted'] = round(
+                        float(recall_score(y_true_enc, y_pred_enc, average='weighted', zero_division=0)), 4
+                    )
+                    report['f1_weighted'] = round(
+                        float(f1_score(y_true_enc, y_pred_enc, average='weighted', zero_division=0)), 4
+                    )
                     # macro 平均 (各类别等权)
-                    report['precision_macro'] = round(float(precision_score(y_true_enc, y_pred_enc, average='macro', zero_division=0)), 4)
-                    report['recall_macro'] = round(float(recall_score(y_true_enc, y_pred_enc, average='macro', zero_division=0)), 4)
-                    report['f1_macro'] = round(float(f1_score(y_true_enc, y_pred_enc, average='macro', zero_division=0)), 4)
+                    report['precision_macro'] = round(
+                        float(precision_score(y_true_enc, y_pred_enc, average='macro', zero_division=0)), 4
+                    )
+                    report['recall_macro'] = round(
+                        float(recall_score(y_true_enc, y_pred_enc, average='macro', zero_division=0)), 4
+                    )
+                    report['f1_macro'] = round(
+                        float(f1_score(y_true_enc, y_pred_enc, average='macro', zero_division=0)), 4
+                    )
                 except Exception:
                     pass
 
@@ -674,7 +701,7 @@ class ModelInferenceService:
                     cm = confusion_matrix(y_true_enc, y_pred_enc)
                     report['confusion_matrix'] = cm.tolist()
                     labels = sorted(set(list(y_true_enc) + list(y_pred_enc)))
-                    report['confusion_matrix_labels'] = [str(l) for l in labels]
+                    report['confusion_matrix_labels'] = [str(c) for c in labels]
                 except Exception:
                     pass
 
@@ -700,11 +727,11 @@ class ModelInferenceService:
                     for i in range(min(500, len(y_pred_num)))
                 ]
 
-            logger.info(f"模型测试完成: {model.name}, 准确率: {report.get('accuracy', report.get('r2', 'N/A'))}")
+            logger.info(f'模型测试完成: {model.name}, 准确率: {report.get("accuracy", report.get("r2", "N/A"))}')
             return report
 
         except Exception as e:
-            logger.error(f"模型测试失败: {e}", exc_info=True)
+            logger.error(f'模型测试失败: {e}', exc_info=True)
             return {'success': False, 'error': f'测试失败: {str(e)}'}
 
     @staticmethod

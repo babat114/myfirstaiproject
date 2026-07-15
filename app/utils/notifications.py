@@ -25,7 +25,7 @@ from urllib.request import Request, urlopen
 logger = logging.getLogger(__name__)
 
 # ── 告警冷却 ──
-_cooldowns: dict = {}         # key → last_sent_timestamp
+_cooldowns: dict = {}  # key → last_sent_timestamp
 _cooldown_lock = threading.Lock()
 
 
@@ -59,10 +59,7 @@ def send_email(subject: str, body: str, config: dict) -> bool:
         logger.debug('SMTP host not configured, skipping email alert.')
         return False
 
-    to_emails = [
-        e.strip() for e in config.get('WATCHDOG_SMTP_TO_EMAILS', '').split(',')
-        if e.strip()
-    ]
+    to_emails = [e.strip() for e in config.get('WATCHDOG_SMTP_TO_EMAILS', '').split(',') if e.strip()]
     if not to_emails:
         logger.warning('No recipient emails configured, skipping email alert.')
         return False
@@ -149,6 +146,7 @@ def send_watchdog_alert(report: dict, config: dict = None) -> dict:
     if config is None:
         try:
             from flask import current_app
+
             config = current_app.config
         except RuntimeError:
             logger.warning('No app context — cannot send watchdog alert.')
@@ -169,16 +167,14 @@ def send_watchdog_alert(report: dict, config: dict = None) -> dict:
     if _is_cooldown_active(cooldown_key, cooldown):
         logger.info(
             'Watchdog alert suppressed (cooldown active, %ds since last %s alert).',
-            cooldown, cooldown_key,
+            cooldown,
+            cooldown_key,
         )
         return {'email_sent': False, 'webhook_sent': False, 'suppressed': True}
 
     # ── 构建告警消息 ──
     alerts = report.get('alerts', [])
-    subject = (
-        f'[AI Platform Watchdog] {n_problem} problem(s), '
-        f'{n_warning} warning(s) detected'
-    )
+    subject = f'[AI Platform Watchdog] {n_problem} problem(s), {n_warning} warning(s) detected'
 
     lines = [
         'AI Platform — Model Quality Watchdog Report',

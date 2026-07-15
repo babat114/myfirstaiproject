@@ -11,6 +11,7 @@ v2 改进 (2026-06-05):
   - train + val 双指标报告
   - 更安全默认值: lr=1e-4, dropout=0.5, wd=1e-3
 """
+
 import json
 import os
 import pickle
@@ -23,6 +24,7 @@ from app.executor.trainers.base import BaseTrainer
 # ============ Keras 延迟导入 ============
 _keras_imported = None
 
+
 def _ensure_tf():
     """延迟导入 TensorFlow/Keras"""
     global _keras_imported
@@ -30,6 +32,7 @@ def _ensure_tf():
         return _keras_imported
     try:
         import tensorflow as tf
+
         tf.get_logger().setLevel('ERROR')
         _keras_imported = tf
         return tf
@@ -63,11 +66,13 @@ class PersistentEarlyStopping:
     标准 EarlyStopping.on_train_begin() 在每次 fit() 被调用时重置 wait=0,
     导致单 epoch fit 循环中的早停永不触发。此包装器维护持久状态。
     """
+
     def __init__(self, monitor='val_loss', patience=10, restore_best_weights=True):
         import tensorflow as tf
+
         self._es = tf.keras.callbacks.EarlyStopping(
-            monitor=monitor, patience=patience,
-            restore_best_weights=restore_best_weights, verbose=0)
+            monitor=monitor, patience=patience, restore_best_weights=restore_best_weights, verbose=0
+        )
         self._initialized = False
 
     def __getattr__(self, name):
@@ -189,22 +194,19 @@ class KerasTrainer(BaseTrainer):
         if self.hidden_layers is None:
             n_classes = self._output_dim if self.task_type == 'classification' else 2
             self.hidden_layers = _auto_hidden_layers_tf(n_samples, self._input_dim, n_classes)
-            self.callback.on_log(f'智能模型规模: {self.hidden_layers} '
-                               f'(样本={n_samples}, 特征={self._input_dim})')
+            self.callback.on_log(f'智能模型规模: {self.hidden_layers} (样本={n_samples}, 特征={self._input_dim})')
         else:
             self.callback.on_log(f'用户指定网络结构: {self.hidden_layers}')
 
         # —— 3-way 分割 ——
         stratify_y = y if self.task_type == 'classification' and len(set(y)) > 1 else None
         X_train_val, X_test, y_train_val, y_test = train_test_split(
-            X_num, y, test_size=self.test_size, random_state=42,
-            stratify=stratify_y
+            X_num, y, test_size=self.test_size, random_state=42, stratify=stratify_y
         )
         val_ratio = self.val_size / (1.0 - self.test_size)
         stratify_tv = y_train_val if self.task_type == 'classification' and len(set(y_train_val)) > 1 else None
         X_train, X_val, y_train, y_val = train_test_split(
-            X_train_val, y_train_val, test_size=val_ratio, random_state=42,
-            stratify=stratify_tv
+            X_train_val, y_train_val, test_size=val_ratio, random_state=42, stratify=stratify_tv
         )
 
         self._X_train, self._X_val, self._X_test = X_train, X_val, X_test
@@ -222,10 +224,11 @@ class KerasTrainer(BaseTrainer):
         model.add(tf.keras.layers.Input(shape=(self._input_dim,)))
 
         for _i, units in enumerate(self.hidden_layers):
-            model.add(tf.keras.layers.Dense(
-                units, activation='relu',
-                kernel_regularizer=tf.keras.regularizers.l2(self.weight_decay)
-            ))
+            model.add(
+                tf.keras.layers.Dense(
+                    units, activation='relu', kernel_regularizer=tf.keras.regularizers.l2(self.weight_decay)
+                )
+            )
             model.add(tf.keras.layers.BatchNormalization())
             model.add(tf.keras.layers.Dropout(self.dropout))
 
@@ -238,33 +241,24 @@ class KerasTrainer(BaseTrainer):
             loss = 'mse'
             metrics = ['mae']
 
-        model.compile(
-            optimizer=tf.keras.optimizers.Adam(learning_rate=self.learning_rate),
-            loss=loss,
-            metrics=metrics
-        )
+        model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=self.learning_rate), loss=loss, metrics=metrics)
 
         self._model = model
 
         # —— Keras 回调: 持久化早停 + LR 调度 ——
         self._callbacks = [
             PersistentEarlyStopping(
-                monitor='val_loss',
-                patience=self.early_stopping_patience,
-                restore_best_weights=True
+                monitor='val_loss', patience=self.early_stopping_patience, restore_best_weights=True
             ),
             tf.keras.callbacks.ReduceLROnPlateau(
-                monitor='val_loss',
-                factor=self.lr_factor,
-                patience=self.lr_patience,
-                min_lr=1e-6,
-                verbose=0
+                monitor='val_loss', factor=self.lr_factor, patience=self.lr_patience, min_lr=1e-6, verbose=0
             ),
         ]
 
         total_params = model.count_params()
-        self.callback.on_log(f'参数: 总={total_params:,} lr={self.learning_rate} '
-                           f'dropout={self.dropout} wd={self.weight_decay}')
+        self.callback.on_log(
+            f'参数: 总={total_params:,} lr={self.learning_rate} dropout={self.dropout} wd={self.weight_decay}'
+        )
 
     def train_epoch(self, epoch: int) -> dict:
         """训练一个 epoch，返回 train + val 指标"""
@@ -279,12 +273,13 @@ class KerasTrainer(BaseTrainer):
         # 注意: Keras 的 fit 是 "训练到完成" 而非 "训练1个epoch"
         # 这里用一次 fit(epochs=1) 模拟单 epoch, callbacks 在 epoch 结束时触发
         history = self._model.fit(
-            self._X_train, y_train,
+            self._X_train,
+            y_train,
             batch_size=self.batch_size,
             epochs=1,
             verbose=0,
             validation_data=(self._X_val, y_val),
-            callbacks=self._callbacks
+            callbacks=self._callbacks,
         )
 
         result = {
@@ -321,11 +316,21 @@ class KerasTrainer(BaseTrainer):
             y_pred = np.argmax(y_pred_raw, axis=1)
             result['test_accuracy'] = round(float(accuracy_score(y_test, y_pred)), 4)
             try:
-                result['test_precision_weighted'] = round(float(precision_score(y_test, y_pred, average='weighted', zero_division=0)), 4)
-                result['test_recall_weighted'] = round(float(recall_score(y_test, y_pred, average='weighted', zero_division=0)), 4)
-                result['test_f1_weighted'] = round(float(f1_score(y_test, y_pred, average='weighted', zero_division=0)), 4)
-                result['test_precision_macro'] = round(float(precision_score(y_test, y_pred, average='macro', zero_division=0)), 4)
-                result['test_recall_macro'] = round(float(recall_score(y_test, y_pred, average='macro', zero_division=0)), 4)
+                result['test_precision_weighted'] = round(
+                    float(precision_score(y_test, y_pred, average='weighted', zero_division=0)), 4
+                )
+                result['test_recall_weighted'] = round(
+                    float(recall_score(y_test, y_pred, average='weighted', zero_division=0)), 4
+                )
+                result['test_f1_weighted'] = round(
+                    float(f1_score(y_test, y_pred, average='weighted', zero_division=0)), 4
+                )
+                result['test_precision_macro'] = round(
+                    float(precision_score(y_test, y_pred, average='macro', zero_division=0)), 4
+                )
+                result['test_recall_macro'] = round(
+                    float(recall_score(y_test, y_pred, average='macro', zero_division=0)), 4
+                )
                 result['test_f1_macro'] = round(float(f1_score(y_test, y_pred, average='macro', zero_division=0)), 4)
             except Exception:
                 pass

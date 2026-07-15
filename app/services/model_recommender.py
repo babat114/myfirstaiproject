@@ -5,6 +5,7 @@
 支持规则推荐 (离线) 和 LLM 增强推荐 (可选)
 ============================================
 """
+
 import json
 import os
 import re
@@ -27,41 +28,41 @@ class ModelRecommender:
 
     # ── 领域检测关键词 (与 routes/models.py _build_model_hints 一致) ──
     DOMAIN_KEYWORDS = {
-        'movie':       ['douban', 'movie', '电影', '影评', '豆瓣', 'film', 'cinema'],
-        'shopping':    ['shopping', 'taobao', 'jd', '购物', '商品', '电商', '淘宝', '好评', '差评'],
-        'restaurant':  ['restaurant', 'food', '餐厅', '美食', '外卖', '点评', '菜单'],
-        'hotel':       ['hotel', '酒店', '住宿', '旅行', '宾馆'],
-        'finance':     ['finance', 'stock', '金融', '股票', '财经', '基金', '贷款'],
-        'social':      ['weibo', 'twitter', '社交', '舆情', '微博', '评论'],
-        'news':        ['news', '新闻', '头条', '资讯', '报道'],
-        'medical':     ['medical', 'health', '医疗', '健康', '诊断', '疾病', '病历', 'symptom'],
-        'education':   ['education', '学校', '教育', '学生', '课程', '考试', '成绩'],
-        'iris':        ['sepal', 'petal', 'iris'],
-        'wine':        ['alcohol', 'malic', 'ash', 'proline', 'wine'],
+        'movie': ['douban', 'movie', '电影', '影评', '豆瓣', 'film', 'cinema'],
+        'shopping': ['shopping', 'taobao', 'jd', '购物', '商品', '电商', '淘宝', '好评', '差评'],
+        'restaurant': ['restaurant', 'food', '餐厅', '美食', '外卖', '点评', '菜单'],
+        'hotel': ['hotel', '酒店', '住宿', '旅行', '宾馆'],
+        'finance': ['finance', 'stock', '金融', '股票', '财经', '基金', '贷款'],
+        'social': ['weibo', 'twitter', '社交', '舆情', '微博', '评论'],
+        'news': ['news', '新闻', '头条', '资讯', '报道'],
+        'medical': ['medical', 'health', '医疗', '健康', '诊断', '疾病', '病历', 'symptom'],
+        'education': ['education', '学校', '教育', '学生', '课程', '考试', '成绩'],
+        'iris': ['sepal', 'petal', 'iris'],
+        'wine': ['alcohol', 'malic', 'ash', 'proline', 'wine'],
         'breast_cancer': ['radius', 'texture', 'perimeter', 'concave'],
-        'diabetes':    ['glucose', 'insulin', 'bmi', 'diabetes'],
-        'housing':     ['medv', 'crim', 'tax', 'rm', 'lstat', 'housing', '房价'],
-        'titanic':     ['pclass', 'sibsp', 'parch', 'fare', 'titanic', '幸存'],
-        'sentiment':   ['sentiment', '情感', '正向', '负向', 'positive', 'negative'],
+        'diabetes': ['glucose', 'insulin', 'bmi', 'diabetes'],
+        'housing': ['medv', 'crim', 'tax', 'rm', 'lstat', 'housing', '房价'],
+        'titanic': ['pclass', 'sibsp', 'parch', 'fare', 'titanic', '幸存'],
+        'sentiment': ['sentiment', '情感', '正向', '负向', 'positive', 'negative'],
     }
 
     DOMAIN_LABELS = {
-        'movie':        '影评',
-        'shopping':     '电商评价',
-        'restaurant':   '餐饮评价',
-        'hotel':        '酒店评价',
-        'finance':      '金融分析',
-        'social':       '社交舆情',
-        'news':         '新闻分类',
-        'medical':      '医疗诊断',
-        'education':    '教育分析',
-        'iris':         '鸢尾花',
-        'wine':         '红酒',
-        'breast_cancer':'乳腺癌',
-        'diabetes':     '糖尿病',
-        'housing':      '房价',
-        'titanic':      '泰坦尼克',
-        'sentiment':    '情感',
+        'movie': '影评',
+        'shopping': '电商评价',
+        'restaurant': '餐饮评价',
+        'hotel': '酒店评价',
+        'finance': '金融分析',
+        'social': '社交舆情',
+        'news': '新闻分类',
+        'medical': '医疗诊断',
+        'education': '教育分析',
+        'iris': '鸢尾花',
+        'wine': '红酒',
+        'breast_cancer': '乳腺癌',
+        'diabetes': '糖尿病',
+        'housing': '房价',
+        'titanic': '泰坦尼克',
+        'sentiment': '情感',
     }
 
     # ── 算法名 → 可读缩写 ──
@@ -144,7 +145,7 @@ class ModelRecommender:
             'description': description,
             'version': version,
         }
-        logger.info(f"ModelRecommender 推荐: name={name}, version={version}")
+        logger.info(f'ModelRecommender 推荐: name={name}, version={version}')
         return result
 
     @classmethod
@@ -157,7 +158,7 @@ class ModelRecommender:
         try:
             from app.services.llm_service import llm_complete
         except ImportError:
-            logger.warning("llm_service 不可用, 降级到规则推荐")
+            logger.warning('llm_service 不可用, 降级到规则推荐')
             return cls.recommend(info)
 
         feature_sample = info.get('feature_names', [])[:10]
@@ -181,11 +182,11 @@ class ModelRecommender:
             result = json.loads(resp)
             # 校验必填字段
             if not result.get('name') or not result.get('description'):
-                raise ValueError("LLM返回缺少必填字段")
-            logger.info(f"ModelRecommender LLM推荐: {result}")
+                raise ValueError('LLM返回缺少必填字段')
+            logger.info(f'ModelRecommender LLM推荐: {result}')
             return result
         except Exception as e:
-            logger.warning(f"LLM 推荐失败 ({e}), 降级到规则推荐")
+            logger.warning(f'LLM 推荐失败 ({e}), 降级到规则推荐')
             return cls.recommend(info)
 
     # ══════════════════════════════════════════════════════
@@ -396,11 +397,11 @@ def recommend_model_metadata(info: dict) -> dict:
 
 TASK_LABELS_DESC = {
     'classification': '分类',
-    'regression':      '回归',
-    'clustering':      '聚类',
-    'nlp':             '文本分析',
+    'regression': '回归',
+    'clustering': '聚类',
+    'nlp': '文本分析',
     'computer_vision': '图像识别',
-    'other':           '预测',
+    'other': '预测',
 }
 
 
@@ -517,6 +518,7 @@ def _normalize_algo_key(algorithm: str) -> str:
     if not algorithm:
         return ''
     from app.utils.algorithm_info import ALGORITHM_INFO
+
     key = algorithm.lower().replace('-', '_')
     if key in ALGORITHM_INFO:
         return key
@@ -548,4 +550,3 @@ def _normalize_algo_key(algorithm: str) -> str:
         'lgbmclassifier': 'gradient_boosting',
     }
     return mapping.get(key, key)
-

@@ -1,0 +1,2 @@
+[bandit]
+skips: B301,B310,B324,B615

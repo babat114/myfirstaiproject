@@ -3,6 +3,7 @@
 TrainingCallback → EventBus → SSE 客户端
 零数据库轮询，仅在训练事件发生时推送数据
 """
+
 import json
 import queue
 import threading
@@ -71,11 +72,12 @@ def tuning_stream(tuning_id):
     """
     # 先获取 tracker (可能抛异常), 成功后再占用 slot (避免 slot 泄漏)
     from app.services.hyperparameter_tuning import get_tuning_tracker
+
     tracker = get_tuning_tracker()
 
     if not _acquire_sse_slot():
         return Response(
-            f"data: {json.dumps({'error': 'SSE 连接数已达上限，请稍后重试'}, ensure_ascii=False)}\n\n",
+            f'data: {json.dumps({"error": "SSE 连接数已达上限，请稍后重试"}, ensure_ascii=False)}\n\n',
             mimetype='text/event-stream',
             status=503,
         )
@@ -91,21 +93,23 @@ def tuning_stream(tuning_id):
                     if init_retries < 10:
                         init_retries += 1
                         import time as _time
+
                         _time.sleep(0.5)
                         continue
-                    yield f"data: {json.dumps({'error': '会话不存在或已过期'}, ensure_ascii=False)}\n\n"
+                    yield f'data: {json.dumps({"error": "会话不存在或已过期"}, ensure_ascii=False)}\n\n'
                     return
 
                 # 只在进度变化时推送 (减少网络传输)
                 current_step = session.get('current_step', 0)
                 if current_step != last_step or session['status'] != 'running':
                     last_step = current_step
-                    yield f"data: {json.dumps(session, ensure_ascii=False)}\n\n"
+                    yield f'data: {json.dumps(session, ensure_ascii=False)}\n\n'
 
                 if session['status'] in ('completed', 'failed'):
                     return
 
                 import time as _time
+
                 _time.sleep(0.5)  # 500ms 间隔
         except GeneratorExit:
             pass
@@ -141,7 +145,7 @@ def training_stream(job_id):
     """
     if not _acquire_sse_slot():
         return Response(
-            f"data: {json.dumps({'error': 'SSE 连接数已达上限，请稍后重试'}, ensure_ascii=False)}\n\n",
+            f'data: {json.dumps({"error": "SSE 连接数已达上限，请稍后重试"}, ensure_ascii=False)}\n\n',
             mimetype='text/event-stream',
             status=503,
         )
@@ -150,16 +154,17 @@ def training_stream(job_id):
     if not job:
         _release_sse_slot()
         return Response(
-            f"data: {json.dumps({'error': '任务不存在'}, ensure_ascii=False)}\n\n",
-            mimetype='text/event-stream')
+            f'data: {json.dumps({"error": "任务不存在"}, ensure_ascii=False)}\n\n', mimetype='text/event-stream'
+        )
 
     if not job.is_viewable_by(current_user):
         _release_sse_slot()
         return Response(
-            f"data: {json.dumps({'error': '权限不足'}, ensure_ascii=False)}\n\n",
-            mimetype='text/event-stream')
+            f'data: {json.dumps({"error": "权限不足"}, ensure_ascii=False)}\n\n', mimetype='text/event-stream'
+        )
 
     from app.utils.event_bus import get_event_bus
+
     event_bus = get_event_bus()
     event_queue = event_bus.subscribe(job_id)
 
@@ -171,27 +176,27 @@ def training_stream(job_id):
             status = TrainingService.get_job_status(job_id)
             if status:
                 status['_init'] = True
-                yield f"data: {json.dumps(status, ensure_ascii=False)}\n\n"
+                yield f'data: {json.dumps(status, ensure_ascii=False)}\n\n'
 
             # 如果任务已完成，发送快照后立即结束
             if job.is_finished:
-                yield f"data: {json.dumps({'is_finished': True, 'message': '任务已结束'}, ensure_ascii=False)}\n\n"
+                yield f'data: {json.dumps({"is_finished": True, "message": "任务已结束"}, ensure_ascii=False)}\n\n'
                 return
 
             # 事件循环 — 阻塞等待训练事件
             while True:
                 try:
                     msg = event_queue.get(timeout=15)  # 15s 心跳超时
-                    yield f"data: {msg}\n\n"
+                    yield f'data: {msg}\n\n'
                 except queue.Empty:
                     # 心跳 — 保持连接，检测断线
-                    yield ": heartbeat\n\n"
+                    yield ': heartbeat\n\n'
 
                     # 心跳时检查任务是否已结束
                     db.session.commit()
                     full_job = db.session.get(TrainingJob, job_id)
                     if full_job and full_job.is_finished:
-                        yield f"data: {json.dumps({'is_finished': True, 'message': '训练已完成'}, ensure_ascii=False)}\n\n"
+                        yield f'data: {json.dumps({"is_finished": True, "message": "训练已完成"}, ensure_ascii=False)}\n\n'
                         return
         except GeneratorExit:
             pass  # 客户端断开连接

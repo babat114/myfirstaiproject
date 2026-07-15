@@ -18,6 +18,7 @@
   - Kempner Institute: "Optimizing ML Workflows Workshop 2026"
   - Hyperopt → Optuna Migration Guide (Azure Databricks ML Runtime 16.4+)
 """
+
 import numpy as np
 
 
@@ -83,16 +84,41 @@ class ParameterGuidanceService:
 
     # ── 系统性调参顺序 (Google Playbook) ──
     TUNING_ORDER = [
-        {'phase': 1, 'param': 'learning_rate', 'name': '学习率',
-         'method': 'LR Finder (指数增长扫描)', 'reason': '单一最重要参数，决定收敛速度和最终性能'},
-        {'phase': 2, 'param': 'batch_size', 'name': '批大小',
-         'method': '线性缩放规则 (LR同步调整)', 'reason': '与LR耦合 — 翻倍batch需翻倍LR'},
-        {'phase': 3, 'param': 'n_estimators', 'name': '树数量/层数',
-         'method': '逐步增加至收益递减', 'reason': '控制模型容量，防止过拟合/欠拟合'},
-        {'phase': 4, 'param': 'weight_decay', 'name': '权重衰减',
-         'method': '对数尺度搜索 (1e-6 → 1e-2)', 'reason': '精细正则化，防止过拟合'},
-        {'phase': 5, 'param': 'dropout', 'name': 'Dropout',
-         'method': '线性扫描 (0.1 → 0.7)', 'reason': '最后一层防线 — 在LR和架构确定后微调'},
+        {
+            'phase': 1,
+            'param': 'learning_rate',
+            'name': '学习率',
+            'method': 'LR Finder (指数增长扫描)',
+            'reason': '单一最重要参数，决定收敛速度和最终性能',
+        },
+        {
+            'phase': 2,
+            'param': 'batch_size',
+            'name': '批大小',
+            'method': '线性缩放规则 (LR同步调整)',
+            'reason': '与LR耦合 — 翻倍batch需翻倍LR',
+        },
+        {
+            'phase': 3,
+            'param': 'n_estimators',
+            'name': '树数量/层数',
+            'method': '逐步增加至收益递减',
+            'reason': '控制模型容量，防止过拟合/欠拟合',
+        },
+        {
+            'phase': 4,
+            'param': 'weight_decay',
+            'name': '权重衰减',
+            'method': '对数尺度搜索 (1e-6 → 1e-2)',
+            'reason': '精细正则化，防止过拟合',
+        },
+        {
+            'phase': 5,
+            'param': 'dropout',
+            'name': 'Dropout',
+            'method': '线性扫描 (0.1 → 0.7)',
+            'reason': '最后一层防线 — 在LR和架构确定后微调',
+        },
     ]
 
     # ── 反模式定义 ──
@@ -128,9 +154,9 @@ class ParameterGuidanceService:
     # ==================================================================
 
     @staticmethod
-    def analyze_results(metrics_history: list, final_metrics: dict,
-                        dataset_info: dict = None,
-                        hyperparams: dict = None) -> dict:
+    def analyze_results(
+        metrics_history: list, final_metrics: dict, dataset_info: dict = None, hyperparams: dict = None
+    ) -> dict:
         """全面科学诊断训练结果
 
         Returns:
@@ -182,9 +208,7 @@ class ParameterGuidanceService:
         sub_scores = {}
 
         # 2a. 绝对性能 (0-100)
-        sub_scores['absolute_perf'] = ParameterGuidanceService._score_absolute_performance_v2(
-            final_metrics, task_type
-        )
+        sub_scores['absolute_perf'] = ParameterGuidanceService._score_absolute_performance_v2(final_metrics, task_type)
 
         # 2b. 过拟合风险 (0-100, 100=无过拟合)
         sub_scores['overfitting_risk'] = ParameterGuidanceService._score_overfitting_v2(
@@ -197,9 +221,7 @@ class ParameterGuidanceService:
         )
 
         # 2d. 类别均衡 (0-100, 100=完美均衡)
-        sub_scores['class_balance'] = ParameterGuidanceService._score_class_balance_v2(
-            final_metrics, task_type
-        )
+        sub_scores['class_balance'] = ParameterGuidanceService._score_class_balance_v2(final_metrics, task_type)
 
         # 2e. 泛化能力 (0-100)
         sub_scores['generalization'] = ParameterGuidanceService._score_generalization_v2(
@@ -216,9 +238,7 @@ class ParameterGuidanceService:
             'class_balance': 0.10,
             'generalization': 0.10,
         }
-        health_score = round(sum(
-            sub_scores[k] * weights[k] for k in weights
-        ), 1)
+        health_score = round(sum(sub_scores[k] * weights[k] for k in weights), 1)
 
         # 边界校准 (防止过高/过低)
         health_score = max(3, min(99, health_score))
@@ -226,9 +246,7 @@ class ParameterGuidanceService:
         # ═══════════════════════════════════════════════════════════════
         # Step 3.5: 子评分→问题映射 (补充决策树未覆盖的情况)
         # ═══════════════════════════════════════════════════════════════
-        issues_from_scores = ParameterGuidanceService._issues_from_sub_scores(
-            sub_scores, task_type, hyperparams
-        )
+        issues_from_scores = ParameterGuidanceService._issues_from_sub_scores(sub_scores, task_type, hyperparams)
         for iss in issues_from_scores:
             if not any(i.get('type') == iss['type'] for i in issues):
                 issues.append(iss)
@@ -250,9 +268,7 @@ class ParameterGuidanceService:
         # ═══════════════════════════════════════════════════════════════
         # Step 6: 综合诊断文本
         # ═══════════════════════════════════════════════════════════════
-        diagnosis = ParameterGuidanceService._generate_diagnosis_text(
-            health_score, sub_scores, issues, task_type
-        )
+        diagnosis = ParameterGuidanceService._generate_diagnosis_text(health_score, sub_scores, issues, task_type)
 
         # ═══════════════════════════════════════════════════════════════
         # Step 7: 下一步操作 + 调参路线图
@@ -312,8 +328,11 @@ class ParameterGuidanceService:
         has_enough_history = n >= 3
 
         # ── Q1: 训练Loss是否异常高? ──
-        train_losses = [m.get('train_loss', m.get('loss')) for m in history
-                        if m.get('train_loss') is not None or m.get('loss') is not None]
+        train_losses = [
+            m.get('train_loss', m.get('loss'))
+            for m in history
+            if m.get('train_loss') is not None or m.get('loss') is not None
+        ]
 
         if train_losses and len(train_losses) >= 3:
             final_loss = train_losses[-1]
@@ -329,171 +348,244 @@ class ParameterGuidanceService:
                 is_high_loss = final_loss > 5.0
 
             if is_high_loss:
-                path.append({'node': 'Q1', 'question': '训练Loss是否异常高?',
-                             'answer': 'YES', 'severity': 'high'})
+                path.append({'node': 'Q1', 'question': '训练Loss是否异常高?', 'answer': 'YES', 'severity': 'high'})
                 lr = hyperparams.get('learning_rate', 0.001)
                 if lr > 0.01:
-                    issues.append({
-                        'type': 'high_initial_lr', 'severity': 'high',
-                        'message': f'学习率({lr})可能过大导致Loss高居不下',
-                        'category': 'nuisance',
-                    })
-                    suggestions.append({
-                        'priority': 1, 'phase': 1,
-                        'param': 'learning_rate', 'action': 'decrease',
-                        'current': lr,
-                        'suggested': round(lr / 5, 6),
-                        'category': 'nuisance',
-                        'reason': '学习率过高导致无法收敛 — 降低5x重试',
-                        'method': 'LR Finder (指数增长扫描确定最佳LR范围)',
-                    })
+                    issues.append(
+                        {
+                            'type': 'high_initial_lr',
+                            'severity': 'high',
+                            'message': f'学习率({lr})可能过大导致Loss高居不下',
+                            'category': 'nuisance',
+                        }
+                    )
+                    suggestions.append(
+                        {
+                            'priority': 1,
+                            'phase': 1,
+                            'param': 'learning_rate',
+                            'action': 'decrease',
+                            'current': lr,
+                            'suggested': round(lr / 5, 6),
+                            'category': 'nuisance',
+                            'reason': '学习率过高导致无法收敛 — 降低5x重试',
+                            'method': 'LR Finder (指数增长扫描确定最佳LR范围)',
+                        }
+                    )
                 else:
-                    issues.append({
-                        'type': 'high_loss_other', 'severity': 'high',
-                        'message': '训练Loss异常高 — 可能数据质量问题或标签错误',
-                    })
-                    suggestions.append({
-                        'priority': 1, 'phase': 0,
-                        'param': 'data_quality', 'action': 'check',
-                        'category': 'fixed',
-                        'reason': '在调参之前，先排除数据质量问题: 检查缺失值/异常值/标签正确性',
-                    })
+                    issues.append(
+                        {
+                            'type': 'high_loss_other',
+                            'severity': 'high',
+                            'message': '训练Loss异常高 — 可能数据质量问题或标签错误',
+                        }
+                    )
+                    suggestions.append(
+                        {
+                            'priority': 1,
+                            'phase': 0,
+                            'param': 'data_quality',
+                            'action': 'check',
+                            'category': 'fixed',
+                            'reason': '在调参之前，先排除数据质量问题: 检查缺失值/异常值/标签正确性',
+                        }
+                    )
             else:
-                path.append({'node': 'Q1', 'question': '训练Loss是否异常高?',
-                             'answer': 'NO — Loss正常范围内', 'severity': 'none'})
+                path.append(
+                    {
+                        'node': 'Q1',
+                        'question': '训练Loss是否异常高?',
+                        'answer': 'NO — Loss正常范围内',
+                        'severity': 'none',
+                    }
+                )
 
         # ── Q2: Val Loss >> Train Loss? (过拟合检测) ──
-        overfit_info = ParameterGuidanceService._detect_overfitting_v2(
-            history, final_metrics, task_type, hyperparams
-        )
+        overfit_info = ParameterGuidanceService._detect_overfitting_v2(history, final_metrics, task_type, hyperparams)
         if overfit_info['overfitting']:
             sev_label = '严重' if overfit_info['severity'] == 'high' else '轻微'
-            path.append({'node': 'Q2', 'question': 'Val Loss >> Train Loss?',
-                         'answer': f'YES — {sev_label}过拟合 (gap={overfit_info.get("gap", "?")})',
-                         'severity': overfit_info['severity']})
+            path.append(
+                {
+                    'node': 'Q2',
+                    'question': 'Val Loss >> Train Loss?',
+                    'answer': f'YES — {sev_label}过拟合 (gap={overfit_info.get("gap", "?")})',
+                    'severity': overfit_info['severity'],
+                }
+            )
 
             # 分级别建议
             if overfit_info['severity'] == 'high':
-                suggestions.append({
-                    'priority': 1, 'phase': 5,
-                    'param': 'dropout', 'action': 'increase',
-                    'current': hyperparams.get('dropout', 0.3),
-                    'suggested': min(0.7, hyperparams.get('dropout', 0.3) + 0.3),
-                    'category': 'nuisance',
-                    'reason': '严重过拟合 — 大幅增加Dropout是最直接有效的正则化手段',
-                })
-                suggestions.append({
-                    'priority': 2, 'phase': 4,
-                    'param': 'weight_decay', 'action': 'increase',
-                    'current': hyperparams.get('weight_decay', 1e-4),
-                    'suggested': hyperparams.get('weight_decay', 1e-4) * 10,
-                    'category': 'nuisance',
-                    'reason': '配合增大weight_decay形成双重正则化防线',
-                })
+                suggestions.append(
+                    {
+                        'priority': 1,
+                        'phase': 5,
+                        'param': 'dropout',
+                        'action': 'increase',
+                        'current': hyperparams.get('dropout', 0.3),
+                        'suggested': min(0.7, hyperparams.get('dropout', 0.3) + 0.3),
+                        'category': 'nuisance',
+                        'reason': '严重过拟合 — 大幅增加Dropout是最直接有效的正则化手段',
+                    }
+                )
+                suggestions.append(
+                    {
+                        'priority': 2,
+                        'phase': 4,
+                        'param': 'weight_decay',
+                        'action': 'increase',
+                        'current': hyperparams.get('weight_decay', 1e-4),
+                        'suggested': hyperparams.get('weight_decay', 1e-4) * 10,
+                        'category': 'nuisance',
+                        'reason': '配合增大weight_decay形成双重正则化防线',
+                    }
+                )
             else:
-                suggestions.append({
-                    'priority': 3, 'phase': 5,
-                    'param': 'dropout', 'action': 'increase',
-                    'current': hyperparams.get('dropout', 0.3),
-                    'suggested': min(0.5, hyperparams.get('dropout', 0.3) + 0.15),
-                    'category': 'nuisance',
-                    'reason': '轻微过拟合 — 适度增加Dropout即可',
-                })
+                suggestions.append(
+                    {
+                        'priority': 3,
+                        'phase': 5,
+                        'param': 'dropout',
+                        'action': 'increase',
+                        'current': hyperparams.get('dropout', 0.3),
+                        'suggested': min(0.5, hyperparams.get('dropout', 0.3) + 0.15),
+                        'category': 'nuisance',
+                        'reason': '轻微过拟合 — 适度增加Dropout即可',
+                    }
+                )
         else:
-            path.append({'node': 'Q2', 'question': 'Val Loss >> Train Loss?',
-                         'answer': 'NO — Train/Val 差距正常', 'severity': 'none'})
+            path.append(
+                {
+                    'node': 'Q2',
+                    'question': 'Val Loss >> Train Loss?',
+                    'answer': 'NO — Train/Val 差距正常',
+                    'severity': 'none',
+                }
+            )
 
         # ── Q3: 欠拟合检测 ──
-        is_underfit = ParameterGuidanceService._detect_underfitting_v2(
-            history, final_metrics, task_type
-        )
+        is_underfit = ParameterGuidanceService._detect_underfitting_v2(history, final_metrics, task_type)
         if is_underfit:
-            path.append({'node': 'Q3', 'question': 'Train ≈ Val 但都很低?',
-                         'answer': 'YES — 欠拟合', 'severity': 'medium'})
-            suggestions.append({
-                'priority': 2, 'phase': 3,
-                'param': 'hidden_layers', 'action': 'increase',
-                'current': hyperparams.get('hidden_layers', [128, 64]),
-                'suggested': [256, 128, 64, 32],
-                'category': 'scientific',
-                'reason': '模型容量不足 — 增加网络深度/宽度提升表达能力',
-            })
-            suggestions.append({
-                'priority': 1, 'phase': 3,
-                'param': 'algorithm', 'action': 'change',
-                'suggested': 'gradient_boosting',
-                'category': 'scientific',
-                'reason': '当前算法容量不足，建议切换到更强的集成方法(GB/RF)',
-            })
+            path.append(
+                {'node': 'Q3', 'question': 'Train ≈ Val 但都很低?', 'answer': 'YES — 欠拟合', 'severity': 'medium'}
+            )
+            suggestions.append(
+                {
+                    'priority': 2,
+                    'phase': 3,
+                    'param': 'hidden_layers',
+                    'action': 'increase',
+                    'current': hyperparams.get('hidden_layers', [128, 64]),
+                    'suggested': [256, 128, 64, 32],
+                    'category': 'scientific',
+                    'reason': '模型容量不足 — 增加网络深度/宽度提升表达能力',
+                }
+            )
+            suggestions.append(
+                {
+                    'priority': 1,
+                    'phase': 3,
+                    'param': 'algorithm',
+                    'action': 'change',
+                    'suggested': 'gradient_boosting',
+                    'category': 'scientific',
+                    'reason': '当前算法容量不足，建议切换到更强的集成方法(GB/RF)',
+                }
+            )
         else:
-            path.append({'node': 'Q3', 'question': 'Train ≈ Val 但都很低?',
-                         'answer': 'NO', 'severity': 'none'})
+            path.append({'node': 'Q3', 'question': 'Train ≈ Val 但都很低?', 'answer': 'NO', 'severity': 'none'})
 
         # ── Q4: Loss震荡 / 收敛速度? ──
         loss_analysis = ParameterGuidanceService._analyze_loss_curve_v2(history)
         if loss_analysis['trend'] == 'unknown' and len(history) < 3:
             # 单轮模型: 无足够epoch数据做loss曲线分析
-            path.append({'node': 'Q4', 'question': 'Loss收敛情况?',
-                         'answer': 'ⓘ 单轮训练, 无Loss曲线数据 — 跳过收敛分析',
-                         'severity': 'none'})
+            path.append(
+                {
+                    'node': 'Q4',
+                    'question': 'Loss收敛情况?',
+                    'answer': 'ⓘ 单轮训练, 无Loss曲线数据 — 跳过收敛分析',
+                    'severity': 'none',
+                }
+            )
         elif loss_analysis['oscillating']:
-            path.append({'node': 'Q4', 'question': 'Loss是否剧烈震荡?',
-                         'answer': f'YES — CV={loss_analysis["cv"]:.2f}',
-                         'severity': 'medium'})
+            path.append(
+                {
+                    'node': 'Q4',
+                    'question': 'Loss是否剧烈震荡?',
+                    'answer': f'YES — CV={loss_analysis["cv"]:.2f}',
+                    'severity': 'medium',
+                }
+            )
             current_lr = hyperparams.get('learning_rate', 0.001)
             current_bs = hyperparams.get('batch_size', 64)
             suggested_lr = round(max(current_lr / 5, 1e-6), 6)
-            suggestions.append({
-                'priority': 1, 'phase': 1,
-                'param': 'learning_rate', 'action': 'decrease',
-                'current': current_lr, 'suggested': suggested_lr,
-                'category': 'nuisance',
-                'reason': f'Loss震荡(CV={loss_analysis["cv"]:.1%}) → 学习率过大。'
-                          f'标准修复: LR从{current_lr}降至{suggested_lr}',
-            })
-            if current_bs < 64:
-                suggestions.append({
-                    'priority': 3, 'phase': 2,
-                    'param': 'batch_size', 'action': 'increase',
-                    'current': current_bs, 'suggested': min(current_bs * 2, 256),
+            suggestions.append(
+                {
+                    'priority': 1,
+                    'phase': 1,
+                    'param': 'learning_rate',
+                    'action': 'decrease',
+                    'current': current_lr,
+                    'suggested': suggested_lr,
                     'category': 'nuisance',
-                    'reason': '增大batch size可平滑梯度估计，减少震荡 (LR需同步缩放)',
-                })
+                    'reason': f'Loss震荡(CV={loss_analysis["cv"]:.1%}) → 学习率过大。'
+                    f'标准修复: LR从{current_lr}降至{suggested_lr}',
+                }
+            )
+            if current_bs < 64:
+                suggestions.append(
+                    {
+                        'priority': 3,
+                        'phase': 2,
+                        'param': 'batch_size',
+                        'action': 'increase',
+                        'current': current_bs,
+                        'suggested': min(current_bs * 2, 256),
+                        'category': 'nuisance',
+                        'reason': '增大batch size可平滑梯度估计，减少震荡 (LR需同步缩放)',
+                    }
+                )
         elif loss_analysis['slow_convergence']:
-            path.append({'node': 'Q4', 'question': 'Loss是否剧烈震荡?',
-                         'answer': 'NO — 但收敛偏慢',
-                         'severity': 'low'})
+            path.append({'node': 'Q4', 'question': 'Loss是否剧烈震荡?', 'answer': 'NO — 但收敛偏慢', 'severity': 'low'})
             current_lr = hyperparams.get('learning_rate', 0.001)
             suggested_lr = round(current_lr * 3, 6)
-            suggestions.append({
-                'priority': 4, 'phase': 1,
-                'param': 'learning_rate', 'action': 'increase',
-                'current': current_lr, 'suggested': suggested_lr,
-                'category': 'nuisance',
-                'reason': '收敛偏慢 — 可适当提高LR加速训练。运行LR Finder确定最佳范围',
-            })
+            suggestions.append(
+                {
+                    'priority': 4,
+                    'phase': 1,
+                    'param': 'learning_rate',
+                    'action': 'increase',
+                    'current': current_lr,
+                    'suggested': suggested_lr,
+                    'category': 'nuisance',
+                    'reason': '收敛偏慢 — 可适当提高LR加速训练。运行LR Finder确定最佳范围',
+                }
+            )
         else:
-            path.append({'node': 'Q4', 'question': 'Loss是否剧烈震荡?',
-                         'answer': 'NO — 收敛稳定', 'severity': 'none'})
+            path.append({'node': 'Q4', 'question': 'Loss是否剧烈震荡?', 'answer': 'NO — 收敛稳定', 'severity': 'none'})
 
         # ── Q5: LR-Batch Size 耦合检查 ──
         if has_enough_history:
-            lr_bs_info = ParameterGuidanceService._check_lr_batch_coupling(
-                history, hyperparams
-            )
+            lr_bs_info = ParameterGuidanceService._check_lr_batch_coupling(history, hyperparams)
             if lr_bs_info['issue']:
-                path.append({
-                    'node': 'Q5', 'question': 'LR-Batch Size 耦合是否合理?',
-                    'answer': f'问题: {lr_bs_info["message"]}',
-                    'severity': 'medium',
-                })
-                suggestions.append({
-                    'priority': 5, 'phase': 2,
-                    'param': 'batch_size', 'action': lr_bs_info['bs_action'],
-                    'suggested': lr_bs_info['suggested_bs'],
-                    'category': 'nuisance',
-                    'reason': lr_bs_info['reason'],
-                })
+                path.append(
+                    {
+                        'node': 'Q5',
+                        'question': 'LR-Batch Size 耦合是否合理?',
+                        'answer': f'问题: {lr_bs_info["message"]}',
+                        'severity': 'medium',
+                    }
+                )
+                suggestions.append(
+                    {
+                        'priority': 5,
+                        'phase': 2,
+                        'param': 'batch_size',
+                        'action': lr_bs_info['bs_action'],
+                        'suggested': lr_bs_info['suggested_bs'],
+                        'category': 'nuisance',
+                        'reason': lr_bs_info['reason'],
+                    }
+                )
 
         return {'path': path, 'issues': issues, 'suggestions': suggestions}
 
@@ -519,25 +611,41 @@ class ParameterGuidanceService:
             f1 = final_metrics.get('test_f1_score', final_metrics.get('f1_score', 0))
 
             # Accuracy → 0-80 基础分 (非线性)
-            if acc >= 0.98:    base = 78 + (acc - 0.98) / 0.02 * 2
-            elif acc >= 0.95:  base = 68 + (acc - 0.95) / 0.03 * 10
-            elif acc >= 0.88:  base = 55 + (acc - 0.88) / 0.07 * 13
-            elif acc >= 0.80:  base = 40 + (acc - 0.80) / 0.08 * 15
-            elif acc >= 0.70:  base = 25 + (acc - 0.70) / 0.10 * 15
-            elif acc >= 0.55:  base = 10 + (acc - 0.55) / 0.15 * 15
-            elif acc >= 0.40:  base = 3 + (acc - 0.40) / 0.15 * 7
-            elif acc > 0:      base = max(0, acc * 7)
-            else:              base = 0
+            if acc >= 0.98:
+                base = 78 + (acc - 0.98) / 0.02 * 2
+            elif acc >= 0.95:
+                base = 68 + (acc - 0.95) / 0.03 * 10
+            elif acc >= 0.88:
+                base = 55 + (acc - 0.88) / 0.07 * 13
+            elif acc >= 0.80:
+                base = 40 + (acc - 0.80) / 0.08 * 15
+            elif acc >= 0.70:
+                base = 25 + (acc - 0.70) / 0.10 * 15
+            elif acc >= 0.55:
+                base = 10 + (acc - 0.55) / 0.15 * 15
+            elif acc >= 0.40:
+                base = 3 + (acc - 0.40) / 0.15 * 7
+            elif acc > 0:
+                base = max(0, acc * 7)
+            else:
+                base = 0
 
             # F1 → ±15 调整
             if f1 > 0:
-                if f1 >= 0.95:   bonus = 15
-                elif f1 >= 0.85: bonus = 10
-                elif f1 >= 0.75: bonus = 5
-                elif f1 >= 0.60: bonus = 0
-                elif f1 >= 0.45: bonus = -5
-                elif f1 >= 0.30: bonus = -10
-                else:            bonus = -15
+                if f1 >= 0.95:
+                    bonus = 15
+                elif f1 >= 0.85:
+                    bonus = 10
+                elif f1 >= 0.75:
+                    bonus = 5
+                elif f1 >= 0.60:
+                    bonus = 0
+                elif f1 >= 0.45:
+                    bonus = -5
+                elif f1 >= 0.30:
+                    bonus = -10
+                else:
+                    bonus = -15
             else:
                 bonus = 0
 
@@ -547,26 +655,38 @@ class ParameterGuidanceService:
             r2 = final_metrics.get('test_r2', final_metrics.get('r2', None))
 
             if r2 is not None:
-                if r2 >= 0.95:   score = 92 + (r2 - 0.95) / 0.05 * 8
-                elif r2 >= 0.85: score = 78 + (r2 - 0.85) / 0.10 * 14
-                elif r2 >= 0.70: score = 60 + (r2 - 0.70) / 0.15 * 18
-                elif r2 >= 0.50: score = 38 + (r2 - 0.50) / 0.20 * 22
-                elif r2 >= 0.25: score = 18 + (r2 - 0.25) / 0.25 * 20
-                elif r2 >= 0:    score = 5 + r2 / 0.25 * 13
-                else:            score = max(0, 3 + r2 * 3)
+                if r2 >= 0.95:
+                    score = 92 + (r2 - 0.95) / 0.05 * 8
+                elif r2 >= 0.85:
+                    score = 78 + (r2 - 0.85) / 0.10 * 14
+                elif r2 >= 0.70:
+                    score = 60 + (r2 - 0.70) / 0.15 * 18
+                elif r2 >= 0.50:
+                    score = 38 + (r2 - 0.50) / 0.20 * 22
+                elif r2 >= 0.25:
+                    score = 18 + (r2 - 0.25) / 0.25 * 20
+                elif r2 >= 0:
+                    score = 5 + r2 / 0.25 * 13
+                else:
+                    score = max(0, 3 + r2 * 3)
                 return round(max(0, min(100, score)), 1)
             return 20.0  # 无R²指标
 
         elif task_type == 'clustering':
-            sil = final_metrics.get('test_silhouette_score',
-                                    final_metrics.get('silhouette_score', None))
+            sil = final_metrics.get('test_silhouette_score', final_metrics.get('silhouette_score', None))
             if sil is not None:
-                if sil >= 0.70:  score = 88 + (sil - 0.70) / 0.30 * 12
-                elif sil >= 0.50: score = 65 + (sil - 0.50) / 0.20 * 23
-                elif sil >= 0.30: score = 38 + (sil - 0.30) / 0.20 * 27
-                elif sil >= 0.10: score = 15 + (sil - 0.10) / 0.20 * 23
-                elif sil >= 0:    score = 5 + sil / 0.10 * 10
-                else:             score = max(0, 2 + sil * 3)
+                if sil >= 0.70:
+                    score = 88 + (sil - 0.70) / 0.30 * 12
+                elif sil >= 0.50:
+                    score = 65 + (sil - 0.50) / 0.20 * 23
+                elif sil >= 0.30:
+                    score = 38 + (sil - 0.30) / 0.20 * 27
+                elif sil >= 0.10:
+                    score = 15 + (sil - 0.10) / 0.20 * 23
+                elif sil >= 0:
+                    score = 5 + sil / 0.10 * 10
+                else:
+                    score = max(0, 2 + sil * 3)
                 return round(max(0, min(100, score)), 1)
             return 20.0
 
@@ -577,12 +697,9 @@ class ParameterGuidanceService:
     # ==================================================================
 
     @staticmethod
-    def _score_overfitting_v2(history, final_metrics, task_type,
-                              hyperparams: dict = None) -> float:
+    def _score_overfitting_v2(history, final_metrics, task_type, hyperparams: dict = None) -> float:
         """过拟合风险评分 (100 = 完全无过拟合, 0 = 严重过拟合)"""
-        info = ParameterGuidanceService._detect_overfitting_v2(
-            history, final_metrics, task_type, hyperparams
-        )
+        info = ParameterGuidanceService._detect_overfitting_v2(history, final_metrics, task_type, hyperparams)
         if not info['overfitting']:
             return 100.0
         if info['severity'] == 'critical':
@@ -595,8 +712,7 @@ class ParameterGuidanceService:
             return 75.0
 
     @staticmethod
-    def _detect_overfitting_v2(history, final_metrics, task_type,
-                               hyperparams: dict = None) -> dict:
+    def _detect_overfitting_v2(history, final_metrics, task_type, hyperparams: dict = None) -> dict:
         """增强过拟合检测 — 多信号融合
 
         对单轮 sklearn 模型(无独立 train/test 指标):
@@ -610,68 +726,68 @@ class ParameterGuidanceService:
         recent = history[-n_recent:]
 
         if task_type == 'regression':
-            train_key, _test_key = 'train_r2', 'test_r2'
-            train_vals = [m.get(train_key) for m in recent
-                          if m.get(train_key) is not None]
+            train_key = 'train_r2'
+            train_vals = [m.get(train_key) for m in recent if m.get(train_key) is not None]
             test_val = final_metrics.get('test_r2', final_metrics.get('r2'))
             # 无独立 train 指标时回退到通用指标
             if not train_vals:
-                train_vals = [m.get('r2') for m in recent
-                              if m.get('r2') is not None]
+                train_vals = [m.get('r2') for m in recent if m.get('r2') is not None]
         elif task_type == 'clustering':
             return {'overfitting': False, 'severity': 'none', 'gap': 0}
         else:
-            train_key, _test_key = 'train_accuracy', 'test_accuracy'
-            train_vals = [m.get(train_key) for m in recent
-                          if m.get(train_key) is not None]
+            train_key = 'train_accuracy'
+            train_vals = [m.get(train_key) for m in recent if m.get(train_key) is not None]
             test_val = final_metrics.get('test_accuracy', final_metrics.get('accuracy'))
             # 无独立 train 指标时回退到通用指标
             if not train_vals:
-                train_vals = [m.get('accuracy') for m in recent
-                              if m.get('accuracy') is not None]
+                train_vals = [m.get('accuracy') for m in recent if m.get('accuracy') is not None]
 
         # ── 检测是否有真正分离的 train/test 指标 ──
-        has_separated = any(m.get(train_key) is not None for m in recent
-                           if train_key in ('train_accuracy', 'train_r2'))
+        has_separated = any(m.get(train_key) is not None for m in recent if train_key in ('train_accuracy', 'train_r2'))
 
         if not train_vals or test_val is None:
             # 无任何指标 → 尝试 CV 方差信号
-            return ParameterGuidanceService._overfitting_from_cv_signal(
-                hyperparams, final_metrics, task_type
-            )
+            return ParameterGuidanceService._overfitting_from_cv_signal(hyperparams, final_metrics, task_type)
 
         avg_train = float(np.mean(train_vals))
         gap = avg_train - test_val
 
         # ── 当 train/test 来源相同时, gap 天然≈0 → 需用 CV 信号补充 ──
         if not has_separated and abs(gap) < 0.005:
-            cv_result = ParameterGuidanceService._overfitting_from_cv_signal(
-                hyperparams, final_metrics, task_type
-            )
+            cv_result = ParameterGuidanceService._overfitting_from_cv_signal(hyperparams, final_metrics, task_type)
             if cv_result['overfitting']:
                 return cv_result
             # 无过拟合信号 → 返回标注 inconclusive 的结果
             return {
-                'overfitting': False, 'severity': 'none', 'gap': 0,
+                'overfitting': False,
+                'severity': 'none',
+                'gap': 0,
                 'note': 'inconclusive — 单轮模型无独立 train/test 分离指标, 过拟合检测基于 CV 方差推断',
             }
 
         if task_type == 'regression':
-            if gap > 0.30:   return {'overfitting': True, 'severity': 'critical', 'gap': round(gap, 4)}
-            elif gap > 0.20: return {'overfitting': True, 'severity': 'high', 'gap': round(gap, 4)}
-            elif gap > 0.10: return {'overfitting': True, 'severity': 'medium', 'gap': round(gap, 4)}
-            elif gap > 0.05: return {'overfitting': True, 'severity': 'low', 'gap': round(gap, 4)}
+            if gap > 0.30:
+                return {'overfitting': True, 'severity': 'critical', 'gap': round(gap, 4)}
+            elif gap > 0.20:
+                return {'overfitting': True, 'severity': 'high', 'gap': round(gap, 4)}
+            elif gap > 0.10:
+                return {'overfitting': True, 'severity': 'medium', 'gap': round(gap, 4)}
+            elif gap > 0.05:
+                return {'overfitting': True, 'severity': 'low', 'gap': round(gap, 4)}
         else:
-            if gap > 0.20:   return {'overfitting': True, 'severity': 'critical', 'gap': round(gap, 4)}
-            elif gap > 0.12: return {'overfitting': True, 'severity': 'high', 'gap': round(gap, 4)}
-            elif gap > 0.06: return {'overfitting': True, 'severity': 'medium', 'gap': round(gap, 4)}
-            elif gap > 0.03: return {'overfitting': True, 'severity': 'low', 'gap': round(gap, 4)}
+            if gap > 0.20:
+                return {'overfitting': True, 'severity': 'critical', 'gap': round(gap, 4)}
+            elif gap > 0.12:
+                return {'overfitting': True, 'severity': 'high', 'gap': round(gap, 4)}
+            elif gap > 0.06:
+                return {'overfitting': True, 'severity': 'medium', 'gap': round(gap, 4)}
+            elif gap > 0.03:
+                return {'overfitting': True, 'severity': 'low', 'gap': round(gap, 4)}
 
         return {'overfitting': False, 'severity': 'none', 'gap': round(gap, 4)}
 
     @staticmethod
-    def _overfitting_from_cv_signal(hyperparams: dict, final_metrics: dict,
-                                    task_type: str) -> dict:
+    def _overfitting_from_cv_signal(hyperparams: dict, final_metrics: dict, task_type: str) -> dict:
         """从 CV 调优结果推断过拟合信号 (替代 train/test gap)"""
         tuning = hyperparams.get('tuning_result', {})
         best_cv = tuning.get('best_cv_score') if isinstance(tuning, dict) else None
@@ -685,34 +801,32 @@ class ParameterGuidanceService:
         if task_type == 'regression':
             test_score = final_metrics.get('test_r2', final_metrics.get('r2', 0))
         elif task_type == 'clustering':
-            test_score = final_metrics.get('test_silhouette_score',
-                                          final_metrics.get('silhouette_score', 0))
+            test_score = final_metrics.get('test_silhouette_score', final_metrics.get('silhouette_score', 0))
         else:
-            test_score = final_metrics.get('test_accuracy',
-                                          final_metrics.get('accuracy', 0))
+            test_score = final_metrics.get('test_accuracy', final_metrics.get('accuracy', 0))
 
         gap = best_cv - test_score
 
         # CV 分数是交叉验证均值, test 分数是留出集单次评估
         # CV > test 说明模型在训练数据的不同子集上表现不一致 → 过拟合信号
         if task_type == 'regression':
-            if gap > 0.25:   return {'overfitting': True, 'severity': 'critical',
-                                     'gap': round(gap, 4), 'source': 'cv_vs_test'}
-            elif gap > 0.15: return {'overfitting': True, 'severity': 'high',
-                                     'gap': round(gap, 4), 'source': 'cv_vs_test'}
-            elif gap > 0.08: return {'overfitting': True, 'severity': 'medium',
-                                     'gap': round(gap, 4), 'source': 'cv_vs_test'}
-            elif gap > 0.04: return {'overfitting': True, 'severity': 'low',
-                                     'gap': round(gap, 4), 'source': 'cv_vs_test'}
+            if gap > 0.25:
+                return {'overfitting': True, 'severity': 'critical', 'gap': round(gap, 4), 'source': 'cv_vs_test'}
+            elif gap > 0.15:
+                return {'overfitting': True, 'severity': 'high', 'gap': round(gap, 4), 'source': 'cv_vs_test'}
+            elif gap > 0.08:
+                return {'overfitting': True, 'severity': 'medium', 'gap': round(gap, 4), 'source': 'cv_vs_test'}
+            elif gap > 0.04:
+                return {'overfitting': True, 'severity': 'low', 'gap': round(gap, 4), 'source': 'cv_vs_test'}
         else:
-            if gap > 0.15:   return {'overfitting': True, 'severity': 'critical',
-                                     'gap': round(gap, 4), 'source': 'cv_vs_test'}
-            elif gap > 0.10: return {'overfitting': True, 'severity': 'high',
-                                     'gap': round(gap, 4), 'source': 'cv_vs_test'}
-            elif gap > 0.05: return {'overfitting': True, 'severity': 'medium',
-                                     'gap': round(gap, 4), 'source': 'cv_vs_test'}
-            elif gap > 0.02: return {'overfitting': True, 'severity': 'low',
-                                     'gap': round(gap, 4), 'source': 'cv_vs_test'}
+            if gap > 0.15:
+                return {'overfitting': True, 'severity': 'critical', 'gap': round(gap, 4), 'source': 'cv_vs_test'}
+            elif gap > 0.10:
+                return {'overfitting': True, 'severity': 'high', 'gap': round(gap, 4), 'source': 'cv_vs_test'}
+            elif gap > 0.05:
+                return {'overfitting': True, 'severity': 'medium', 'gap': round(gap, 4), 'source': 'cv_vs_test'}
+            elif gap > 0.02:
+                return {'overfitting': True, 'severity': 'low', 'gap': round(gap, 4), 'source': 'cv_vs_test'}
 
         return {'overfitting': False, 'severity': 'none', 'gap': round(gap, 4)}
 
@@ -734,36 +848,54 @@ class ParameterGuidanceService:
             entry = history[-1] if n >= 1 else final_metrics
 
             if task_type == 'classification':
-                test_acc = entry.get('test_accuracy', entry.get('accuracy',
-                                     final_metrics.get('test_accuracy',
-                                     final_metrics.get('accuracy', 0))))
+                test_acc = entry.get(
+                    'test_accuracy',
+                    entry.get('accuracy', final_metrics.get('test_accuracy', final_metrics.get('accuracy', 0))),
+                )
                 entry.get('train_accuracy', test_acc)
-                if test_acc >= 0.90:  return 85.0  # 高准确率 → 收敛良好
-                elif test_acc >= 0.78: return 73.0  # 中等 → 可接受
-                elif test_acc >= 0.60: return 58.0  # 偏低 → 可能欠收敛
-                elif test_acc > 0:     return 40.0  # 低 → 收敛差
-                else:                  return 30.0  # 无有效指标
+                if test_acc >= 0.90:
+                    return 85.0  # 高准确率 → 收敛良好
+                elif test_acc >= 0.78:
+                    return 73.0  # 中等 → 可接受
+                elif test_acc >= 0.60:
+                    return 58.0  # 偏低 → 可能欠收敛
+                elif test_acc > 0:
+                    return 40.0  # 低 → 收敛差
+                else:
+                    return 30.0  # 无有效指标
             elif task_type == 'regression':
-                r2 = entry.get('test_r2', entry.get('r2',
-                               final_metrics.get('test_r2',
-                               final_metrics.get('r2'))))
+                r2 = entry.get('test_r2', entry.get('r2', final_metrics.get('test_r2', final_metrics.get('r2'))))
                 if r2 is not None:
-                    if r2 >= 0.85:  return 85.0
-                    elif r2 >= 0.65: return 73.0
-                    elif r2 >= 0.40: return 58.0
-                    elif r2 >= 0.10: return 40.0
-                    else:            return 30.0
+                    if r2 >= 0.85:
+                        return 85.0
+                    elif r2 >= 0.65:
+                        return 73.0
+                    elif r2 >= 0.40:
+                        return 58.0
+                    elif r2 >= 0.10:
+                        return 40.0
+                    else:
+                        return 30.0
                 return 50.0  # 无 R² 指标
             elif task_type == 'clustering':
-                sil = entry.get('test_silhouette_score', entry.get('silhouette_score',
-                                final_metrics.get('test_silhouette_score',
-                                final_metrics.get('silhouette_score'))))
+                sil = entry.get(
+                    'test_silhouette_score',
+                    entry.get(
+                        'silhouette_score',
+                        final_metrics.get('test_silhouette_score', final_metrics.get('silhouette_score')),
+                    ),
+                )
                 if sil is not None:
-                    if sil >= 0.60:  return 85.0
-                    elif sil >= 0.40: return 73.0
-                    elif sil >= 0.20: return 58.0
-                    elif sil >= 0.05: return 40.0
-                    else:             return 30.0
+                    if sil >= 0.60:
+                        return 85.0
+                    elif sil >= 0.40:
+                        return 73.0
+                    elif sil >= 0.20:
+                        return 58.0
+                    elif sil >= 0.05:
+                        return 40.0
+                    else:
+                        return 30.0
                 return 50.0
             return 50.0  # 完全无法评估
 
@@ -774,10 +906,14 @@ class ParameterGuidanceService:
 
         if analysis['oscillating']:
             cv = analysis['cv']
-            if cv > 0.50:     score -= 40
-            elif cv > 0.35:   score -= 30
-            elif cv > 0.25:   score -= 20
-            else:             score -= 10
+            if cv > 0.50:
+                score -= 40
+            elif cv > 0.35:
+                score -= 30
+            elif cv > 0.25:
+                score -= 20
+            else:
+                score -= 10
 
         if analysis['slow_convergence']:
             score -= 15
@@ -794,22 +930,40 @@ class ParameterGuidanceService:
     def _analyze_loss_curve_v2(history) -> dict:
         """增强Loss曲线分析 — 多维度信号"""
         if len(history) < 3:
-            return {'oscillating': False, 'slow_convergence': False,
-                    'converged_well': False, 'diverging': False,
-                    'cv': 0, 'trend': 'unknown'}
+            return {
+                'oscillating': False,
+                'slow_convergence': False,
+                'converged_well': False,
+                'diverging': False,
+                'cv': 0,
+                'trend': 'unknown',
+            }
 
-        losses = [m.get('loss', m.get('train_loss')) for m in history
-                  if m.get('loss') is not None or m.get('train_loss') is not None]
+        losses = [
+            m.get('loss', m.get('train_loss'))
+            for m in history
+            if m.get('loss') is not None or m.get('train_loss') is not None
+        ]
         if len(losses) < 3:
-            return {'oscillating': False, 'slow_convergence': False,
-                    'converged_well': False, 'diverging': False,
-                    'cv': 0, 'trend': 'unknown'}
+            return {
+                'oscillating': False,
+                'slow_convergence': False,
+                'converged_well': False,
+                'diverging': False,
+                'cv': 0,
+                'trend': 'unknown',
+            }
 
         avg_loss = np.mean(losses)
         if avg_loss <= 0:
-            return {'oscillating': False, 'slow_convergence': False,
-                    'converged_well': False, 'diverging': False,
-                    'cv': 0, 'trend': 'unknown'}
+            return {
+                'oscillating': False,
+                'slow_convergence': False,
+                'converged_well': False,
+                'diverging': False,
+                'cv': 0,
+                'trend': 'unknown',
+            }
 
         # 变异系数 (CV = std/mean)
         cv = float(np.std(losses) / avg_loss)
@@ -819,7 +973,7 @@ class ParameterGuidanceService:
         slope = float(np.polyfit(x, losses, 1)[0])
 
         # 发散检测: 后期Loss > 初期Loss * 1.5
-        early_mean = float(np.mean(losses[:min(3, len(losses))]))
+        early_mean = float(np.mean(losses[: min(3, len(losses))]))
         late_mean = float(np.mean(losses[-min(3, len(losses)):]))
         diverging = late_mean > early_mean * 1.5
 
@@ -833,9 +987,13 @@ class ParameterGuidanceService:
             'converged_well': converged_well,
             'diverging': diverging,
             'cv': round(cv, 4),
-            'trend': 'diverging' if diverging else
-                     'converging' if slope < -0.01 else
-                     'flat' if abs(slope) < 0.01 else 'increasing',
+            'trend': 'diverging'
+            if diverging
+            else 'converging'
+            if slope < -0.01
+            else 'flat'
+            if abs(slope) < 0.01
+            else 'increasing',
             'slope': round(float(slope), 6),
             'early_mean': round(early_mean, 4),
             'late_mean': round(late_mean, 4),
@@ -868,21 +1026,30 @@ class ParameterGuidanceService:
         # P-R 差距过大
         if prec > 0 and rec > 0:
             pr_gap = abs(prec - rec)
-            if pr_gap > 0.40:    score -= 35
-            elif pr_gap > 0.25:  score -= 20
-            elif pr_gap > 0.15:  score -= 10
-            elif pr_gap > 0.08:  score -= 5
+            if pr_gap > 0.40:
+                score -= 35
+            elif pr_gap > 0.25:
+                score -= 20
+            elif pr_gap > 0.15:
+                score -= 10
+            elif pr_gap > 0.08:
+                score -= 5
 
         # F1 远低于 Accuracy (类别不平衡的标志)
         if acc > 0 and f1 > 0:
             acc_f1_gap = acc - f1
-            if acc_f1_gap > 0.30:   score -= 25
-            elif acc_f1_gap > 0.15: score -= 12
-            elif acc_f1_gap > 0.08: score -= 5
+            if acc_f1_gap > 0.30:
+                score -= 25
+            elif acc_f1_gap > 0.15:
+                score -= 12
+            elif acc_f1_gap > 0.08:
+                score -= 5
 
         # 极端P或R
-        if prec > 0 and prec < 0.30:  score -= 15
-        if rec > 0 and rec < 0.30:   score -= 15
+        if prec > 0 and prec < 0.30:
+            score -= 15
+        if rec > 0 and rec < 0.30:
+            score -= 15
 
         return round(max(0, min(100, score)), 1)
 
@@ -895,8 +1062,7 @@ class ParameterGuidanceService:
           - residual_kurtosis: 残差峰度 (>3=厚尾, 模型对大误差样本预测差)
           - RMSE/MAE 比值: 远大于1说明存在异常大误差样本
         """
-        skew = abs(final_metrics.get('residual_skew',
-                                     final_metrics.get('residual_skewness', 0)))
+        skew = abs(final_metrics.get('residual_skew', final_metrics.get('residual_skewness', 0)))
         kurt = final_metrics.get('residual_kurtosis', 0)
         rmse = final_metrics.get('test_rmse', final_metrics.get('rmse', 0))
         mae = final_metrics.get('test_mae', final_metrics.get('mae', 1))
@@ -904,20 +1070,28 @@ class ParameterGuidanceService:
         score = 85.0  # 基础分 (比分类保守 — 回归的均衡概念不同)
 
         # 残差偏度惩罚
-        if skew > 1.5:        score -= 35
-        elif skew > 1.0:      score -= 20
-        elif skew > 0.5:      score -= 10
-        elif skew > 0.25:     score -= 5
+        if skew > 1.5:
+            score -= 35
+        elif skew > 1.0:
+            score -= 20
+        elif skew > 0.5:
+            score -= 10
+        elif skew > 0.25:
+            score -= 5
 
         # 厚尾惩罚 (模型在某些样本上表现显著更差)
-        if kurt > 4.0:        score -= 20
-        elif kurt > 3.5:      score -= 10
+        if kurt > 4.0:
+            score -= 20
+        elif kurt > 3.5:
+            score -= 10
 
         # RMSE/MAE 比值 — 远大于1说明有异常大误差样本
         if mae > 0 and rmse > 0:
             ratio = rmse / mae
-            if ratio > 2.5:   score -= 15
-            elif ratio > 1.8: score -= 8
+            if ratio > 2.5:
+                score -= 15
+            elif ratio > 1.8:
+                score -= 8
 
         return round(max(0, min(100, score)), 1)
 
@@ -931,25 +1105,29 @@ class ParameterGuidanceService:
           - noise_ratio: DBSCAN 噪声点比例
         """
         cluster_sizes = final_metrics.get('cluster_sizes', None)
-        noise_ratio = final_metrics.get('noise_ratio',
-                                        final_metrics.get('noise_points_ratio', 0))
+        noise_ratio = final_metrics.get('noise_ratio', final_metrics.get('noise_points_ratio', 0))
 
         if cluster_sizes and len(cluster_sizes) >= 2:
             sizes = [s for s in cluster_sizes if s > 0]
             if len(sizes) >= 2:
                 balance_ratio = min(sizes) / max(sizes) if max(sizes) > 0 else 0
-                if balance_ratio >= 0.7:  score = 95.0
-                elif balance_ratio >= 0.5: score = 85.0
-                elif balance_ratio >= 0.3: score = 65.0
-                elif balance_ratio >= 0.15: score = 40.0
-                elif balance_ratio >= 0.05: score = 20.0
-                else:                      score = 8.0
+                if balance_ratio >= 0.7:
+                    score = 95.0
+                elif balance_ratio >= 0.5:
+                    score = 85.0
+                elif balance_ratio >= 0.3:
+                    score = 65.0
+                elif balance_ratio >= 0.15:
+                    score = 40.0
+                elif balance_ratio >= 0.05:
+                    score = 20.0
+                else:
+                    score = 8.0
             else:
                 score = 30.0  # 仅1个有效簇 — 几乎肯定有问题
         else:
             # 无簇大小数据 → 从 silhouette 推算
-            sil = final_metrics.get('test_silhouette_score',
-                                    final_metrics.get('silhouette_score', 0.3))
+            sil = final_metrics.get('test_silhouette_score', final_metrics.get('silhouette_score', 0.3))
             n_clusters = final_metrics.get('n_clusters', 3)
             base = sil * 100
             if n_clusters > 10:
@@ -957,9 +1135,12 @@ class ParameterGuidanceService:
             score = max(10, min(95, base))
 
         # 噪声点惩罚 (DBSCAN)
-        if noise_ratio > 0.30:  score -= 30
-        elif noise_ratio > 0.15: score -= 15
-        elif noise_ratio > 0.08: score -= 8
+        if noise_ratio > 0.30:
+            score -= 30
+        elif noise_ratio > 0.15:
+            score -= 15
+        elif noise_ratio > 0.08:
+            score -= 8
 
         return round(max(0, min(100, score)), 1)
 
@@ -968,8 +1149,7 @@ class ParameterGuidanceService:
     # ==================================================================
 
     @staticmethod
-    def _score_generalization_v2(history, final_metrics, task_type,
-                                  hyperparams, dataset_info) -> float:
+    def _score_generalization_v2(history, final_metrics, task_type, hyperparams, dataset_info) -> float:
         """泛化能力评分 (100 = 完美泛化)"""
         score = 80.0  # 基础分
 
@@ -977,25 +1157,37 @@ class ParameterGuidanceService:
         n = len(history)
         if n >= 2:
             if task_type == 'classification':
-                train_vals = [m.get('train_accuracy', m.get('accuracy')) for m in history
-                              if m.get('train_accuracy') is not None or m.get('accuracy') is not None]
+                train_vals = [
+                    m.get('train_accuracy', m.get('accuracy'))
+                    for m in history
+                    if m.get('train_accuracy') is not None or m.get('accuracy') is not None
+                ]
                 test_val = final_metrics.get('test_accuracy', final_metrics.get('accuracy', 0))
                 if train_vals:
                     avg_train = float(np.mean(train_vals))
                     gap = avg_train - test_val
-                    if gap > 0.15:     score -= 30
-                    elif gap > 0.08:   score -= 15
-                    elif gap > 0.03:   score -= 5
+                    if gap > 0.15:
+                        score -= 30
+                    elif gap > 0.08:
+                        score -= 15
+                    elif gap > 0.03:
+                        score -= 5
             elif task_type == 'regression':
-                train_r2s = [m.get('train_r2', m.get('r2')) for m in history
-                             if m.get('train_r2') is not None or m.get('r2') is not None]
+                train_r2s = [
+                    m.get('train_r2', m.get('r2'))
+                    for m in history
+                    if m.get('train_r2') is not None or m.get('r2') is not None
+                ]
                 test_r2 = final_metrics.get('test_r2', final_metrics.get('r2', 0))
                 if train_r2s:
                     avg_train = float(np.mean(train_r2s))
                     gap = avg_train - test_r2
-                    if gap > 0.20:    score -= 30
-                    elif gap > 0.10:  score -= 15
-                    elif gap > 0.05:  score -= 5
+                    if gap > 0.20:
+                        score -= 30
+                    elif gap > 0.10:
+                        score -= 15
+                    elif gap > 0.05:
+                        score -= 5
 
         # 模型容量-数据量匹配 (如果可用)
         n_samples = dataset_info.get('n_samples', 0) if dataset_info else 0
@@ -1003,9 +1195,12 @@ class ParameterGuidanceService:
         if hl and n_samples > 0:
             total_params_est = sum(hl) * 100  # 粗略估计
             ratio = n_samples / max(total_params_est, 1)
-            if ratio < 1:     score -= 15  # 参数多于样本 → 高风险过拟合
-            elif ratio < 5:   score -= 5
-            elif ratio > 50:  score += 5   # 充足数据
+            if ratio < 1:
+                score -= 15  # 参数多于样本 → 高风险过拟合
+            elif ratio < 5:
+                score -= 5
+            elif ratio > 50:
+                score += 5  # 充足数据
 
         return round(max(0, min(100, score)), 1)
 
@@ -1046,12 +1241,14 @@ class ParameterGuidanceService:
             else:
                 continue  # 健康, 不生成 issue
 
-            issues.append({
-                'type': f'low_{dim}',
-                'severity': severity,
-                'message': f'{title} ({level_text}): {desc} (评分 {score:.0f}/100)',
-                'category': 'scientific' if dim == 'absolute_perf' else 'nuisance',
-            })
+            issues.append(
+                {
+                    'type': f'low_{dim}',
+                    'severity': severity,
+                    'message': f'{title} ({level_text}): {desc} (评分 {score:.0f}/100)',
+                    'category': 'scientific' if dim == 'absolute_perf' else 'nuisance',
+                }
+            )
         return issues
 
     # ==================================================================
@@ -1065,36 +1262,55 @@ class ParameterGuidanceService:
 
         # 反模式1: 无有效Baseline — v2.1 修复: 已有指标即为有效baseline
         has_meaningful_metrics = bool(
-            final_metrics.get('accuracy') or final_metrics.get('f1_score') or
-            final_metrics.get('r2') is not None or
-            final_metrics.get('silhouette_score') or
-            final_metrics.get('test_accuracy') or final_metrics.get('test_f1_score') or
-            final_metrics.get('test_r2') is not None or
-            final_metrics.get('test_silhouette_score')
+            final_metrics.get('accuracy')
+            or final_metrics.get('f1_score')
+            or final_metrics.get('r2') is not None
+            or final_metrics.get('silhouette_score')
+            or final_metrics.get('test_accuracy')
+            or final_metrics.get('test_f1_score')
+            or final_metrics.get('test_r2') is not None
+            or final_metrics.get('test_silhouette_score')
         )
-        if not hyperparams.get('tuned') and not hyperparams.get('baseline_score'):
-            if not has_meaningful_metrics and len(history) < 2:
-                found.append({
-                    'type': 'no_baseline',
-                    'name': '缺少有效Baseline',
-                    'severity': 'medium',
-                    'message': '未检测到有效指标 — 模型可能未成功训练或指标为空',
-                    'fix': '检查训练日志，确认模型成功完成训练并产生了指标',
-                })
+        no_tuned = not hyperparams.get('tuned')
+        no_baseline = not hyperparams.get('baseline_score')
+        no_metrics_and_history = not has_meaningful_metrics and len(history) < 2
+        if no_tuned and no_baseline and no_metrics_and_history:
+            found.append({
+                'type': 'no_baseline',
+                'name': '缺少有效Baseline',
+                'severity': 'medium',
+                'message': '未检测到有效指标 — 模型可能未成功训练或指标为空',
+                'fix': '检查训练日志，确认模型成功完成训练并产生了指标',
+            })
 
         # 反模式2: GridSearch高维
         if hyperparams.get('tuning_method') == 'grid' and hyperparams.get('tuned'):
-            hp_count = len([k for k in hyperparams if k not in
-                           ('task_type', 'algorithm', 'target_column', 'tuned',
-                            'tuning_method', 'best_cv_score', 'tuning_cv_folds')])
+            hp_count = len(
+                [
+                    k
+                    for k in hyperparams
+                    if k
+                    not in (
+                        'task_type',
+                        'algorithm',
+                        'target_column',
+                        'tuned',
+                        'tuning_method',
+                        'best_cv_score',
+                        'tuning_cv_folds',
+                    )
+                ]
+            )
             if hp_count > 3:
-                found.append({
-                    'type': 'grid_search_high_dim',
-                    'name': '高维Grid Search',
-                    'severity': 'medium',
-                    'message': f'对{hp_count}个超参数使用Grid Search — 推荐切换到Optuna TPE Bayesian Optimization',
-                    'fix': '使用Optuna进行贝叶斯优化，或至少切换到Random Search',
-                })
+                found.append(
+                    {
+                        'type': 'grid_search_high_dim',
+                        'name': '高维Grid Search',
+                        'severity': 'medium',
+                        'message': f'对{hp_count}个超参数使用Grid Search — 推荐切换到Optuna TPE Bayesian Optimization',
+                        'fix': '使用Optuna进行贝叶斯优化，或至少切换到Random Search',
+                    }
+                )
 
         # 反模式3: 测试集泄露风险
         if final_metrics:
@@ -1102,13 +1318,15 @@ class ParameterGuidanceService:
             suspicious = {'test_accuracy', 'test_f1', 'test_r2'} & metric_keys
             if suspicious and len(history) > 10:
                 # 多轮调整后还在报告test指标 → 可能存在test调参
-                found.append({
-                    'type': 'potential_test_leak',
-                    'name': '潜在的测试集过拟合',
-                    'severity': 'low',
-                    'message': '警告: 经过多轮训练后仍报告test指标 — 确保test集仅用于最终评估',
-                    'fix': '采用嵌套CV: 外层CV评估泛化性能，内层CV选择超参数',
-                })
+                found.append(
+                    {
+                        'type': 'potential_test_leak',
+                        'name': '潜在的测试集过拟合',
+                        'severity': 'low',
+                        'message': '警告: 经过多轮训练后仍报告test指标 — 确保test集仅用于最终评估',
+                        'fix': '采用嵌套CV: 外层CV评估泛化性能，内层CV选择超参数',
+                    }
+                )
 
         return found
 
@@ -1117,8 +1335,7 @@ class ParameterGuidanceService:
     # ==================================================================
 
     @staticmethod
-    def _generate_scientific_suggestions(issues, sub_scores, task_type,
-                                          hyperparams, health_score) -> list:
+    def _generate_scientific_suggestions(issues, sub_scores, task_type, hyperparams, health_score) -> list:
         """按科学调参顺序生成建议 (Phase 1→5)
 
         v2.1: 降低触发阈值 + 算法感知 — 不再对树模型建议dropout/batch_size
@@ -1128,10 +1345,14 @@ class ParameterGuidanceService:
         algo_lower = algorithm.lower()
 
         # 算法分类 (决定哪些建议有意义)
-        _TREE_ALGOS = {'random_forest', 'random_forest_regressor', 'gradient_boosting',
-                       'gradient_boosting_regressor', 'decision_tree'}
+        _TREE_ALGOS = {
+            'random_forest',
+            'random_forest_regressor',
+            'gradient_boosting',
+            'gradient_boosting_regressor',
+            'decision_tree',
+        }
         _LINEAR_ALGOS = {'logistic_regression', 'linear_regression', 'ridge', 'svm', 'svr'}
-        _KNN_ALGOS = {'knn', 'knn_regressor'}
         _CLUSTER_ALGOS = {'kmeans', 'dbscan', 'agglomerative', 'minibatch_kmeans'}
         _DL_ALGOS = {'mlp', 'transformer_bert'}
         is_tree = algo_lower in _TREE_ALGOS
@@ -1143,146 +1364,196 @@ class ParameterGuidanceService:
             current_lr = hyperparams.get('learning_rate', 0.001)
             if is_tree and algo_lower.startswith('gradient'):
                 # GBDT: 调整learning_rate
-                suggestions.append({
-                    'priority': 1, 'phase': 1,
-                    'param': 'learning_rate', 'action': 'decrease',
-                    'current': current_lr,
-                    'suggested': round(max(current_lr / 3, 1e-6), 6),
-                    'category': 'nuisance',
-                    'reason': f'收敛质量评分偏低({sub_scores["convergence_quality"]:.0f}/100) — '
-                              f'降低GBDT学习率+增加n_estimators补偿',
-                    'method': 'GBDT: 学习率减半 → n_estimators加倍',
-                })
+                suggestions.append(
+                    {
+                        'priority': 1,
+                        'phase': 1,
+                        'param': 'learning_rate',
+                        'action': 'decrease',
+                        'current': current_lr,
+                        'suggested': round(max(current_lr / 3, 1e-6), 6),
+                        'category': 'nuisance',
+                        'reason': f'收敛质量评分偏低({sub_scores["convergence_quality"]:.0f}/100) — '
+                        f'降低GBDT学习率+增加n_estimators补偿',
+                        'method': 'GBDT: 学习率减半 → n_estimators加倍',
+                    }
+                )
             elif is_dl:
-                suggestions.append({
-                    'priority': 1, 'phase': 1,
-                    'param': 'learning_rate', 'action': 'decrease',
-                    'current': current_lr,
-                    'suggested': round(max(current_lr / 5, 1e-6), 6),
-                    'category': 'nuisance',
-                    'reason': f'收敛质量评分偏低({sub_scores["convergence_quality"]:.0f}/100) — '
-                              f'优先调整学习率 (Phase 1: 最重要的参数)',
-                    'method': '运行LR Finder确定最佳LR范围',
-                })
+                suggestions.append(
+                    {
+                        'priority': 1,
+                        'phase': 1,
+                        'param': 'learning_rate',
+                        'action': 'decrease',
+                        'current': current_lr,
+                        'suggested': round(max(current_lr / 5, 1e-6), 6),
+                        'category': 'nuisance',
+                        'reason': f'收敛质量评分偏低({sub_scores["convergence_quality"]:.0f}/100) — '
+                        f'优先调整学习率 (Phase 1: 最重要的参数)',
+                        'method': '运行LR Finder确定最佳LR范围',
+                    }
+                )
 
         # 过拟合风险高 → 正则化 (不同算法有不同正则化手段)
         if sub_scores.get('overfitting_risk', 100) < 75:
             if is_tree:
-                suggestions.append({
-                    'priority': 2, 'phase': 3,
-                    'param': 'max_depth', 'action': 'decrease',
-                    'current': hyperparams.get('max_depth', 'None'),
-                    'suggested': hyperparams.get('max_depth') or 10,
-                    'category': 'scientific',
-                    'reason': f'过拟合风险评分({sub_scores["overfitting_risk"]:.0f}/100) — '
-                              f'树模型: 限制max_depth是最有效的正则化手段',
-                })
-                suggestions.append({
-                    'priority': 3, 'phase': 3,
-                    'param': 'min_samples_split', 'action': 'increase',
-                    'current': hyperparams.get('min_samples_split', 2),
-                    'suggested': min(hyperparams.get('min_samples_split', 2) * 3, 20),
-                    'category': 'scientific',
-                    'reason': '增大min_samples_split进一步防止过拟合',
-                })
+                suggestions.append(
+                    {
+                        'priority': 2,
+                        'phase': 3,
+                        'param': 'max_depth',
+                        'action': 'decrease',
+                        'current': hyperparams.get('max_depth', 'None'),
+                        'suggested': hyperparams.get('max_depth') or 10,
+                        'category': 'scientific',
+                        'reason': f'过拟合风险评分({sub_scores["overfitting_risk"]:.0f}/100) — '
+                        f'树模型: 限制max_depth是最有效的正则化手段',
+                    }
+                )
+                suggestions.append(
+                    {
+                        'priority': 3,
+                        'phase': 3,
+                        'param': 'min_samples_split',
+                        'action': 'increase',
+                        'current': hyperparams.get('min_samples_split', 2),
+                        'suggested': min(hyperparams.get('min_samples_split', 2) * 3, 20),
+                        'category': 'scientific',
+                        'reason': '增大min_samples_split进一步防止过拟合',
+                    }
+                )
             elif is_dl:
-                suggestions.append({
-                    'priority': 2, 'phase': 4,
-                    'param': 'weight_decay', 'action': 'increase',
-                    'current': hyperparams.get('weight_decay', 1e-4),
-                    'suggested': hyperparams.get('weight_decay', 1e-4) * 5,
-                    'category': 'nuisance',
-                    'reason': f'过拟合风险评分({sub_scores["overfitting_risk"]:.0f}/100) — '
-                              f'Phase 4: 增强weight_decay正则化',
-                })
-                suggestions.append({
-                    'priority': 3, 'phase': 5,
-                    'param': 'dropout', 'action': 'increase',
-                    'current': hyperparams.get('dropout', 0.3),
-                    'suggested': min(0.7, hyperparams.get('dropout', 0.3) + 0.2),
-                    'category': 'nuisance',
-                    'reason': '配合增加dropout形成双重正则化防线',
-                })
+                suggestions.append(
+                    {
+                        'priority': 2,
+                        'phase': 4,
+                        'param': 'weight_decay',
+                        'action': 'increase',
+                        'current': hyperparams.get('weight_decay', 1e-4),
+                        'suggested': hyperparams.get('weight_decay', 1e-4) * 5,
+                        'category': 'nuisance',
+                        'reason': f'过拟合风险评分({sub_scores["overfitting_risk"]:.0f}/100) — '
+                        f'Phase 4: 增强weight_decay正则化',
+                    }
+                )
+                suggestions.append(
+                    {
+                        'priority': 3,
+                        'phase': 5,
+                        'param': 'dropout',
+                        'action': 'increase',
+                        'current': hyperparams.get('dropout', 0.3),
+                        'suggested': min(0.7, hyperparams.get('dropout', 0.3) + 0.2),
+                        'category': 'nuisance',
+                        'reason': '配合增加dropout形成双重正则化防线',
+                    }
+                )
             elif not is_cluster:
                 # SVM/线性模型: 增强C/alpha
-                suggestions.append({
-                    'priority': 2, 'phase': 4,
-                    'param': 'C' if 'svm' in algo_lower else 'alpha',
-                    'action': 'decrease',
-                    'current': hyperparams.get('C', hyperparams.get('alpha', 1.0)),
-                    'suggested': round(hyperparams.get('C', hyperparams.get('alpha', 1.0)) / 5, 4),
-                    'category': 'nuisance',
-                    'reason': f'过拟合风险评分({sub_scores["overfitting_risk"]:.0f}/100) — '
-                              f'增强L2正则化 (减小C/alpha = 更强正则化)',
-                })
+                suggestions.append(
+                    {
+                        'priority': 2,
+                        'phase': 4,
+                        'param': 'C' if 'svm' in algo_lower else 'alpha',
+                        'action': 'decrease',
+                        'current': hyperparams.get('C', hyperparams.get('alpha', 1.0)),
+                        'suggested': round(hyperparams.get('C', hyperparams.get('alpha', 1.0)) / 5, 4),
+                        'category': 'nuisance',
+                        'reason': f'过拟合风险评分({sub_scores["overfitting_risk"]:.0f}/100) — '
+                        f'增强L2正则化 (减小C/alpha = 更强正则化)',
+                    }
+                )
 
         # 类别不均衡 → class_weight
         if sub_scores.get('class_balance', 100) < 80 and task_type == 'classification':
-            suggestions.append({
-                'priority': 3, 'phase': 1,
-                'param': 'class_weight', 'action': 'enable',
-                'suggested': 'balanced',
-                'category': 'scientific',
-                'reason': f'类别均衡评分偏低({sub_scores["class_balance"]:.0f}/100) — '
-                          f'启用class_weight="balanced"处理类别不平衡',
-            })
+            suggestions.append(
+                {
+                    'priority': 3,
+                    'phase': 1,
+                    'param': 'class_weight',
+                    'action': 'enable',
+                    'suggested': 'balanced',
+                    'category': 'scientific',
+                    'reason': f'类别均衡评分偏低({sub_scores["class_balance"]:.0f}/100) — '
+                    f'启用class_weight="balanced"处理类别不平衡',
+                }
+            )
 
         # 绝对性能低 → 提升模型容量
         if sub_scores.get('absolute_perf', 100) < 70:
             if is_tree:
-                suggestions.append({
-                    'priority': 4, 'phase': 3,
-                    'param': 'n_estimators', 'action': 'increase',
-                    'current': hyperparams.get('n_estimators', 200),
-                    'suggested': min(hyperparams.get('n_estimators', 200) * 2, 500),
-                    'category': 'scientific',
-                    'reason': f'绝对性能评分偏低({sub_scores["absolute_perf"]:.0f}/100) — '
-                              f'增加树数量提升模型表达能力',
-                })
+                suggestions.append(
+                    {
+                        'priority': 4,
+                        'phase': 3,
+                        'param': 'n_estimators',
+                        'action': 'increase',
+                        'current': hyperparams.get('n_estimators', 200),
+                        'suggested': min(hyperparams.get('n_estimators', 200) * 2, 500),
+                        'category': 'scientific',
+                        'reason': f'绝对性能评分偏低({sub_scores["absolute_perf"]:.0f}/100) — '
+                        f'增加树数量提升模型表达能力',
+                    }
+                )
             elif is_dl:
                 hl = hyperparams.get('hidden_layers', [128, 64, 32])
                 wider = [min(h * 2, 1024) for h in hl]
-                suggestions.append({
-                    'priority': 4, 'phase': 3,
-                    'param': 'hidden_layers', 'action': 'widen',
-                    'current': hl,
-                    'suggested': wider,
-                    'category': 'scientific',
-                    'reason': f'绝对性能评分偏低({sub_scores["absolute_perf"]:.0f}/100) — '
-                              f'加宽网络提升模型容量',
-                })
+                suggestions.append(
+                    {
+                        'priority': 4,
+                        'phase': 3,
+                        'param': 'hidden_layers',
+                        'action': 'widen',
+                        'current': hl,
+                        'suggested': wider,
+                        'category': 'scientific',
+                        'reason': f'绝对性能评分偏低({sub_scores["absolute_perf"]:.0f}/100) — 加宽网络提升模型容量',
+                    }
+                )
             elif is_cluster:
-                suggestions.append({
-                    'priority': 4, 'phase': 3,
-                    'param': 'algorithm', 'action': 'change',
-                    'suggested': 'kmeans' if algo_lower != 'kmeans' else 'agglomerative',
-                    'category': 'scientific',
-                    'reason': f'聚类质量评分偏低({sub_scores["absolute_perf"]:.0f}/100) — '
-                              f'尝试不同聚类算法。K-Means适合球形簇，DBSCAN适合任意形状',
-                })
+                suggestions.append(
+                    {
+                        'priority': 4,
+                        'phase': 3,
+                        'param': 'algorithm',
+                        'action': 'change',
+                        'suggested': 'kmeans' if algo_lower != 'kmeans' else 'agglomerative',
+                        'category': 'scientific',
+                        'reason': f'聚类质量评分偏低({sub_scores["absolute_perf"]:.0f}/100) — '
+                        f'尝试不同聚类算法。K-Means适合球形簇，DBSCAN适合任意形状',
+                    }
+                )
             elif algo_lower in _LINEAR_ALGOS:
-                suggestions.append({
-                    'priority': 4, 'phase': 3,
-                    'param': 'algorithm', 'action': 'change',
-                    'suggested': 'random_forest',
-                    'category': 'scientific',
-                    'reason': f'绝对性能评分偏低({sub_scores["absolute_perf"]:.0f}/100) — '
-                              f'线性模型容量有限，建议升级到RandomForest/GBDT',
-                })
+                suggestions.append(
+                    {
+                        'priority': 4,
+                        'phase': 3,
+                        'param': 'algorithm',
+                        'action': 'change',
+                        'suggested': 'random_forest',
+                        'category': 'scientific',
+                        'reason': f'绝对性能评分偏低({sub_scores["absolute_perf"]:.0f}/100) — '
+                        f'线性模型容量有限，建议升级到RandomForest/GBDT',
+                    }
+                )
 
         # 泛化能力低
         if sub_scores.get('generalization', 100) < 75:
             n_samples = hyperparams.get('_n_samples', 0)
             if n_samples < 1000:
-                suggestions.append({
-                    'priority': 5, 'phase': 5,
-                    'param': 'test_size', 'action': 'increase',
-                    'current': hyperparams.get('test_size', 0.2),
-                    'suggested': 0.3,
-                    'category': 'fixed',
-                    'reason': f'泛化能力评分偏低({sub_scores["generalization"]:.0f}/100) + '
-                              f'小样本({n_samples}) — 增加测试集比例以获得更可靠的泛化估计',
-                })
+                suggestions.append(
+                    {
+                        'priority': 5,
+                        'phase': 5,
+                        'param': 'test_size',
+                        'action': 'increase',
+                        'current': hyperparams.get('test_size', 0.2),
+                        'suggested': 0.3,
+                        'category': 'fixed',
+                        'reason': f'泛化能力评分偏低({sub_scores["generalization"]:.0f}/100) + '
+                        f'小样本({n_samples}) — 增加测试集比例以获得更可靠的泛化估计',
+                    }
+                )
 
         return suggestions
 
@@ -1305,45 +1576,50 @@ class ParameterGuidanceService:
         }
 
         # 识别弱项 (评分 < 80 的维度)
-        weak_dims = [(dim_names.get(k, k), v) for k, v in sub_scores.items()
-                     if v < 80 and k != 'overfitting_risk']
-        weak_dims_str = '、'.join(f'{name}({score:.0f}/100)'
-                                  for name, score in weak_dims[:3]) if weak_dims else '无'
+        weak_dims = [(dim_names.get(k, k), v) for k, v in sub_scores.items() if v < 80 and k != 'overfitting_risk']
+        weak_dims_str = '、'.join(f'{name}({score:.0f}/100)' for name, score in weak_dims[:3]) if weak_dims else '无'
 
-        task_cn = {'classification': '分类', 'regression': '回归',
-                   'clustering': '聚类'}.get(task_type, task_type)
+        task_cn = {'classification': '分类', 'regression': '回归', 'clustering': '聚类'}.get(task_type, task_type)
 
         if health_score >= 90:
-            return (f"[{task_cn}任务] 模型表现卓越 (健康度 {health_score:.0f}/100)。"
-                    f"各项指标优秀，已达到生产部署标准。")
+            return f'[{task_cn}任务] 模型表现卓越 (健康度 {health_score:.0f}/100)。各项指标优秀，已达到生产部署标准。'
         elif health_score >= 75:
-            return (f"[{task_cn}任务] 模型表现良好 (健康度 {health_score:.0f}/100)。"
-                    f"弱项维度: {weak_dims_str}。"
-                    f"按下方路线图微调可预期提升1-3个百分点。")
+            return (
+                f'[{task_cn}任务] 模型表现良好 (健康度 {health_score:.0f}/100)。'
+                f'弱项维度: {weak_dims_str}。'
+                f'按下方路线图微调可预期提升1-3个百分点。'
+            )
         elif health_score >= 60:
-            return (f"[{task_cn}任务] 模型表现一般 (健康度 {health_score:.0f}/100)。"
-                    f"弱项维度: {weak_dims_str}。"
-                    f"检测到 {len(issues)} 个可改进问题，建议按下方路线图逐步优化。")
+            return (
+                f'[{task_cn}任务] 模型表现一般 (健康度 {health_score:.0f}/100)。'
+                f'弱项维度: {weak_dims_str}。'
+                f'检测到 {len(issues)} 个可改进问题，建议按下方路线图逐步优化。'
+            )
         elif health_score >= 40:
-            return (f"[{task_cn}任务] 模型表现偏差 (健康度 {health_score:.0f}/100)。"
-                    f"核心问题: {dim_names.get(worst_dim, '?')} 仅 {worst_score:.0f}/100。"
-                    f"弱项维度: {weak_dims_str}。需要系统性优化。")
+            return (
+                f'[{task_cn}任务] 模型表现偏差 (健康度 {health_score:.0f}/100)。'
+                f'核心问题: {dim_names.get(worst_dim, "?")} 仅 {worst_score:.0f}/100。'
+                f'弱项维度: {weak_dims_str}。需要系统性优化。'
+            )
         elif health_score >= 25:
-            return (f"[{task_cn}任务] 模型表现很差 (健康度 {health_score:.0f}/100)，"
-                    f"基本不具备实用价值。建议: "
-                    f"1) 重新检查数据质量 2) 使用RF/GB建立baseline 3) 特征选择去噪。")
+            return (
+                f'[{task_cn}任务] 模型表现很差 (健康度 {health_score:.0f}/100)，'
+                f'基本不具备实用价值。建议: '
+                f'1) 重新检查数据质量 2) 使用RF/GB建立baseline 3) 特征选择去噪。'
+            )
         else:
-            return (f"[{task_cn}任务] 模型几乎无效 (健康度 {health_score:.0f}/100)。"
-                    f"请确认: 1) 目标列设置正确? 2) 数据包含有效标签? "
-                    f"3) 数据格式无问题? 建议从LogisticRegression/Ridge baseline开始。")
+            return (
+                f'[{task_cn}任务] 模型几乎无效 (健康度 {health_score:.0f}/100)。'
+                f'请确认: 1) 目标列设置正确? 2) 数据包含有效标签? '
+                f'3) 数据格式无问题? 建议从LogisticRegression/Ridge baseline开始。'
+            )
 
     # ==================================================================
     # Step 7: 下一步操作 + 调参路线图
     # ==================================================================
 
     @staticmethod
-    def _generate_scientific_next_steps(health_score, sub_scores, issues,
-                                         suggestions, hyperparams) -> list:
+    def _generate_scientific_next_steps(health_score, sub_scores, issues, suggestions, hyperparams) -> list:
         """生成科学调参步骤清单 — v2.1 降低触发阈值 + 算法感知"""
         steps = []
         algorithm = hyperparams.get('algorithm', '')
@@ -1356,53 +1632,77 @@ class ParameterGuidanceService:
 
         # 第1步: 根据问题严重程度生成针对性建议
         if cq < 75 and not is_cluster:
-            steps.append({
-                'step': 1, 'phase': 'Phase 1',
-                'action': '调整学习率 (最重要参数)',
-                'detail': f'收敛质量 {cq:.0f}/100 → 运行LR Finder找到最佳LR范围',
-                'icon': '🔍',
-            })
+            steps.append(
+                {
+                    'step': 1,
+                    'phase': 'Phase 1',
+                    'action': '调整学习率 (最重要参数)',
+                    'detail': f'收敛质量 {cq:.0f}/100 → 运行LR Finder找到最佳LR范围',
+                    'icon': '🔍',
+                }
+            )
 
         if of < 75 and not is_cluster:
-            steps.append({
-                'step': 2, 'phase': 'Phase 4-5',
-                'action': '增强正则化',
-                'detail': f'过拟合风险 {of:.0f}/100 → 依次调整正则化参数' +
-                          (' (weight_decay → dropout)' if algo_lower in ('mlp',) else
-                           ' (max_depth → min_samples_split)' if algo_lower.startswith('random_forest') else
-                           ' (C/alpha → 简化模型)'),
-                'icon': '🛡️',
-            })
+            steps.append(
+                {
+                    'step': 2,
+                    'phase': 'Phase 4-5',
+                    'action': '增强正则化',
+                    'detail': f'过拟合风险 {of:.0f}/100 → 依次调整正则化参数'
+                    + (
+                        ' (weight_decay → dropout)'
+                        if algo_lower in ('mlp',)
+                        else ' (max_depth → min_samples_split)'
+                        if algo_lower.startswith('random_forest')
+                        else ' (C/alpha → 简化模型)'
+                    ),
+                    'icon': '🛡️',
+                }
+            )
 
         if ap < 75 or len(issues) > 0:
-            steps.append({
-                'step': 3 if steps else 1, 'phase': 'Phase 3',
-                'action': '提升模型容量/切换算法',
-                'detail': f'绝对性能 {ap:.0f}/100 → ' +
-                          ('增加n_estimators或切换GBDT' if algo_lower in ('random_forest', 'random_forest_regressor') else
-                           '尝试更深的网络' if algo_lower in ('mlp',) else
-                           '尝试不同聚类算法' if is_cluster else
-                           '考虑升级到集成方法(RandomForest/GBDT)'),
-                'icon': '📈',
-            })
+            steps.append(
+                {
+                    'step': 3 if steps else 1,
+                    'phase': 'Phase 3',
+                    'action': '提升模型容量/切换算法',
+                    'detail': f'绝对性能 {ap:.0f}/100 → '
+                    + (
+                        '增加n_estimators或切换GBDT'
+                        if algo_lower in ('random_forest', 'random_forest_regressor')
+                        else '尝试更深的网络'
+                        if algo_lower in ('mlp',)
+                        else '尝试不同聚类算法'
+                        if is_cluster
+                        else '考虑升级到集成方法(RandomForest/GBDT)'
+                    ),
+                    'icon': '📈',
+                }
+            )
 
         # Optuna建议 — 有多个issue时推荐
         if health_score < 85 and len(issues) >= 1:
-            steps.append({
-                'step': 4 if steps else 1, 'phase': '进阶',
-                'action': '使用Optuna自动搜索',
-                'detail': '对确定的2-3个关键超参数运行Optuna TPE搜索 (50-100 trials)',
-                'icon': '🤖',
-            })
+            steps.append(
+                {
+                    'step': 4 if steps else 1,
+                    'phase': '进阶',
+                    'action': '使用Optuna自动搜索',
+                    'detail': '对确定的2-3个关键超参数运行Optuna TPE搜索 (50-100 trials)',
+                    'icon': '🤖',
+                }
+            )
 
         # 良好模型 — 给出部署建议而非优化建议
         if health_score >= 85:
-            steps.append({
-                'step': len(steps) + 1, 'phase': '部署',
-                'action': '模型已达到生产标准',
-                'detail': '可进行: 模型压缩/量化 → 部署上线 → 持续监控drift',
-                'icon': '✅',
-            })
+            steps.append(
+                {
+                    'step': len(steps) + 1,
+                    'phase': '部署',
+                    'action': '模型已达到生产标准',
+                    'detail': '可进行: 模型压缩/量化 → 部署上线 → 持续监控drift',
+                    'icon': '✅',
+                }
+            )
 
         return steps
 
@@ -1418,10 +1718,14 @@ class ParameterGuidanceService:
         algo_lower = algorithm.lower()
 
         # 算法感知: 定义各Phase对哪些算法有意义
-        _DL_ONLY = {'mlp', 'transformer_bert'}   # dropout/batch_size/lr仅对DL有意义
-        _TREE_ONLY = {'random_forest', 'random_forest_regressor',
-                      'gradient_boosting', 'gradient_boosting_regressor',
-                      'decision_tree'}            # n_estimators/max_depth仅对树模型有意义
+        _DL_ONLY = {'mlp', 'transformer_bert'}  # dropout/batch_size/lr仅对DL有意义
+        _TREE_ONLY = {
+            'random_forest',
+            'random_forest_regressor',
+            'gradient_boosting',
+            'gradient_boosting_regressor',
+            'decision_tree',
+        }  # n_estimators/max_depth仅对树模型有意义
         _CLUSTER_ALGOS = {'kmeans', 'dbscan', 'agglomerative', 'minibatch_kmeans'}
 
         is_dl = algo_lower in _DL_ONLY
@@ -1431,24 +1735,42 @@ class ParameterGuidanceService:
         # ── 聚类专属路线图 ──
         if is_cluster:
             return [
-                {'phase': 1, 'param': 'n_clusters', 'name': '簇数选择',
-                 'method': 'Elbow Method + Silhouette Analysis',
-                 'reason': '确定最佳簇数是聚类最重要的决策',
-                 'urgency': 'high' if sub_scores.get('absolute_perf', 100) < 70 else 'medium',
-                 'note': f'当前silhouette仅{sub_scores.get("absolute_perf", 0):.0f}/100 — 尝试不同k值' if sub_scores.get('absolute_perf', 100) < 70 else '通过Elbow曲线找到拐点'},
-                {'phase': 2, 'param': 'algorithm', 'name': '聚类算法选择',
-                 'method': '对比 K-Means vs DBSCAN vs Agglomerative',
-                 'reason': '不同算法假设不同的簇形状 — K-Means球形/DBSCAN任意形/层次树形',
-                 'urgency': 'medium',
-                 'note': f'当前{algorithm}, 建议对比其他算法'},
-                {'phase': 3, 'param': 'init', 'name': '初始化方法',
-                 'method': 'k-means++ vs random',
-                 'reason': 'k-means++ 提供更好的初始质心，通常收敛到更优解',
-                 'urgency': 'low' if algo_lower != 'kmeans' else 'medium'},
-                {'phase': 4, 'param': 'max_iter', 'name': '最大迭代次数',
-                 'method': '逐步增加至收敛稳定 (100 → 500)',
-                 'reason': '复杂数据集需要更多迭代才能收敛',
-                 'urgency': 'low'},
+                {
+                    'phase': 1,
+                    'param': 'n_clusters',
+                    'name': '簇数选择',
+                    'method': 'Elbow Method + Silhouette Analysis',
+                    'reason': '确定最佳簇数是聚类最重要的决策',
+                    'urgency': 'high' if sub_scores.get('absolute_perf', 100) < 70 else 'medium',
+                    'note': f'当前silhouette仅{sub_scores.get("absolute_perf", 0):.0f}/100 — 尝试不同k值'
+                    if sub_scores.get('absolute_perf', 100) < 70
+                    else '通过Elbow曲线找到拐点',
+                },
+                {
+                    'phase': 2,
+                    'param': 'algorithm',
+                    'name': '聚类算法选择',
+                    'method': '对比 K-Means vs DBSCAN vs Agglomerative',
+                    'reason': '不同算法假设不同的簇形状 — K-Means球形/DBSCAN任意形/层次树形',
+                    'urgency': 'medium',
+                    'note': f'当前{algorithm}, 建议对比其他算法',
+                },
+                {
+                    'phase': 3,
+                    'param': 'init',
+                    'name': '初始化方法',
+                    'method': 'k-means++ vs random',
+                    'reason': 'k-means++ 提供更好的初始质心，通常收敛到更优解',
+                    'urgency': 'low' if algo_lower != 'kmeans' else 'medium',
+                },
+                {
+                    'phase': 4,
+                    'param': 'max_iter',
+                    'name': '最大迭代次数',
+                    'method': '逐步增加至收敛稳定 (100 → 500)',
+                    'reason': '复杂数据集需要更多迭代才能收敛',
+                    'urgency': 'low',
+                },
             ]
 
         roadmap = []
@@ -1535,7 +1857,7 @@ class ParameterGuidanceService:
                 'bs_action': 'increase',
                 'suggested_bs': min(bs * 2, 512),
                 'reason': f'根据线性缩放规则: batch={bs}对应最佳LR≈{expected_lr:.6f}, '
-                          f'当前LR={lr}偏大。建议增大batch或降低LR。',
+                f'当前LR={lr}偏大。建议增大batch或降低LR。',
             }
         elif lr < expected_lr / 3:
             return {
@@ -1544,7 +1866,7 @@ class ParameterGuidanceService:
                 'bs_action': 'decrease',
                 'suggested_bs': max(bs // 2, 8),
                 'reason': f'根据线性缩放规则: batch={bs}对应最佳LR≈{expected_lr:.6f}, '
-                          f'当前LR={lr}偏小。建议减小batch或提高LR。',
+                f'当前LR={lr}偏小。建议减小batch或提高LR。',
             }
 
         return {'issue': False, 'message': 'LR-Batch Size 耦合正常'}
@@ -1565,16 +1887,22 @@ class ParameterGuidanceService:
     def _detect_underfitting_v2(history, final_metrics, task_type) -> bool:
         """增强欠拟合检测"""
         if task_type == 'classification':
-            train_accs = [m.get('train_accuracy', m.get('accuracy', 0)) for m in history
-                          if m.get('train_accuracy') is not None or m.get('accuracy') is not None]
+            train_accs = [
+                m.get('train_accuracy', m.get('accuracy', 0))
+                for m in history
+                if m.get('train_accuracy') is not None or m.get('accuracy') is not None
+            ]
             test_acc = final_metrics.get('test_accuracy', final_metrics.get('accuracy', 0))
             avg_train = float(np.mean(train_accs)) if train_accs else test_acc
             # 训练和测试都 < 0.55 且 gap < 0.10 → 欠拟合
             gap = abs(avg_train - test_acc) if train_accs else 0
             return avg_train < 0.55 and test_acc < 0.55 and gap < 0.10 and test_acc > 0
         elif task_type == 'regression':
-            train_r2s = [m.get('train_r2', m.get('r2', 0)) for m in history
-                         if m.get('train_r2') is not None or m.get('r2') is not None]
+            train_r2s = [
+                m.get('train_r2', m.get('r2', 0))
+                for m in history
+                if m.get('train_r2') is not None or m.get('r2') is not None
+            ]
             test_r2 = final_metrics.get('test_r2', final_metrics.get('r2', 0))
             avg_train = float(np.mean(train_r2s)) if train_r2s else test_r2
             gap = abs(avg_train - test_r2) if train_r2s else 0
@@ -1602,11 +1930,14 @@ class ParameterGuidanceService:
     #   - 反馈闭环: 低分先诊断根因, 再决定调参 vs 换算法 vs 检查数据
 
     # ── 算法族分类 (决定参数逻辑) ──
-    _TREE_ALGOS = {'random_forest', 'random_forest_regressor',
-                   'gradient_boosting', 'gradient_boosting_regressor',
-                   'decision_tree'}
-    _LINEAR_ALGOS = {'logistic_regression', 'linear_regression', 'ridge',
-                     'svm', 'svr'}
+    _TREE_ALGOS = {
+        'random_forest',
+        'random_forest_regressor',
+        'gradient_boosting',
+        'gradient_boosting_regressor',
+        'decision_tree',
+    }
+    _LINEAR_ALGOS = {'logistic_regression', 'linear_regression', 'ridge', 'svm', 'svr'}
     _KNN_ALGOS = {'knn', 'knn_regressor'}
     _CLUSTER_ALGOS = {'kmeans', 'dbscan', 'agglomerative', 'minibatch_kmeans'}
     _DL_ALGOS = {'mlp', 'transformer_bert'}
@@ -1621,6 +1952,7 @@ class ParameterGuidanceService:
         """
         # 对数归一化: log10(n) 映射到 [0, 1] 区间 (100 → 0, 1e6 → 1)
         import math
+
         log_n = math.log10(max(100, min(n_samples, 1_000_000)))
         t = (log_n - 2.0) / 4.0  # log10(100)=2, log10(1e6)=6 → range 4
         t = max(0.0, min(1.0, t))
@@ -1630,12 +1962,12 @@ class ParameterGuidanceService:
             return a + (b - a) * x
 
         return {
-            'epochs':       round(lerp(35, 4, t)),          # 小数据多轮, 大数据少轮
-            'batch_size':   round(lerp(12, 160, t) / 8) * 8,  # 量化到 8 的倍数
+            'epochs': round(lerp(35, 4, t)),  # 小数据多轮, 大数据少轮
+            'batch_size': round(lerp(12, 160, t) / 8) * 8,  # 量化到 8 的倍数
             'learning_rate': round(lerp(3e-4, 2e-3, t), 6),  # 小数据低lr防过拟合
-            'dropout':      round(lerp(0.55, 0.15, t), 2),   # 小数据强dropout
-            'weight_decay': 10 ** lerp(-2.5, -5.0, t),       # log scale: 3e-3 → 1e-5
-            'val_size':     round(lerp(0.22, 0.08, t), 2),   # 小数据多留验证
+            'dropout': round(lerp(0.55, 0.15, t), 2),  # 小数据强dropout
+            'weight_decay': 10 ** lerp(-2.5, -5.0, t),  # log scale: 3e-3 → 1e-5
+            'val_size': round(lerp(0.22, 0.08, t), 2),  # 小数据多留验证
         }
 
     @staticmethod
@@ -1680,7 +2012,7 @@ class ParameterGuidanceService:
 
         # 特征/样本比: >1:10 扣分 (高维小样本)
         ratio = n_features / max(n_samples, 1)
-        if ratio > 0.5:       # 特征数 > 样本数的一半
+        if ratio > 0.5:  # 特征数 > 样本数的一半
             score -= 0.25
             issues.append(f'特征/样本比过高({ratio:.2f}), 极易过拟合')
         elif ratio > 0.1:
@@ -1739,8 +2071,7 @@ class ParameterGuidanceService:
         }
 
     @staticmethod
-    def _generate_tree_params(algorithm: str, n_samples: int, n_features: int,
-                               signal: dict, scale: dict) -> dict:
+    def _generate_tree_params(algorithm: str, n_samples: int, n_features: int, signal: dict, scale: dict) -> dict:
         """为树模型生成数据感知参数
 
         n_estimators:
@@ -1757,6 +2088,7 @@ class ParameterGuidanceService:
           - 信号弱 → 增大 (强正则化)
         """
         import math
+
         log_n = math.log10(max(100, n_samples))
 
         # n_estimators: 平滑增长, 不是固定 200
@@ -1766,11 +2098,11 @@ class ParameterGuidanceService:
         # 信号调整
         sig_factor = 1.0
         if signal['level'] == 'weak':
-            sig_factor = 1.35   # 弱信号: 更多树 + bagging 降噪
+            sig_factor = 1.35  # 弱信号: 更多树 + bagging 降噪
         elif signal['level'] == 'noise':
             sig_factor = 1.50
         elif signal['level'] == 'strong':
-            sig_factor = 0.85   # 强信号: 少树足够
+            sig_factor = 0.85  # 强信号: 少树足够
 
         # 特征数调整
         feat_factor = 1.0 + max(0, (n_features - 15) / 100)  # 特征>15时逐步增加
@@ -1785,15 +2117,15 @@ class ParameterGuidanceService:
             min_samples_split = 2
         elif signal['level'] == 'moderate':
             max_depth = max(6, min(25, int(n_features * 0.6)))
-            min_samples_leaf = max(1, int(n_samples ** 0.25 / 3))
+            min_samples_leaf = max(1, int(n_samples**0.25 / 3))
             min_samples_split = max(2, min_samples_leaf * 2)
         elif signal['level'] == 'weak':
             max_depth = max(3, min(12, int(n_features * 0.3)))
-            min_samples_leaf = max(2, int(n_samples ** 0.25 / 2))
+            min_samples_leaf = max(2, int(n_samples**0.25 / 2))
             min_samples_split = max(4, min_samples_leaf * 3)
         else:  # noise
             max_depth = max(2, min(6, int(n_features * 0.15)))
-            min_samples_leaf = max(5, int(n_samples ** 0.3 / 2))
+            min_samples_leaf = max(5, int(n_samples**0.3 / 2))
             min_samples_split = max(8, min_samples_leaf * 2)
 
         params = {
@@ -1819,8 +2151,7 @@ class ParameterGuidanceService:
         return params
 
     @staticmethod
-    def _generate_linear_params(algorithm: str, n_samples: int,
-                                 n_features: int, signal: dict) -> dict:
+    def _generate_linear_params(algorithm: str, n_samples: int, n_features: int, signal: dict) -> dict:
         """为线性模型生成数据感知参数
 
         C (SVM/LR) 或 alpha (Ridge):
@@ -1858,14 +2189,14 @@ class ParameterGuidanceService:
         return params
 
     @staticmethod
-    def _generate_knn_params(n_samples: int, n_features: int,
-                              signal: dict) -> dict:
+    def _generate_knn_params(n_samples: int, n_features: int, signal: dict) -> dict:
         """为 KNN 生成数据感知参数
 
         n_neighbors = clip(sqrt(n_samples) * signal_factor, 3, 30)
         信号弱 → 更多邻居 (平滑降噪)
         """
         import math
+
         base_k = int(math.sqrt(n_samples))
         if signal['level'] == 'strong':
             k = max(3, base_k // 2)
@@ -1885,8 +2216,7 @@ class ParameterGuidanceService:
         }
 
     @staticmethod
-    def _generate_dl_params(algorithm: str, n_samples: int, n_features: int,
-                             signal: dict, scale: dict) -> dict:
+    def _generate_dl_params(algorithm: str, n_samples: int, n_features: int, signal: dict, scale: dict) -> dict:
         """为 DL 模型生成数据感知参数
 
         hidden_layers:
@@ -1898,8 +2228,12 @@ class ParameterGuidanceService:
 
         if algorithm == 'transformer_bert':
             return {
-                'learning_rate': 2e-5, 'batch_size': 16, 'max_length': 256,
-                'epochs': scale['epochs'], 'warmup_steps': 500, 'dropout': 0.1,
+                'learning_rate': 2e-5,
+                'batch_size': 16,
+                'max_length': 256,
+                'epochs': scale['epochs'],
+                'warmup_steps': 500,
+                'dropout': 0.1,
             }
 
         # MLP: 层数 = f(n_features)
@@ -1917,6 +2251,7 @@ class ParameterGuidanceService:
         first_width = max(16, min(1024, first_width))
         # 量化到 2 的幂附近
         import math as _m
+
         first_width = 2 ** int(_m.log2(first_width))
 
         hidden = []
@@ -1938,9 +2273,9 @@ class ParameterGuidanceService:
     # ── 公共 API ──
 
     @staticmethod
-    def recommend_initial_params(analysis: dict, algorithm: str,
-                                  ml_task_type: str = 'classification',
-                                  framework: str = 'sklearn') -> dict:
+    def recommend_initial_params(
+        analysis: dict, algorithm: str, ml_task_type: str = 'classification', framework: str = 'sklearn'
+    ) -> dict:
         """训练前智能参数推荐 v3 — 连续缩放 + 数据感知
 
         Args:
@@ -1969,32 +2304,32 @@ class ParameterGuidanceService:
         tips = []
         algo_lower = algorithm.lower()
         if algo_lower in ParameterGuidanceService._TREE_ALGOS:
-            params = ParameterGuidanceService._generate_tree_params(
-                algorithm, n_samples, n_features, signal, scale)
+            params = ParameterGuidanceService._generate_tree_params(algorithm, n_samples, n_features, signal, scale)
             algo_family = '集成树'
         elif algo_lower in ParameterGuidanceService._LINEAR_ALGOS:
-            params = ParameterGuidanceService._generate_linear_params(
-                algorithm, n_samples, n_features, signal)
+            params = ParameterGuidanceService._generate_linear_params(algorithm, n_samples, n_features, signal)
             algo_family = '线性模型'
         elif algo_lower in ParameterGuidanceService._KNN_ALGOS:
-            params = ParameterGuidanceService._generate_knn_params(
-                n_samples, n_features, signal)
+            params = ParameterGuidanceService._generate_knn_params(n_samples, n_features, signal)
             algo_family = 'KNN'
         elif algo_lower in ParameterGuidanceService._DL_ALGOS:
-            params = ParameterGuidanceService._generate_dl_params(
-                algorithm, n_samples, n_features, signal, scale)
+            params = ParameterGuidanceService._generate_dl_params(algorithm, n_samples, n_features, signal, scale)
             algo_family = '深度学习'
         elif algo_lower in ParameterGuidanceService._CLUSTER_ALGOS or ml_task_type == 'clustering':
             # 聚类算法 — 使用 sqrt(n/2) 经验公式, 而非 n_classes (违反无监督假设)
             import math
+
             est_k = max(2, min(15, int(math.sqrt(n_samples / 2))))
             params = {
                 'n_clusters': est_k,
                 'max_iter': 500,
             }
             algo_family = '聚类'
-            tips.insert(0, f'聚类初始化: n_clusters={est_k} (经验公式 sqrt(n/2)), '
-                          f'请通过 Elbow Method + Silhouette Analysis 确认最佳簇数')
+            tips.insert(
+                0,
+                f'聚类初始化: n_clusters={est_k} (经验公式 sqrt(n/2)), '
+                f'请通过 Elbow Method + Silhouette Analysis 确认最佳簇数',
+            )
         else:
             # 完全未知算法 — 最小合理默认值
             params = {
@@ -2043,9 +2378,11 @@ class ParameterGuidanceService:
         reason = ' — '.join(reason_parts) + '。'
 
         # ── 7. GridSearchCV 建议 (v3: 更智能) ──
-        sklearn_algos = (ParameterGuidanceService._TREE_ALGOS |
-                         ParameterGuidanceService._LINEAR_ALGOS |
-                         ParameterGuidanceService._KNN_ALGOS)
+        sklearn_algos = (
+            ParameterGuidanceService._TREE_ALGOS
+            | ParameterGuidanceService._LINEAR_ALGOS
+            | ParameterGuidanceService._KNN_ALGOS
+        )
         # 仅在中等信号 + 中等数据量时强烈推荐 GridSearchCV
         # 强信号 → 当前参数已足够, 弱信号 → 调参帮助有限, 应换算法或检查数据
         if algorithm in sklearn_algos and 800 < n_samples < 80000:
@@ -2105,11 +2442,14 @@ class ParameterGuidanceService:
         }
 
     @staticmethod
-    def recommend_retry_params(analysis: dict, algorithm: str,
-                                previous_metrics: dict = None,
-                                previous_params: dict = None,
-                                ml_task_type: str = 'classification',
-                                framework: str = 'sklearn') -> dict:
+    def recommend_retry_params(
+        analysis: dict,
+        algorithm: str,
+        previous_metrics: dict = None,
+        previous_params: dict = None,
+        ml_task_type: str = 'classification',
+        framework: str = 'sklearn',
+    ) -> dict:
         """反馈学习: 根据上一次训练结果生成改进参数
 
         这是 v3 的核心新增功能 — 解决"重复推荐同一套参数"的问题。
@@ -2126,9 +2466,7 @@ class ParameterGuidanceService:
             与 recommend_initial_params 相同结构, 但参数基于反馈调整
         """
         # 先获取基础推荐
-        result = ParameterGuidanceService.recommend_initial_params(
-            analysis, algorithm, ml_task_type, framework
-        )
+        result = ParameterGuidanceService.recommend_initial_params(analysis, algorithm, ml_task_type, framework)
         params = result['params']
         tips = result['tips'][:]
 
@@ -2146,16 +2484,13 @@ class ParameterGuidanceService:
             score_name = 'R²'
             low_threshold = 0.30
         elif ml_task_type == 'clustering':
-            test_score = previous_metrics.get('test_silhouette_score',
-                                              previous_metrics.get('silhouette_score', 0))
+            test_score = previous_metrics.get('test_silhouette_score', previous_metrics.get('silhouette_score', 0))
             train_score = test_score
             score_name = 'Silhouette'
             low_threshold = 0.25
         else:
-            test_score = previous_metrics.get('test_accuracy',
-                                              previous_metrics.get('accuracy', 0))
-            train_score = previous_metrics.get('train_accuracy',
-                                               previous_metrics.get('accuracy', test_score))
+            test_score = previous_metrics.get('test_accuracy', previous_metrics.get('accuracy', 0))
+            train_score = previous_metrics.get('train_accuracy', previous_metrics.get('accuracy', test_score))
             score_name = 'Accuracy'
             low_threshold = 0.55
 
@@ -2169,14 +2504,18 @@ class ParameterGuidanceService:
 
         if is_low and signal['level'] in ('weak', 'noise'):
             # 信号弱 + 评分低 → 数据问题占主导
-            diagnosis.append({
-                'type': 'data_issue',
-                'severity': 'high',
-                'message': (f'信号质量{signal["level"]}({signal["score"]:.2f}) + '
-                           f'{score_name}={test_score:.3f}偏低 → 数据质量可能是根因。'
-                           f'调参提升空间有限 (<5%), 建议优先检查数据。'),
-                'suggestion': '检查目标列是否正确、特征是否包含预测信息、是否存在数据泄漏',
-            })
+            diagnosis.append(
+                {
+                    'type': 'data_issue',
+                    'severity': 'high',
+                    'message': (
+                        f'信号质量{signal["level"]}({signal["score"]:.2f}) + '
+                        f'{score_name}={test_score:.3f}偏低 → 数据质量可能是根因。'
+                        f'调参提升空间有限 (<5%), 建议优先检查数据。'
+                    ),
+                    'suggestion': '检查目标列是否正确、特征是否包含预测信息、是否存在数据泄漏',
+                }
+            )
             # 数据问题: 不要大幅调参, 只小幅加强正则化
             if 'n_estimators' in params:
                 params['n_estimators'] = min(500, int(params['n_estimators'] * 1.15))
@@ -2197,31 +2536,40 @@ class ParameterGuidanceService:
                     n_est = params.get('n_estimators', 250)
                     params['n_estimators'] = min(500, int(n_est * 1.5))
                     param_changes['lr×0.5 + n_est×1.5'] = True
-                diagnosis.append({
-                    'type': 'underfit',
-                    'severity': 'medium',
-                    'message': (f'{score_name}={test_score:.3f}偏低 + 信号{signal["level"]} → '
-                               f'增加模型容量 (n_estimators↑, lr↓)。'
-                               f'如仍无改善, 建议切换算法 (RF→GB 或反之)。'),
-                    'suggestion': '增加树数量+降低学习率; 或切换到更强的算法',
-                })
+                diagnosis.append(
+                    {
+                        'type': 'underfit',
+                        'severity': 'medium',
+                        'message': (
+                            f'{score_name}={test_score:.3f}偏低 + 信号{signal["level"]} → '
+                            f'增加模型容量 (n_estimators↑, lr↓)。'
+                            f'如仍无改善, 建议切换算法 (RF→GB 或反之)。'
+                        ),
+                        'suggestion': '增加树数量+降低学习率; 或切换到更强的算法',
+                    }
+                )
             elif algo_lower in ParameterGuidanceService._LINEAR_ALGOS:
                 # 线性模型评分低 → 可能是非线性关系
-                diagnosis.append({
-                    'type': 'algorithm_mismatch',
-                    'severity': 'high',
-                    'message': (f'线性模型 {score_name}={test_score:.3f} → '
-                               f'数据可能存在非线性关系, 线性模型容量不足。'),
-                    'suggestion': '强烈建议切换到 RandomForest 或 GradientBoosting',
-                })
+                diagnosis.append(
+                    {
+                        'type': 'algorithm_mismatch',
+                        'severity': 'high',
+                        'message': (
+                            f'线性模型 {score_name}={test_score:.3f} → 数据可能存在非线性关系, 线性模型容量不足。'
+                        ),
+                        'suggestion': '强烈建议切换到 RandomForest 或 GradientBoosting',
+                    }
+                )
                 tips.insert(0, '⚠ 线性模型评分低, 建议切换到集成树模型 (RF/GBDT)')
             elif algo_lower in ParameterGuidanceService._DL_ALGOS:
-                diagnosis.append({
-                    'type': 'dl_underfit',
-                    'severity': 'medium',
-                    'message': f'深度学习 {score_name}={test_score:.3f}偏低 → 可能需要更多epochs或调整架构。',
-                    'suggestion': '增加 epochs + 调整 hidden_layers 宽度',
-                })
+                diagnosis.append(
+                    {
+                        'type': 'dl_underfit',
+                        'severity': 'medium',
+                        'message': f'深度学习 {score_name}={test_score:.3f}偏低 → 可能需要更多epochs或调整架构。',
+                        'suggestion': '增加 epochs + 调整 hidden_layers 宽度',
+                    }
+                )
                 if 'epochs' in params:
                     params['epochs'] = min(100, params['epochs'] * 2)
                 if 'hidden_layers' in params:
@@ -2229,13 +2577,16 @@ class ParameterGuidanceService:
                     params['hidden_layers'] = wider
         elif is_overfitting:
             # 过拟合: 增强正则化
-            diagnosis.append({
-                'type': 'overfitting',
-                'severity': 'medium',
-                'message': (f'Train-Test gap={gap:.3f} → 过拟合。'
-                           f'加强正则化: max_depth↓, dropout↑, weight_decay↑。'),
-                'suggestion': '限制max_depth, 增加dropout/weight_decay, 或增大test_size',
-            })
+            diagnosis.append(
+                {
+                    'type': 'overfitting',
+                    'severity': 'medium',
+                    'message': (
+                        f'Train-Test gap={gap:.3f} → 过拟合。加强正则化: max_depth↓, dropout↑, weight_decay↑。'
+                    ),
+                    'suggestion': '限制max_depth, 增加dropout/weight_decay, 或增大test_size',
+                }
+            )
             if 'max_depth' in params and params['max_depth'] is not None:
                 params['max_depth'] = max(3, params['max_depth'] // 2)
             elif 'max_depth' in params and params['max_depth'] is None:
@@ -2248,13 +2599,14 @@ class ParameterGuidanceService:
                 params['min_samples_leaf'] = max(2, params['min_samples_leaf'] * 3)
         else:
             # 评分OK → 微调建议
-            diagnosis.append({
-                'type': 'fine_tune',
-                'severity': 'low',
-                'message': (f'{score_name}={test_score:.3f} 已达可用水平。'
-                           f'小幅微调关键参数可提升 1-3%。'),
-                'suggestion': '用 GridSearchCV 在小范围搜索 n_estimators/learning_rate',
-            })
+            diagnosis.append(
+                {
+                    'type': 'fine_tune',
+                    'severity': 'low',
+                    'message': (f'{score_name}={test_score:.3f} 已达可用水平。小幅微调关键参数可提升 1-3%。'),
+                    'suggestion': '用 GridSearchCV 在小范围搜索 n_estimators/learning_rate',
+                }
+            )
             if 'n_estimators' in params:
                 params['n_estimators'] = min(500, int(params['n_estimators'] * 1.15))
 
@@ -2263,7 +2615,13 @@ class ParameterGuidanceService:
             same_keys = 0
             total_keys = 0
             for k in params:
-                if k in previous_params and k not in ('test_size', 'val_size', 'framework', 'algorithm', 'ml_task_type'):
+                if k in previous_params and k not in (
+                    'test_size',
+                    'val_size',
+                    'framework',
+                    'algorithm',
+                    'ml_task_type',
+                ):
                     total_keys += 1
                     if params[k] == previous_params[k]:
                         same_keys += 1
@@ -2283,8 +2641,7 @@ class ParameterGuidanceService:
         return result
 
     @staticmethod
-    def diagnose_low_score(analysis: dict, algorithm: str, metrics: dict,
-                            ml_task_type: str = 'classification') -> dict:
+    def diagnose_low_score(analysis: dict, algorithm: str, metrics: dict, ml_task_type: str = 'classification') -> dict:
         """独立诊断: 低分根因分析 (供前端 "AI诊断" Tab 使用)
 
         Returns:
@@ -2318,9 +2675,11 @@ class ParameterGuidanceService:
         if signal['level'] in ('weak', 'noise') and score < low_threshold:
             root_cause = 'data'
             confidence = 0.75 + (1.0 - signal['score']) * 0.2
-            explanation = (f'信号质量{signal["level"]}({signal["score"]:.2f}) + '
-                         f'{score_name}={score:.3f} → 数据质量是主因。'
-                         f'特征预测力不足, 调参空间有限。')
+            explanation = (
+                f'信号质量{signal["level"]}({signal["score"]:.2f}) + '
+                f'{score_name}={score:.3f} → 数据质量是主因。'
+                f'特征预测力不足, 调参空间有限。'
+            )
             actions = [
                 '检查目标列 (target_column) 是否正确设置了',
                 '验证特征与目标的相关性 — 用 df.corr()[target] 排序查看',
@@ -2331,8 +2690,9 @@ class ParameterGuidanceService:
         elif score < low_threshold * 0.6:
             root_cause = 'algorithm'
             confidence = 0.65
-            explanation = (f'{score_name}={score:.3f} 极低, 但信号{signal["level"]}。'
-                         f'当前算法 ({algorithm}) 可能不匹配数据分布。')
+            explanation = (
+                f'{score_name}={score:.3f} 极低, 但信号{signal["level"]}。当前算法 ({algorithm}) 可能不匹配数据分布。'
+            )
             algo_lower = algorithm.lower()
             if algo_lower in ParameterGuidanceService._LINEAR_ALGOS:
                 actions = [
@@ -2353,8 +2713,7 @@ class ParameterGuidanceService:
         elif gap > 0.15:
             root_cause = 'parameter'
             confidence = 0.72
-            explanation = (f'Train-Test gap={gap:.3f} → 严重过拟合。'
-                         f'正则化参数需要调整。')
+            explanation = f'Train-Test gap={gap:.3f} → 严重过拟合。正则化参数需要调整。'
             actions = [
                 '限制 max_depth (树模型) 或增加 dropout/weight_decay (DL)',
                 '增大 test_size 以获得更可靠的泛化估计',
@@ -2364,8 +2723,7 @@ class ParameterGuidanceService:
         elif score < low_threshold:
             root_cause = 'parameter'
             confidence = 0.55
-            explanation = (f'{score_name}={score:.3f} 偏低, 但信号{signal["level"]}。'
-                         f'可能是参数未达最优。')
+            explanation = f'{score_name}={score:.3f} 偏低, 但信号{signal["level"]}。可能是参数未达最优。'
             actions = [
                 '使用 GridSearchCV 在关键参数上搜索',
                 f'当前算法({algorithm}): 重点调 n_estimators 和 learning_rate',
@@ -2384,8 +2742,10 @@ class ParameterGuidanceService:
             'suggested_actions': actions,
             'signal_quality': signal,
             'metrics_summary': {
-                'score': score, 'score_name': score_name,
-                'train_score': train_score, 'gap': round(gap, 4),
+                'score': score,
+                'score_name': score_name,
+                'train_score': train_score,
+                'gap': round(gap, 4),
                 'is_low': score < low_threshold,
                 'is_overfitting': gap > 0.10,
             },

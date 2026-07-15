@@ -152,7 +152,7 @@ skip-magic-trailing-comma = false
 # ========== mypy ==========
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 ignore_missing_imports = true
 exclude = ["migrations/", "tests/"]
 check_untyped_defs = true

@@ -4,6 +4,7 @@
 RESTful JSON 接口
 ============================================
 """
+
 import json
 import os
 
@@ -57,15 +58,19 @@ def list_datasets():
 
     user = get_current_user()
     result = DatasetService.list_datasets(
-        page=page, per_page=per_page,
-        category=category, search=search,
+        page=page,
+        per_page=per_page,
+        category=category,
+        search=search,
         owner_id=user.id,
     )
 
-    return jsonify({
-        'success': True,
-        'data': result,
-    })
+    return jsonify(
+        {
+            'success': True,
+            'data': result,
+        }
+    )
 
 
 @datasets_api_bp.route('/<string:dataset_uuid>', methods=['GET'])
@@ -92,10 +97,12 @@ def get_dataset(dataset_uuid):
     if not dataset:
         return jsonify({'success': False, 'message': '数据集不存在。'}), 404
 
-    return jsonify({
-        'success': True,
-        'data': dataset.to_dict(include_file_path=True),
-    })
+    return jsonify(
+        {
+            'success': True,
+            'data': dataset.to_dict(include_file_path=True),
+        }
+    )
 
 
 @datasets_api_bp.route('/', methods=['POST'])
@@ -158,11 +165,13 @@ def create_dataset():
     if error:
         return jsonify({'success': False, 'message': error}), 400
 
-    return jsonify({
-        'success': True,
-        'message': '数据集创建成功。',
-        'data': dataset.to_dict(),
-    }), 201
+    return jsonify(
+        {
+            'success': True,
+            'message': '数据集创建成功。',
+            'data': dataset.to_dict(),
+        }
+    ), 201
 
 
 @datasets_api_bp.route('/<string:dataset_uuid>', methods=['PUT'])
@@ -214,11 +223,13 @@ def update_dataset(dataset_uuid):
     if not success:
         return jsonify({'success': False, 'message': error}), 400
 
-    return jsonify({
-        'success': True,
-        'message': '数据集已更新。',
-        'data': dataset.to_dict(),
-    })
+    return jsonify(
+        {
+            'success': True,
+            'message': '数据集已更新。',
+            'data': dataset.to_dict(),
+        }
+    )
 
 
 @datasets_api_bp.route('/<string:dataset_uuid>', methods=['DELETE'])
@@ -259,6 +270,7 @@ def delete_dataset(dataset_uuid):
 
 
 # ============ 数据集推荐 API ============
+
 
 @datasets_api_bp.route('/<string:dataset_uuid>/analyze', methods=['GET'])
 @api_login_required
@@ -333,6 +345,7 @@ def analyze_dataset_by_id(dataset_id):
 def _convert_numpy_types(obj):
     """递归转换 numpy 类型为 Python 原生类型 (JSON serializable)"""
     import numpy as np
+
     if isinstance(obj, dict):
         return {k: _convert_numpy_types(v) for k, v in obj.items()}
     elif isinstance(obj, list):
@@ -368,26 +381,45 @@ def _analyze_dataset_from_obj(dataset):
             pass
 
     result = DatasetRecommendationService.recommend(
-        dataset.file_path, target_col, dataset.file_format,
+        dataset.file_path,
+        target_col,
+        dataset.file_format,
         known_n_samples=dataset.row_count or None,
     )
     return _convert_numpy_types(result), None
 
 
 # 训练表单可用的算法白名单 (与 create.html 中的 ALGORITHMS 保持一致)
-_FORM_CLASSIFICATION_ALGOS = {'random_forest', 'logistic_regression', 'svm', 'knn', 'gradient_boosting', 'decision_tree', 'mlp', 'transformer_bert'}
-_FORM_REGRESSION_ALGOS = {'random_forest_regressor', 'linear_regression', 'ridge', 'svr', 'gradient_boosting_regressor', 'knn_regressor', 'mlp'}
+_FORM_CLASSIFICATION_ALGOS = {
+    'random_forest',
+    'logistic_regression',
+    'svm',
+    'knn',
+    'gradient_boosting',
+    'decision_tree',
+    'mlp',
+    'transformer_bert',
+}
+_FORM_REGRESSION_ALGOS = {
+    'random_forest_regressor',
+    'linear_regression',
+    'ridge',
+    'svr',
+    'gradient_boosting_regressor',
+    'knn_regressor',
+    'mlp',
+}
 _FORM_CLUSTERING_ALGOS = {'kmeans', 'dbscan', 'agglomerative', 'minibatch_kmeans'}
 
 # 推荐算法 → 表单算法映射 (推荐引擎可能返回表单不支持的算法)
 _ALGO_MAP = {
-    'ridge': 'ridge',                             # Ridge → 岭回归 (L2正则, 保留)
-    'knn_regressor': 'knn_regressor',             # KNN回归 → KNN回归 (表单现已支持)
-    'tfidf_logistic': 'logistic_regression',      # TF-IDF逻辑回归 → 逻辑回归 (SklearnTrainer已加TF-IDF管道)
-    'tfidf_svm': 'svm',                           # TF-IDF SVM → SVM
-    'transformer_bert': 'transformer_bert',       # BERT → TransformersNLPTrainer
-    'mlp': 'mlp',                                 # MLP → PyTorch MLP (宽网络)
-    'decision_tree': 'decision_tree',             # 决策树 (表单现已支持)
+    'ridge': 'ridge',  # Ridge → 岭回归 (L2正则, 保留)
+    'knn_regressor': 'knn_regressor',  # KNN回归 → KNN回归 (表单现已支持)
+    'tfidf_logistic': 'logistic_regression',  # TF-IDF逻辑回归 → 逻辑回归 (SklearnTrainer已加TF-IDF管道)
+    'tfidf_svm': 'svm',  # TF-IDF SVM → SVM
+    'transformer_bert': 'transformer_bert',  # BERT → TransformersNLPTrainer
+    'mlp': 'mlp',  # MLP → PyTorch MLP (宽网络)
+    'decision_tree': 'decision_tree',  # 决策树 (表单现已支持)
     'decision_tree_regressor': 'random_forest_regressor',  # 决策树回归 → RF回归 (无独立训练器)
 }
 
@@ -434,8 +466,7 @@ def auto_config(dataset_id):
             pass
 
     result = DatasetRecommendationService.recommend(
-        dataset.file_path, target_col, dataset.file_format,
-        known_n_samples=dataset.row_count or None
+        dataset.file_path, target_col, dataset.file_format, known_n_samples=dataset.row_count or None
     )
 
     if 'error' in result:
@@ -449,32 +480,43 @@ def auto_config(dataset_id):
     ds_category = getattr(dataset, 'category', 'other') or 'other'
 
     CATEGORY_TASK_MAP = {
-        'classification': ('classification', None),     # 强制分类
-        'regression':     ('regression', None),          # 强制回归
-        'clustering':     ('clustering', None),
-        'nlp':            ('classification', '⚠ 此数据集为NLP文本类型，标准分类/回归可能不适用。建议使用TF-IDF+分类器或深度学习。'),
-        'vision':         ('classification', '⚠ 此数据集为视觉类型，表格型算法不适用于图像特征。建议使用PyTorch/TensorFlow CNN。'),
-        'synthetic':      (None, '⚠ 此数据集为合成/生成式数据，target列可能为随机合成值而非真实标签，模型可能无法学到有效模式。'),
-        'time_series':    (None, '⚠ 此数据集为时间序列类型，标准train_test_split会破坏时序依赖。建议使用时序交叉验证。'),
-        'biology':        (None, None),   # 生物医学: 跟随分析器结果
-        'finance':        (None, None),   # 金融: 跟随分析器结果
-        'tabular':        (None, None),   # 通用表格: 跟随分析器结果
-        'other':          (None, None),   # 其他: 跟随分析器结果
+        'classification': ('classification', None),  # 强制分类
+        'regression': ('regression', None),  # 强制回归
+        'clustering': ('clustering', None),
+        'nlp': (
+            'classification',
+            '⚠ 此数据集为NLP文本类型，标准分类/回归可能不适用。建议使用TF-IDF+分类器或深度学习。',
+        ),
+        'vision': (
+            'classification',
+            '⚠ 此数据集为视觉类型，表格型算法不适用于图像特征。建议使用PyTorch/TensorFlow CNN。',
+        ),
+        'synthetic': (
+            None,
+            '⚠ 此数据集为合成/生成式数据，target列可能为随机合成值而非真实标签，模型可能无法学到有效模式。',
+        ),
+        'time_series': (None, '⚠ 此数据集为时间序列类型，标准train_test_split会破坏时序依赖。建议使用时序交叉验证。'),
+        'biology': (None, None),  # 生物医学: 跟随分析器结果
+        'finance': (None, None),  # 金融: 跟随分析器结果
+        'tabular': (None, None),  # 通用表格: 跟随分析器结果
+        'other': (None, None),  # 其他: 跟随分析器结果
     }
 
-    forced_task, category_warning = CATEGORY_TASK_MAP.get(
-        ds_category, (None, None)
-    )
+    forced_task, category_warning = CATEGORY_TASK_MAP.get(ds_category, (None, None))
 
     # 启发式检测
     column_names = analysis.get('column_names', [])
     latent_cols = [c for c in column_names if c.startswith('latent_')]
-    is_latent_data = (len(latent_cols) > 0 and
-                      len(latent_cols) >= len(column_names) * 0.7)
+    is_latent_data = len(latent_cols) > 0 and len(latent_cols) >= len(column_names) * 0.7
     if is_latent_data and not category_warning:
-        category_warning = ('⚠ 检测到' + str(len(latent_cols)) + '/' + str(len(column_names)) +
-                           '特征为latent_*隐空间维度，此数据可能来自生成式模型（GAN/VAE/AE）。'
-                           '隐空间特征与target之间的相关关系可能是随机噪声，模型可能无法学到有效模式。')
+        category_warning = (
+            '⚠ 检测到'
+            + str(len(latent_cols))
+            + '/'
+            + str(len(column_names))
+            + '特征为latent_*隐空间维度，此数据可能来自生成式模型（GAN/VAE/AE）。'
+            '隐空间特征与target之间的相关关系可能是随机噪声，模型可能无法学到有效模式。'
+        )
 
     # NLP 专属: 强制 transformer 框架
     is_nlp = ds_category == 'nlp'
@@ -510,11 +552,13 @@ def auto_config(dataset_id):
             if algorithm is None:
                 algorithm = mapped
             else:
-                alternative_algorithms.append({
-                    'value': mapped,
-                    'display': rec.get('display', mapped),
-                    'confidence': rec['confidence'],
-                })
+                alternative_algorithms.append(
+                    {
+                        'value': mapped,
+                        'display': rec.get('display', mapped),
+                        'confidence': rec['confidence'],
+                    }
+                )
 
     # 如果推荐算法全部不匹配，使用默认值
     if algorithm is None:
@@ -558,8 +602,10 @@ def auto_config(dataset_id):
         }
         total_epochs = 3
         # 替换推荐理由
-        reason_text = ('[NLP Transformer] 使用预训练BERT模型进行迁移学习微调。'
-                       '自动检测文本列+语言，3轮训练即可达到高准确率。' + reason_text)
+        reason_text = (
+            '[NLP Transformer] 使用预训练BERT模型进行迁移学习微调。'
+            '自动检测文本列+语言，3轮训练即可达到高准确率。' + reason_text
+        )
     # --- 视觉专属: 强制 PyTorch 深度学习 ---
     elif is_vision:
         framework = 'pytorch'
@@ -577,8 +623,9 @@ def auto_config(dataset_id):
         params['dropout'] = 0.4
         params['batch_size'] = 32
         total_epochs = 20
-        reason_text = ('[Vision DL] 视觉特征使用PyTorch MLP深度网络训练。'
-                       '自动加宽隐藏层+增加dropout防过拟合。' + reason_text)
+        reason_text = (
+            '[Vision DL] 视觉特征使用PyTorch MLP深度网络训练。自动加宽隐藏层+增加dropout防过拟合。' + reason_text
+        )
     else:
         # --- 框架 ---
         frameworks = result.get('recommended_frameworks', [])
@@ -588,16 +635,29 @@ def auto_config(dataset_id):
         params = result.get('param_presets', {})
 
         # --- Epochs: sklearn 算法固定为1 ---
-        if algorithm in ('random_forest', 'gradient_boosting', 'random_forest_regressor',
-                         'gradient_boosting_regressor', 'svm', 'svr',
-                         'logistic_regression', 'linear_regression', 'knn', 'ridge',
-                         'kmeans', 'dbscan', 'agglomerative', 'minibatch_kmeans'):
+        if algorithm in (
+            'random_forest',
+            'gradient_boosting',
+            'random_forest_regressor',
+            'gradient_boosting_regressor',
+            'svm',
+            'svr',
+            'logistic_regression',
+            'linear_regression',
+            'knn',
+            'ridge',
+            'kmeans',
+            'dbscan',
+            'agglomerative',
+            'minibatch_kmeans',
+        ):
             total_epochs = 1
         else:
             total_epochs = params.get('epochs', 10)
 
     # --- 推荐任务名称和描述 ---
     from app.utils.algorithm_info import ALGORITHM_INFO
+
     algo_display = ALGORITHM_INFO.get(algorithm, {}).get('name', algorithm)
     if ml_task_type == 'clustering':
         task_cn = '聚类'
@@ -612,6 +672,7 @@ def auto_config(dataset_id):
     # 从数据集中提取简短的名称片段
     ds_name = dataset.name or 'dataset'
     import re
+
     # 去除数据集名中的尺寸/样本数标记: _20K, (30K samples), _15K 等
     ds_short = re.sub(r'\s*\(?\d{1,4}[kK]\w*\s*\w*\)?\s*', ' ', ds_name)
     ds_short = re.sub(r'[_-]\d{1,4}[kK]\b', '', ds_short)
@@ -640,35 +701,40 @@ def auto_config(dataset_id):
 
     suggested_description = '。'.join(desc_parts) + '。'
 
-    return jsonify({
-        'success': True,
-        'data': {
-            'ml_task_type': ml_task_type,
-            'algorithm': algorithm,
-            'target_column': target_column or '',
-            'text_column': text_colname,
-            'framework': framework,
-            'test_size': to_python_type(params.get('test_size', 0.2)),
-            'total_epochs': to_python_type(total_epochs),
-            'suggested_name': suggested_name,
-            'suggested_description': suggested_description,
-            'reason': reason_text,
-            'category_warning': bool(category_warning),
-            'alternative_algorithms': [
-                {'value': a['value'], 'display': a.get('display', a['value']),
-                 'confidence': to_python_type(a.get('confidence', 0.5))}
-                for a in alternative_algorithms[:3]
-            ],
-            # 额外分析信息供前端展示
-            'dataset_info': {
-                'n_samples': to_python_type(analysis.get('n_samples', 0)),
-                'n_features': to_python_type(analysis.get('n_features', 0)),
-                'n_classes': to_python_type(analysis.get('n_classes', 0)),
-                'missing_rate': to_python_type(analysis.get('missing_rate', 0)),
-                'imbalanced': bool(analysis.get('imbalanced', False)),
+    return jsonify(
+        {
+            'success': True,
+            'data': {
+                'ml_task_type': ml_task_type,
+                'algorithm': algorithm,
+                'target_column': target_column or '',
+                'text_column': text_colname,
+                'framework': framework,
+                'test_size': to_python_type(params.get('test_size', 0.2)),
+                'total_epochs': to_python_type(total_epochs),
+                'suggested_name': suggested_name,
+                'suggested_description': suggested_description,
+                'reason': reason_text,
+                'category_warning': bool(category_warning),
+                'alternative_algorithms': [
+                    {
+                        'value': a['value'],
+                        'display': a.get('display', a['value']),
+                        'confidence': to_python_type(a.get('confidence', 0.5)),
+                    }
+                    for a in alternative_algorithms[:3]
+                ],
+                # 额外分析信息供前端展示
+                'dataset_info': {
+                    'n_samples': to_python_type(analysis.get('n_samples', 0)),
+                    'n_features': to_python_type(analysis.get('n_features', 0)),
+                    'n_classes': to_python_type(analysis.get('n_classes', 0)),
+                    'missing_rate': to_python_type(analysis.get('missing_rate', 0)),
+                    'imbalanced': bool(analysis.get('imbalanced', False)),
+                },
             },
-        },
-    })
+        }
+    )
 
 
 @datasets_api_bp.route('/public', methods=['GET'])
@@ -690,14 +756,17 @@ def list_public_datasets():
         description: 公开数据集列表 + 类别
     """
     from app.services.dataset_import_service import DatasetImportService
+
     category = request.args.get('category')
     datasets = DatasetImportService.get_available_datasets(category=category)
     categories = DatasetImportService.get_categories()
-    return jsonify({
-        'success': True,
-        'data': datasets,
-        'categories': categories,
-    })
+    return jsonify(
+        {
+            'success': True,
+            'data': datasets,
+            'categories': categories,
+        }
+    )
 
 
 @datasets_api_bp.route('/import/<dataset_key>', methods=['POST'])
@@ -731,17 +800,20 @@ def import_public_dataset(dataset_key):
         description: 导入失败
     """
     from app.services.dataset_import_service import DatasetImportService
+
     user = get_current_user()
     data = request.get_json(silent=True) or {}
     name = data.get('name')
     dataset, error = DatasetImportService.import_dataset(user, dataset_key, name=name)
     if error:
         return jsonify({'success': False, 'message': error}), 400
-    return jsonify({
-        'success': True,
-        'message': f'数据集 "{dataset.name}" 导入成功',
-        'data': dataset.to_dict(),
-    }), 201
+    return jsonify(
+        {
+            'success': True,
+            'message': f'数据集 "{dataset.name}" 导入成功',
+            'data': dataset.to_dict(),
+        }
+    ), 201
 
 
 @datasets_api_bp.route('/import/url', methods=['POST'])
@@ -777,6 +849,7 @@ def import_from_url():
         description: 缺少url或name / 下载失败
     """
     from app.services.dataset_import_service import DatasetImportService
+
     user = get_current_user()
     data = request.get_json(silent=True) or {}
     url = data.get('url')
@@ -784,17 +857,21 @@ def import_from_url():
     if not url or not name:
         return jsonify({'success': False, 'message': '缺少url或name参数'}), 400
     dataset, error = DatasetImportService.import_from_url(
-        user, url, name,
+        user,
+        url,
+        name,
         target_column=data.get('target_column'),
         description=data.get('description'),
     )
     if error:
         return jsonify({'success': False, 'message': error}), 400
-    return jsonify({
-        'success': True,
-        'message': f'数据集 "{dataset.name}" 导入成功',
-        'data': dataset.to_dict(),
-    }), 201
+    return jsonify(
+        {
+            'success': True,
+            'message': f'数据集 "{dataset.name}" 导入成功',
+            'data': dataset.to_dict(),
+        }
+    ), 201
 
 
 @datasets_api_bp.route('/<int:dataset_id>/smart-params', methods=['GET'])
@@ -859,7 +936,9 @@ def smart_params(dataset_id):
             pass
 
     analysis = DatasetAnalyzer.analyze(
-        dataset.file_path, target_col, dataset.file_format,
+        dataset.file_path,
+        target_col,
+        dataset.file_format,
     )
 
     if 'error' in analysis:
@@ -877,19 +956,21 @@ def smart_params(dataset_id):
         framework=framework,
     )
 
-    return jsonify({
-        'success': True,
-        'data': {
-            'params': to_python_type(result['params']),
-            'reason': result['reason'],
-            'scale': result['scale'],
-            'confidence': to_python_type(result['confidence']),
-            'tips': result['tips'],
-            'gridsearch_suggestion': result['gridsearch_suggestion'],
-            'gridsearch_reason': result['gridsearch_reason'],
-            'signal_quality': result.get('signal_quality', {}),
-        },
-    })
+    return jsonify(
+        {
+            'success': True,
+            'data': {
+                'params': to_python_type(result['params']),
+                'reason': result['reason'],
+                'scale': result['scale'],
+                'confidence': to_python_type(result['confidence']),
+                'tips': result['tips'],
+                'gridsearch_suggestion': result['gridsearch_suggestion'],
+                'gridsearch_reason': result['gridsearch_reason'],
+                'signal_quality': result.get('signal_quality', {}),
+            },
+        }
+    )
 
 
 @datasets_api_bp.route('/<int:dataset_id>/smart-retry', methods=['POST'])
@@ -959,7 +1040,9 @@ def smart_retry(dataset_id):
             pass
 
     analysis = DatasetAnalyzer.analyze(
-        dataset.file_path, target_col, dataset.file_format,
+        dataset.file_path,
+        target_col,
+        dataset.file_format,
     )
 
     if 'error' in analysis:
@@ -978,21 +1061,23 @@ def smart_retry(dataset_id):
         framework=framework,
     )
 
-    return jsonify({
-        'success': True,
-        'data': {
-            'params': to_python_type(result['params']),
-            'reason': result['reason'],
-            'scale': result['scale'],
-            'confidence': to_python_type(result['confidence']),
-            'tips': result['tips'],
-            'gridsearch_suggestion': result['gridsearch_suggestion'],
-            'gridsearch_reason': result['gridsearch_reason'],
-            'signal_quality': result.get('signal_quality', {}),
-            'diagnosis': result.get('diagnosis', []),
-            'feedback_applied': result.get('feedback_applied', False),
-        },
-    })
+    return jsonify(
+        {
+            'success': True,
+            'data': {
+                'params': to_python_type(result['params']),
+                'reason': result['reason'],
+                'scale': result['scale'],
+                'confidence': to_python_type(result['confidence']),
+                'tips': result['tips'],
+                'gridsearch_suggestion': result['gridsearch_suggestion'],
+                'gridsearch_reason': result['gridsearch_reason'],
+                'signal_quality': result.get('signal_quality', {}),
+                'diagnosis': result.get('diagnosis', []),
+                'feedback_applied': result.get('feedback_applied', False),
+            },
+        }
+    )
 
 
 @datasets_api_bp.route('/<int:dataset_id>/diagnose', methods=['POST'])
@@ -1054,7 +1139,9 @@ def diagnose_low_score(dataset_id):
             pass
 
     analysis = DatasetAnalyzer.analyze(
-        dataset.file_path, target_col, dataset.file_format,
+        dataset.file_path,
+        target_col,
+        dataset.file_format,
     )
 
     if 'error' in analysis:

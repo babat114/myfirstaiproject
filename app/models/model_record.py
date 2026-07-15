@@ -4,6 +4,7 @@ AI模型注册模型
 管理已训练的AI模型版本和元数据
 ============================================
 """
+
 import json
 import uuid
 
@@ -47,19 +48,20 @@ class ModelRecord(AccessControlMixin, db.Model):
     # 模型类型
     model_type = db.Column(
         db.Enum(
-            'classification', 'regression', 'clustering',
-            'nlp', 'computer_vision', 'reinforcement',
-            'generative', 'other',
-            name='model_types'
+            'classification',
+            'regression',
+            'clustering',
+            'nlp',
+            'computer_vision',
+            'reinforcement',
+            'generative',
+            'other',
+            name='model_types',
         ),
         default='other',
-        nullable=False
+        nullable=False,
     )
-    framework = db.Column(
-        db.String(50),
-        nullable=True,
-        comment='PyTorch, TensorFlow, scikit-learn, etc.'
-    )
+    framework = db.Column(db.String(50), nullable=True, comment='PyTorch, TensorFlow, scikit-learn, etc.')
 
     # 文件路径
     model_file_path = db.Column(db.String(512), nullable=True)
@@ -92,20 +94,17 @@ class ModelRecord(AccessControlMixin, db.Model):
     training_duration_seconds = db.Column(db.Integer, nullable=True)
 
     # --- 独立测试集评估 ---
-    independent_test_dataset_id = db.Column(
-        db.Integer, db.ForeignKey('datasets.id'), nullable=True
-    )
+    independent_test_dataset_id = db.Column(db.Integer, db.ForeignKey('datasets.id'), nullable=True)
     independent_accuracy = db.Column(db.Float, nullable=True)
     independent_f1_score = db.Column(db.Float, nullable=True)
     independent_metrics_json = db.Column(db.Text, nullable=True)
 
     # 状态和可见性
     status = db.Column(
-        db.Enum('draft', 'trained', 'deployed', 'archived', 'failed',
-                name='model_status'),
+        db.Enum('draft', 'trained', 'deployed', 'archived', 'failed', name='model_status'),
         default='draft',
         nullable=False,
-        index=True
+        index=True,
     )
     is_public = db.Column(db.Boolean, default=False, index=True)
     deployment_url = db.Column(db.String(512), nullable=True)
@@ -118,31 +117,18 @@ class ModelRecord(AccessControlMixin, db.Model):
 
     # 时间戳
     created_at = db.Column(db.DateTime, default=lambda: localnow(), nullable=False)
-    updated_at = db.Column(
-        db.DateTime,
-        default=lambda: localnow(),
-        onupdate=lambda: localnow(),
-        nullable=False
-    )
+    updated_at = db.Column(db.DateTime, default=lambda: localnow(), onupdate=lambda: localnow(), nullable=False)
 
     # 表级约束: 指标值域检查
     __table_args__ = (
-        CheckConstraint('accuracy IS NULL OR (accuracy >= 0.0 AND accuracy <= 1.0)',
-                        name='ck_accuracy_range'),
-        CheckConstraint('precision IS NULL OR (precision >= 0.0 AND precision <= 1.0)',
-                        name='ck_precision_range'),
-        CheckConstraint('recall IS NULL OR (recall >= 0.0 AND recall <= 1.0)',
-                        name='ck_recall_range'),
-        CheckConstraint('f1_score IS NULL OR (f1_score >= 0.0 AND f1_score <= 1.0)',
-                        name='ck_f1_score_range'),
-        CheckConstraint('loss IS NULL OR loss >= 0.0',
-                        name='ck_loss_nonnegative'),
-        CheckConstraint('mse IS NULL OR mse >= 0.0',
-                        name='ck_mse_nonnegative'),
-        CheckConstraint('mae IS NULL OR mae >= 0.0',
-                        name='ck_mae_nonnegative'),
-        CheckConstraint('r2 IS NULL OR r2 <= 1.0',
-                        name='ck_r2_upper'),
+        CheckConstraint('accuracy IS NULL OR (accuracy >= 0.0 AND accuracy <= 1.0)', name='ck_accuracy_range'),
+        CheckConstraint('precision IS NULL OR (precision >= 0.0 AND precision <= 1.0)', name='ck_precision_range'),
+        CheckConstraint('recall IS NULL OR (recall >= 0.0 AND recall <= 1.0)', name='ck_recall_range'),
+        CheckConstraint('f1_score IS NULL OR (f1_score >= 0.0 AND f1_score <= 1.0)', name='ck_f1_score_range'),
+        CheckConstraint('loss IS NULL OR loss >= 0.0', name='ck_loss_nonnegative'),
+        CheckConstraint('mse IS NULL OR mse >= 0.0', name='ck_mse_nonnegative'),
+        CheckConstraint('mae IS NULL OR mae >= 0.0', name='ck_mae_nonnegative'),
+        CheckConstraint('r2 IS NULL OR r2 <= 1.0', name='ck_r2_upper'),
         # 性能索引 — leaderboard排序 + 列表过滤
         db.Index('ix_model_records_accuracy', 'accuracy'),
         db.Index('ix_model_records_f1_score', 'f1_score'),
@@ -155,9 +141,7 @@ class ModelRecord(AccessControlMixin, db.Model):
     owner = db.relationship('User', back_populates='model_records')
     training_dataset = db.relationship('Dataset', foreign_keys=[training_dataset_id])
     training_job = db.relationship('TrainingJob', foreign_keys=[training_job_id])
-    independent_test_dataset = db.relationship(
-        'Dataset', foreign_keys=[independent_test_dataset_id]
-    )
+    independent_test_dataset = db.relationship('Dataset', foreign_keys=[independent_test_dataset_id])
 
     # ============ 属性 ============
 
@@ -190,6 +174,7 @@ class ModelRecord(AccessControlMixin, db.Model):
     def name_slug(self) -> str:
         """文件名友好的 slug"""
         import re
+
         return re.sub(r'[^a-zA-Z0-9_-]', '-', self.name.lower()).strip('-')
 
     # ============ 方法 ============
@@ -206,16 +191,23 @@ class ModelRecord(AccessControlMixin, db.Model):
         """
         # 检测是否包含回归指标 (含 test_/train_ 前缀 或 裸键)
         _reg_suffixes = ('mse', 'mae', 'r2', 'rmse', 'r2_score')
-        has_reg = any(
-            k.endswith(_reg_suffixes) for k in metrics
+        has_reg = any(k.endswith(_reg_suffixes) for k in metrics)
+        has_cls = (
+            'accuracy' in metrics
+            or 'precision_macro' in metrics
+            or any('_accuracy' in k or '_precision_' in k for k in metrics)
         )
-        has_cls = 'accuracy' in metrics or 'precision_macro' in metrics or any(
-            '_accuracy' in k or '_precision_' in k for k in metrics)
         has_cluster = any(
-            k.endswith(suffix) for k in metrics
-            for suffix in ('silhouette_score', 'davies_bouldin_score',
-                           'calinski_harabasz_score', 'inertia',
-                           'adjusted_rand_score', 'normalized_mutual_info_score')
+            k.endswith(suffix)
+            for k in metrics
+            for suffix in (
+                'silhouette_score',
+                'davies_bouldin_score',
+                'calinski_harabasz_score',
+                'inertia',
+                'adjusted_rand_score',
+                'normalized_mutual_info_score',
+            )
         )
 
         if has_cls or has_reg or has_cluster:

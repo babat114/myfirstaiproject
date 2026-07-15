@@ -10,6 +10,7 @@
 
 设计原则: 与训练器框架无关, 接受 DataFrame/ndarray, 返回处理后的数据
 """
+
 import logging
 
 import numpy as np
@@ -20,9 +21,11 @@ _nlp_logger = logging.getLogger(__name__)
 
 # ============ Tokenizer (必须可 pickle) ============
 
+
 def jieba_tokenize(text: str):
     """jieba 中文分词 — 模块级函数 (必须可 pickle)"""
     import jieba
+
     return list(jieba.cut(text))
 
 
@@ -38,6 +41,7 @@ def combined_tokenize(text: str):
     import re
 
     import jieba
+
     words = list(jieba.cut(text))
     # 提取中文字符 unigram (U+4E00-U+9FFF 基本汉字 + U+3400-U+4DBF 扩展A)
     chars = re.findall(r'[㐀-鿿]', text)
@@ -78,6 +82,7 @@ def detect_nlp_text_column(df: pd.DataFrame, dataset_category: str = None):
 
 # ============ Vectorizer 配置 ============
 
+
 def create_vectorizer_config(nlp_max_features=2000, nlp_min_df=2, nlp_max_df=0.9):
     """创建 TfidfVectorizer 配置字典。
 
@@ -90,6 +95,7 @@ def create_vectorizer_config(nlp_max_features=2000, nlp_min_df=2, nlp_max_df=0.9
     """
     try:
         import jieba  # noqa: F401
+
         _nlp_logger.info('[NLP] Using combined jieba+char tokenizer')
         return {
             'tokenizer': combined_tokenize,
@@ -113,6 +119,7 @@ def create_vectorizer_config(nlp_max_features=2000, nlp_min_df=2, nlp_max_df=0.9
 
 
 # ============ 3-way TF-IDF 变换 ============
+
 
 def apply_tfidf_3way(
     train_indices: list,
@@ -148,7 +155,8 @@ def apply_tfidf_3way(
     n_features = tfidf_train.shape[1]
     _nlp_logger.info(
         '[NLP] TF-IDF complete: %d features, train=%d val=%d test=%d',
-        n_features, tfidf_train.shape[0],
+        n_features,
+        tfidf_train.shape[0],
         tfidf_val.shape[0] if tfidf_val is not None else 0,
         tfidf_test.shape[0],
     )
@@ -174,10 +182,11 @@ def tfidf_to_dataframe(tfidf_matrix, indices, prefix='tfidf'):
 
 # ============ 类别标签 ============
 
+
 def extract_class_labels(y: pd.Series) -> list:
     """从目标列提取人类可读的类别标签 (排序)。"""
     try:
         unique_labels = y.dropna().unique()
-        return [str(l) for l in sorted(unique_labels, key=str)]
+        return [str(c) for c in sorted(unique_labels, key=str)]
     except Exception:
         return []

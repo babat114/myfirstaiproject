@@ -10,6 +10,7 @@ v2 改进 (2026-06-20):
   - 每个 epoch 后报告 train + val 双指标
 ============================================
 """
+
 import contextlib
 import copy
 import json
@@ -25,17 +26,17 @@ _HF_MIRROR = 'https://hf-mirror.com'
 
 # 语言 → 预训练模型映射
 LANGUAGE_MODEL_MAP = {
-    'zh': 'bert-base-chinese',          # 中文: BERT-base (110M参数)
-    'en': 'distilbert-base-uncased',    # 英文: DistilBERT (66M, 轻量)
+    'zh': 'bert-base-chinese',  # 中文: BERT-base (110M参数)
+    'en': 'distilbert-base-uncased',  # 英文: DistilBERT (66M, 轻量)
     'multi': 'bert-base-multilingual-cased',  # 多语言
 }
 
 # 默认配置
 DEFAULT_MODEL = 'bert-base-chinese'
-MAX_LENGTH = 256        # 最大token长度
-BATCH_SIZE = 16         # CPU友好batch
-LEARNING_RATE = 2e-5    # BERT推荐学习率
-EPOCHS = 3              # 微调3-5轮
+MAX_LENGTH = 256  # 最大token长度
+BATCH_SIZE = 16  # CPU友好batch
+LEARNING_RATE = 2e-5  # BERT推荐学习率
+EPOCHS = 3  # 微调3-5轮
 WARMUP_STEPS = 100
 
 
@@ -47,6 +48,7 @@ def _ensure_hf_access():
     # 尝试直连，失败则切镜像
     try:
         import urllib.request
+
         req = urllib.request.Request('https://huggingface.co', method='HEAD')
         urllib.request.urlopen(req, timeout=5)
     except Exception:
@@ -61,9 +63,7 @@ def _download_model(model_name: str):
 
     # 先尝试从本地缓存加载
     try:
-        tokenizer = AutoTokenizer.from_pretrained(
-            model_name, trust_remote_code=True, local_files_only=True
-        )
+        tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True, local_files_only=True)
         # local_files_only 成功 → 已缓存
         return tokenizer
     except Exception:
@@ -79,6 +79,8 @@ def _download_model(model_name: str):
             f'错误: {e}\n'
             f'或运行: export HF_ENDPOINT=https://hf-mirror.com'
         )
+
+
 class TransformersNLPTrainer(BaseTrainer):
     """NLP Transformer 微调训练器
 
@@ -155,6 +157,7 @@ class TransformersNLPTrainer(BaseTrainer):
 
         # 编码标签
         from sklearn.preprocessing import LabelEncoder
+
         le = LabelEncoder()
         y = le.fit_transform(df[target_col].astype(str))
         self._label2id = {label: i for i, label in enumerate(le.classes_)}
@@ -168,8 +171,11 @@ class TransformersNLPTrainer(BaseTrainer):
         # —— 3-way 分割: train / val / test ——
         # Step 1: 分出 test 集
         X_train_val, X_test, y_train_val, y_test = train_test_split(
-            texts, y, test_size=self.test_size, random_state=42,
-            stratify=y if num_classes > 1 and min(np.bincount(y)) >= 2 else None
+            texts,
+            y,
+            test_size=self.test_size,
+            random_state=42,
+            stratify=y if num_classes > 1 and min(np.bincount(y)) >= 2 else None,
         )
         self._X_test_texts = X_test
         self._y_test_labels = y_test
@@ -178,42 +184,32 @@ class TransformersNLPTrainer(BaseTrainer):
         val_ratio = self.val_size / (1.0 - self.test_size)
         stratify_tv = y_train_val if num_classes > 1 and min(np.bincount(y_train_val)) >= 2 else None
         X_train, X_val, y_train, y_val = train_test_split(
-            X_train_val, y_train_val, test_size=val_ratio, random_state=42,
-            stratify=stratify_tv
+            X_train_val, y_train_val, test_size=val_ratio, random_state=42, stratify=stratify_tv
         )
 
         self.callback.on_log(f'训练集: {len(X_train)}, 验证集: {len(X_val)}, 测试集: {len(X_test)}')
 
         # Tokenize
-        self._tokenizer = AutoTokenizer.from_pretrained(
-            self.model_name, local_files_only=True
-        )
+        self._tokenizer = AutoTokenizer.from_pretrained(self.model_name, local_files_only=True)
         train_enc = self._tokenizer(
-            X_train, truncation=True, padding='max_length',
-            max_length=self.max_length, return_tensors='pt'
+            X_train, truncation=True, padding='max_length', max_length=self.max_length, return_tensors='pt'
         )
         val_enc = self._tokenizer(
-            X_val, truncation=True, padding='max_length',
-            max_length=self.max_length, return_tensors='pt'
+            X_val, truncation=True, padding='max_length', max_length=self.max_length, return_tensors='pt'
         )
         test_enc = self._tokenizer(
-            X_test, truncation=True, padding='max_length',
-            max_length=self.max_length, return_tensors='pt'
+            X_test, truncation=True, padding='max_length', max_length=self.max_length, return_tensors='pt'
         )
 
         # DataLoader
         from torch.utils.data import DataLoader, TensorDataset
+
         train_ds = TensorDataset(
-            train_enc['input_ids'], train_enc['attention_mask'],
-            torch.tensor(y_train, dtype=torch.long)
+            train_enc['input_ids'], train_enc['attention_mask'], torch.tensor(y_train, dtype=torch.long)
         )
-        val_ds = TensorDataset(
-            val_enc['input_ids'], val_enc['attention_mask'],
-            torch.tensor(y_val, dtype=torch.long)
-        )
+        val_ds = TensorDataset(val_enc['input_ids'], val_enc['attention_mask'], torch.tensor(y_val, dtype=torch.long))
         test_ds = TensorDataset(
-            test_enc['input_ids'], test_enc['attention_mask'],
-            torch.tensor(y_test, dtype=torch.long)
+            test_enc['input_ids'], test_enc['attention_mask'], torch.tensor(y_test, dtype=torch.long)
         )
         self._train_loader = DataLoader(train_ds, batch_size=self.batch_size, shuffle=True)
         self._val_loader = DataLoader(val_ds, batch_size=self.batch_size, shuffle=False)
@@ -246,16 +242,16 @@ class TransformersNLPTrainer(BaseTrainer):
         # AdamW 优化器
         no_decay = ['bias', 'LayerNorm.weight']
         optimizer_grouped_params = [
-            {'params': [p for n, p in self._model.named_parameters()
-                        if not any(nd in n for nd in no_decay)],
-             'weight_decay': 0.01},
-            {'params': [p for n, p in self._model.named_parameters()
-                        if any(nd in n for nd in no_decay)],
-             'weight_decay': 0.0},
+            {
+                'params': [p for n, p in self._model.named_parameters() if not any(nd in n for nd in no_decay)],
+                'weight_decay': 0.01,
+            },
+            {
+                'params': [p for n, p in self._model.named_parameters() if any(nd in n for nd in no_decay)],
+                'weight_decay': 0.0,
+            },
         ]
-        self._optimizer = torch.optim.AdamW(
-            optimizer_grouped_params, lr=self.learning_rate
-        )
+        self._optimizer = torch.optim.AdamW(optimizer_grouped_params, lr=self.learning_rate)
 
         # 线性warmup+衰减调度器
         total_steps = len(self._train_loader) * self.total_epochs
@@ -270,6 +266,7 @@ class TransformersNLPTrainer(BaseTrainer):
     def train_epoch(self, epoch: int) -> dict:
         """训练一个 epoch + 验证，返回 train + val 指标"""
         import torch
+
         self._model.train()
         total_loss = 0.0
         correct = total = 0
@@ -331,7 +328,7 @@ class TransformersNLPTrainer(BaseTrainer):
                 self._best_val_metric = round(self._best_val_loss, 4)
 
         self.callback.on_log(
-            f'Epoch {epoch+1}/{self.total_epochs} - loss={avg_loss:.4f}, '
+            f'Epoch {epoch + 1}/{self.total_epochs} - loss={avg_loss:.4f}, '
             f'acc={acc:.4f}, val_loss={val_avg_loss:.4f}, val_acc={val_acc:.4f}, '
             f'lr={lr:.2e}'
         )
@@ -420,6 +417,7 @@ class TransformersNLPTrainer(BaseTrainer):
         if self._model is None:
             return
         import torch
+
         os.makedirs(self.output_dir, exist_ok=True)
 
         ckpt = {
@@ -437,6 +435,7 @@ class TransformersNLPTrainer(BaseTrainer):
     @staticmethod
     def load_checkpoint(output_dir: str) -> dict:
         import torch
+
         ckpt_path = os.path.join(output_dir, 'checkpoint.pt')
         if not os.path.exists(ckpt_path):
             return {}

@@ -4,6 +4,7 @@
 RESTful JSON 接口
 ============================================
 """
+
 import contextlib
 import json
 
@@ -53,8 +54,10 @@ def list_jobs():
 
     user = get_current_user()
     result = TrainingService.list_jobs(
-        page=page, per_page=per_page,
-        status=status, search=search,
+        page=page,
+        per_page=per_page,
+        status=status,
+        search=search,
         owner_id=user.id,
     )
 
@@ -162,11 +165,13 @@ def create_job():
     if error:
         return jsonify({'success': False, 'message': error}), 400
 
-    return jsonify({
-        'success': True,
-        'message': '训练任务创建成功。',
-        'data': job.to_dict(),
-    }), 201
+    return jsonify(
+        {
+            'success': True,
+            'message': '训练任务创建成功。',
+            'data': job.to_dict(),
+        }
+    ), 201
 
 
 @training_api_bp.route('/<string:job_uuid>/start', methods=['POST'])
@@ -425,10 +430,12 @@ def fail_job(job_uuid):
 
     # 仅允许对 running/paused 状态的任务标记失败, 防止滥用
     if job.status not in ('running', 'paused', 'queued', 'preparing'):
-        return jsonify({
-            'success': False,
-            'message': f'无法将 {job.status} 状态的任务标记为失败。仅运行中的任务可标记。',
-        }), 400
+        return jsonify(
+            {
+                'success': False,
+                'message': f'无法将 {job.status} 状态的任务标记为失败。仅运行中的任务可标记。',
+            }
+        ), 400
 
     data = request.get_json(silent=True) or {}
     error_msg = data.get('error', '未知错误')
@@ -547,21 +554,66 @@ def retrain_with_params(job_uuid):
     # 数值转换 — expanded to accept all sklearn hyperparameter keys
     new_params = {}
     # 已知安全参数白名单
-    str_fields = ('algorithm', 'ml_task_type', 'framework', 'class_weight',
-                  'max_features', 'criterion', 'kernel', 'penalty', 'solver',
-                  'weights', 'metric', 'hidden_layers_str')
-    float_fields = ('learning_rate', 'test_size', 'dropout', 'weight_decay',
-                    'C', 'alpha', 'gamma', 'epsilon', 'subsample', 'learning_rate_init')
-    int_fields = ('batch_size', 'epochs', 'total_epochs', 'n_estimators', 'max_depth',
-                  'min_samples_split', 'min_samples_leaf', 'n_neighbors', 'max_iter',
-                  'n_clusters', 'val_size', 'early_stopping_patience')
+    str_fields = (
+        'algorithm',
+        'ml_task_type',
+        'framework',
+        'class_weight',
+        'max_features',
+        'criterion',
+        'kernel',
+        'penalty',
+        'solver',
+        'weights',
+        'metric',
+        'hidden_layers_str',
+    )
+    float_fields = (
+        'learning_rate',
+        'test_size',
+        'dropout',
+        'weight_decay',
+        'C',
+        'alpha',
+        'gamma',
+        'epsilon',
+        'subsample',
+        'learning_rate_init',
+    )
+    int_fields = (
+        'batch_size',
+        'epochs',
+        'total_epochs',
+        'n_estimators',
+        'max_depth',
+        'min_samples_split',
+        'min_samples_leaf',
+        'n_neighbors',
+        'max_iter',
+        'n_clusters',
+        'val_size',
+        'early_stopping_patience',
+    )
 
     # 已知安全的额外参数 (白名单, 防止参数注入)
     ALLOWED_EXTRA_PARAMS = {
-        'fit_intercept', 'positive', 'n_init', 'init', 'degree', 'p',
-        'linkage', 'eps', 'min_samples', 'batch_size_tune',
-        'validation_fraction', 'early_stopping', 'hidden_layer_sizes',
-        'tol', 'verbose', 'n_jobs', 'warm_start',
+        'fit_intercept',
+        'positive',
+        'n_init',
+        'init',
+        'degree',
+        'p',
+        'linkage',
+        'eps',
+        'min_samples',
+        'batch_size_tune',
+        'validation_fraction',
+        'early_stopping',
+        'hidden_layer_sizes',
+        'tol',
+        'verbose',
+        'n_jobs',
+        'warm_start',
     }
 
     for k in str_fields:
@@ -599,14 +651,17 @@ def retrain_with_params(job_uuid):
     if not success:
         return jsonify({'success': False, 'message': error}), 400
 
-    return jsonify({
-        'success': True,
-        'message': '重新训练已启动',
-        'data': {'params_used': new_params or '(使用原参数)'},
-    })
+    return jsonify(
+        {
+            'success': True,
+            'message': '重新训练已启动',
+            'data': {'params_used': new_params or '(使用原参数)'},
+        }
+    )
 
 
 # ============ 参数调整引导 API ============
+
 
 @training_api_bp.route('/<string:job_uuid>/guidance', methods=['GET'])
 @api_login_required
@@ -711,6 +766,7 @@ def get_search_space():
         description: 搜索空间 (param_grid 参数网格)
     """
     from app.services.hyperparameter_tuning import HyperparameterTuningService
+
     algorithm = request.args.get('algorithm', 'random_forest')
     framework = request.args.get('framework', 'sklearn')
     space = HyperparameterTuningService.get_search_space(algorithm, framework)
@@ -797,11 +853,13 @@ def run_tuning():
     if start_training and job:
         TrainingService.start_job(job)
 
-    return jsonify({
-        'success': True,
-        'message': '调优完成',
-        'data': {
-            'job': job.to_dict() if job else None,
-            'tuning_result': tuning_result,
+    return jsonify(
+        {
+            'success': True,
+            'message': '调优完成',
+            'data': {
+                'job': job.to_dict() if job else None,
+                'tuning_result': tuning_result,
+            },
         }
-    }), 201
+    ), 201

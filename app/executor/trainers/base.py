@@ -2,6 +2,7 @@
 训练器抽象基类
 定义所有训练器必须实现的接口
 """
+
 import os
 import threading
 from abc import ABC, abstractmethod
@@ -144,9 +145,7 @@ class BaseTrainer(ABC):
             if self.has_checkpoint(self.output_dir):
                 ckpt_meta = self.load_checkpoint(self.output_dir)
                 self._current_epoch = ckpt_meta.get('epoch', 0)
-                self.callback.on_log(
-                    f'[检查点] 从 epoch {self._current_epoch}/{self.total_epochs} 恢复训练'
-                )
+                self.callback.on_log(f'[检查点] 从 epoch {self._current_epoch}/{self.total_epochs} 恢复训练')
             else:
                 self._current_epoch = 0
 
@@ -180,9 +179,7 @@ class BaseTrainer(ABC):
                 # 检查早停
                 if self._early_stop:
                     stopped_at = epoch
-                    self.callback.on_log(
-                        f'[早停] 验证指标连续未改善，在第 {stopped_at}/{self.total_epochs} 轮提前停止'
-                    )
+                    self.callback.on_log(f'[早停] 验证指标连续未改善，在第 {stopped_at}/{self.total_epochs} 轮提前停止')
                     break
 
                 # 训练一个 epoch
@@ -193,36 +190,30 @@ class BaseTrainer(ABC):
                 # 检查子类是否在 train_epoch 中设置了早停
                 if self._early_stop:
                     stopped_at = epoch + 1
-                    self.callback.on_log(
-                        f'[早停] 验证指标连续未改善，在第 {stopped_at}/{self.total_epochs} 轮提前停止'
-                    )
+                    self.callback.on_log(f'[早停] 验证指标连续未改善，在第 {stopped_at}/{self.total_epochs} 轮提前停止')
                     break
 
                 # —— 定期保存检查点 ——
                 if self.checkpoint_frequency > 0 and (epoch + 1) % self.checkpoint_frequency == 0:
                     self.save_checkpoint()
-                    self.callback.on_log(
-                        f'[检查点] epoch {epoch + 1}/{self.total_epochs} 快照已保存'
-                    )
+                    self.callback.on_log(f'[检查点] epoch {epoch + 1}/{self.total_epochs} 快照已保存')
 
                 # 日志 — 突出 val metrics
-                train_items = {k: v for k, v in metrics.items()
-                              if isinstance(v, float) and k.startswith('train_')}
-                val_items = {k: v for k, v in metrics.items()
-                            if isinstance(v, float) and k.startswith('val_')}
-                other_items = {k: v for k, v in metrics.items()
-                              if isinstance(v, float) and not k.startswith(('train_', 'val_'))}
+                train_items = {k: v for k, v in metrics.items() if isinstance(v, float) and k.startswith('train_')}
+                val_items = {k: v for k, v in metrics.items() if isinstance(v, float) and k.startswith('val_')}
+                other_items = {
+                    k: v for k, v in metrics.items() if isinstance(v, float) and not k.startswith(('train_', 'val_'))
+                }
 
                 parts = []
                 if train_items:
-                    parts.append('train: ' + ' '.join(
-                        f'{k[6:]}={v:.4f}' for k, v in train_items.items()))
+                    parts.append('train: ' + ' '.join(f'{k[6:]}={v:.4f}' for k, v in train_items.items()))
                 if val_items:
-                    parts.append('val: ' + ' '.join(
-                        f'{k[4:]}={v:.4f}' for k, v in val_items.items()))
+                    parts.append('val: ' + ' '.join(f'{k[4:]}={v:.4f}' for k, v in val_items.items()))
                 if other_items:
-                    parts.append(' '.join(f'{k}={v:.4f}' if isinstance(v, float) else f'{k}={v}'
-                                         for k, v in other_items.items()))
+                    parts.append(
+                        ' '.join(f'{k}={v:.4f}' if isinstance(v, float) else f'{k}={v}' for k, v in other_items.items())
+                    )
                 self.callback.on_log(f'Epoch {epoch + 1}/{self.total_epochs} - {", ".join(parts)}')
 
             # 评估
@@ -277,9 +268,7 @@ class BaseTrainer(ABC):
         # 先保存检查点再暂停
         try:
             self.save_checkpoint()
-            self.callback.on_log(
-                f'[检查点] 训练暂停, epoch {self._current_epoch + 1} 快照已保存'
-            )
+            self.callback.on_log(f'[检查点] 训练暂停, epoch {self._current_epoch + 1} 快照已保存')
         except Exception as e:
             self.callback.on_log(f'[检查点] 暂停快照保存失败: {e}')
         self._pause_event.clear()
@@ -297,6 +286,7 @@ class BaseTrainer(ABC):
         """训练成功完成或取消后清理检查点文件 (文件或目录)"""
         import glob
         import shutil
+
         pattern = os.path.join(self.output_dir, 'checkpoint*')
         for f in glob.glob(pattern):
             try:

@@ -4,6 +4,7 @@
 共享的模型行为: 权限检查 / 软删除 / 时间戳
 ============================================
 """
+
 from app import db
 from app._timezone import localnow
 

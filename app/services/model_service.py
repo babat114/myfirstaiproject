@@ -4,6 +4,7 @@ AI模型服务
 处理模型注册、版本管理、性能追踪
 ============================================
 """
+
 import os
 
 from flask import current_app
@@ -22,6 +23,7 @@ from app.utils.helpers import paginate_query, sanitize_service_error
 # 模型卡片生成 — 安全转义工具 (提取自 generate_model_card)
 # ═══════════════════════════════════════════════════════════════
 
+
 def _escape_yaml_value(s: str) -> str:
     """转义 YAML 值中的特殊字符, 防止 YAML 注入"""
     if not s:
@@ -38,9 +40,18 @@ def _escape_bibtex_value(s: str) -> str:
     if not s:
         return s
     # 注意: \\ 必须最先转义, 否则会破坏后续 \{ \} 等转义序列
-    for ch in [('\\', '\\textbackslash{}'), ('{', '\\{'), ('}', '\\}'),
-                ('$', '\\$'), ('&', '\\&'), ('#', '\\#'),
-                ('%', '\\%'), ('_', '\\_'), ('~', '\\~{}'), ('^', '\\^{}')]:
+    for ch in [
+        ('\\', '\\textbackslash{}'),
+        ('{', '\\{'),
+        ('}', '\\}'),
+        ('$', '\\$'),
+        ('&', '\\&'),
+        ('#', '\\#'),
+        ('%', '\\%'),
+        ('_', '\\_'),
+        ('~', '\\~{}'),
+        ('^', '\\^{}'),
+    ]:
         s = s.replace(ch[0], ch[1])
     return s
 
@@ -73,26 +84,29 @@ class ModelService:
             是否允许上传
         """
         # 1. 扩展名检查
-        ext_ok = '.' in filename and \
-                 filename.rsplit('.', 1)[1].lower() in ModelService.ALLOWED_EXTENSIONS
+        ext_ok = '.' in filename and filename.rsplit('.', 1)[1].lower() in ModelService.ALLOWED_EXTENSIONS
         if not ext_ok:
             return False
 
         # 2. MIME 类型检查 (如提供 file_storage)
         if file_storage is not None:
             mime = (getattr(file_storage, 'content_type', '') or '').lower()
-            if mime and mime not in ModelService.ALLOWED_MIMETYPES:
-                # 允许以 text/ 开头的类型 (某些 JSON/YAML 文件)
-                if not mime.startswith('text/'):
-                    return False
+            if mime and mime not in ModelService.ALLOWED_MIMETYPES and not mime.startswith('text/'):
+                return False
 
         return True
 
     @staticmethod
-    def create_model(user: User, name: str, model_type: str = 'other',
-                     framework: str = None, description: str = None,
-                     version: str = '1.0.0', hyperparameters: dict = None,
-                     is_public: bool = False) -> tuple[ModelRecord | None, str | None]:
+    def create_model(
+        user: User,
+        name: str,
+        model_type: str = 'other',
+        framework: str = None,
+        description: str = None,
+        version: str = '1.0.0',
+        hyperparameters: dict = None,
+        is_public: bool = False,
+    ) -> tuple[ModelRecord | None, str | None]:
         """
         注册新AI模型
 
@@ -119,7 +133,7 @@ class ModelService:
             dashboard_cache.invalidate('model_stats:')
             dashboard_cache.invalidate('dashboard:')
 
-            logger.info(f"模型注册成功: {name} v{version} by {user.username}")
+            logger.info(f'模型注册成功: {name} v{version} by {user.username}')
             return model, None
 
         except Exception as e:
@@ -127,8 +141,7 @@ class ModelService:
             return None, sanitize_service_error(e, '模型注册失败')
 
     @staticmethod
-    def upload_model_file(model: ModelRecord, file: FileStorage,
-                          upload_folder: str = None) -> tuple[bool, str | None]:
+    def upload_model_file(model: ModelRecord, file: FileStorage, upload_folder: str = None) -> tuple[bool, str | None]:
         """
         上传模型权重文件
 
@@ -145,7 +158,7 @@ class ModelService:
         os.makedirs(model_dir, exist_ok=True)
 
         original_name = secure_filename(file.filename)
-        unique_name = f"{model.uuid}_{original_name}"
+        unique_name = f'{model.uuid}_{original_name}'
         file_path = os.path.join(model_dir, unique_name)
 
         try:
@@ -162,7 +175,7 @@ class ModelService:
             dashboard_cache.invalidate('dashboard:')
             leaderboard_cache.clear()
 
-            logger.info(f"模型文件上传成功: {model.name} ({file_size} bytes)")
+            logger.info(f'模型文件上传成功: {model.name} ({file_size} bytes)')
             return True, None
 
         except Exception as e:
@@ -192,25 +205,20 @@ class ModelService:
     def get_model_by_id(model_id: int) -> ModelRecord | None:
         """根据 ID 获取模型 (预加载 owner 避免详情页 N+1)"""
         return db.session.execute(
-            db.select(ModelRecord).filter_by(id=model_id)
-            .options(joinedload(ModelRecord.owner))
+            db.select(ModelRecord).filter_by(id=model_id).options(joinedload(ModelRecord.owner))
         ).scalar_one_or_none()
 
     @staticmethod
     def get_model_by_uuid(model_uuid: str) -> ModelRecord | None:
         """根据 UUID 获取模型 (预加载 owner 避免详情页 N+1)"""
         return db.session.execute(
-            db.select(ModelRecord).filter_by(uuid=model_uuid)
-            .options(joinedload(ModelRecord.owner))
+            db.select(ModelRecord).filter_by(uuid=model_uuid).options(joinedload(ModelRecord.owner))
         ).scalar_one_or_none()
 
     @staticmethod
     def update_model(model: ModelRecord, data: dict) -> tuple[bool, str | None]:
         """更新模型信息"""
-        allowed_fields = {
-            'name', 'description', 'version', 'model_type',
-            'framework', 'is_public', 'status'
-        }
+        allowed_fields = {'name', 'description', 'version', 'model_type', 'framework', 'is_public', 'status'}
         try:
             for field, value in data.items():
                 if field in allowed_fields and hasattr(model, field):
@@ -237,11 +245,7 @@ class ModelService:
             from app.models.training_job import TrainingJob
 
             # 解除关联的训练任务引用 (避免外键约束报错) — SA 2.0 bulk update
-            db.session.execute(
-                db.update(TrainingJob)
-                .where(TrainingJob.model_id == model.id)
-                .values(model_id=None)
-            )
+            db.session.execute(db.update(TrainingJob).where(TrainingJob.model_id == model.id).values(model_id=None))
 
             # 先删除 DB 记录，再删物理文件 (确保 DB 操作成功后再操作文件)
             model_files = []
@@ -264,7 +268,7 @@ class ModelService:
             dashboard_cache.invalidate('dashboard:')
             leaderboard_cache.clear()
 
-            logger.info(f"模型已删除: {model.name}")
+            logger.info(f'模型已删除: {model.name}')
             return True, None
 
         except Exception as e:
@@ -273,11 +277,18 @@ class ModelService:
             return False, sanitize_service_error(e, '删除模型失败')
 
     @staticmethod
-    def import_model(user: User, name: str, model_type: str = 'other',
-                     framework: str = None, description: str = None,
-                     version: str = '1.0.0', hyperparameters: dict = None,
-                     metrics: dict = None, model_file_path: str = None,
-                     is_public: bool = False) -> tuple[ModelRecord | None, str | None]:
+    def import_model(
+        user: User,
+        name: str,
+        model_type: str = 'other',
+        framework: str = None,
+        description: str = None,
+        version: str = '1.0.0',
+        hyperparameters: dict = None,
+        metrics: dict = None,
+        model_file_path: str = None,
+        is_public: bool = False,
+    ) -> tuple[ModelRecord | None, str | None]:
         """导入模型 — 从已有模型文件创建完整 ModelRecord
 
         与 create_model 的区别:
@@ -322,7 +333,7 @@ class ModelService:
             if any(k in (metrics or {}) for k in ('accuracy', 'f1_score', 'r2')):
                 leaderboard_cache.clear()
 
-            logger.info(f"模型导入成功: {name} v{version} by {user.username}")
+            logger.info(f'模型导入成功: {name} v{version} by {user.username}')
             return model, None
 
         except Exception as e:
@@ -331,17 +342,33 @@ class ModelService:
 
     # 允许排序的列名白名单 (防SQL注入)
     _SORTABLE_COLUMNS = {
-        'accuracy', 'precision', 'recall', 'f1_score', 'loss',
-        'r2', 'mse', 'mae', 'created_at', 'updated_at', 'name',
+        'accuracy',
+        'precision',
+        'recall',
+        'f1_score',
+        'loss',
+        'r2',
+        'mse',
+        'mae',
+        'created_at',
+        'updated_at',
+        'name',
     }
 
     @staticmethod
-    def list_models(page: int = 1, per_page: int = 15,
-                    model_type: str = None, framework: str = None,
-                    owner_id: int = None, status: str = None,
-                    search: str = None, is_public: bool = None,
-                    include_public: bool = False,
-                    sort_by: str = 'created_at', sort_order: str = 'desc') -> dict:
+    def list_models(
+        page: int = 1,
+        per_page: int = 15,
+        model_type: str = None,
+        framework: str = None,
+        owner_id: int = None,
+        status: str = None,
+        search: str = None,
+        is_public: bool = None,
+        include_public: bool = False,
+        sort_by: str = 'created_at',
+        sort_order: str = 'desc',
+    ) -> dict:
         """
         获取模型列表 (支持多条件筛选 + 排序)
 
@@ -366,7 +393,7 @@ class ModelService:
                 query = query.filter(
                     db.or_(
                         ModelRecord.owner_id == owner_id,
-                        ModelRecord.is_public == True  # noqa: E712
+                        ModelRecord.is_public == True,  # noqa: E712
                     )
                 )
             else:
@@ -408,13 +435,14 @@ class ModelService:
             return cached
 
         sort_column = getattr(ModelRecord, metric, ModelRecord.accuracy)
-        models = ModelRecord.query \
-            .options(joinedload(ModelRecord.owner)) \
-            .filter(ModelRecord.status.in_(['trained', 'deployed'])) \
-            .filter(sort_column.isnot(None)) \
-            .order_by(sort_column.desc()) \
-            .limit(limit) \
+        models = (
+            ModelRecord.query.options(joinedload(ModelRecord.owner))
+            .filter(ModelRecord.status.in_(['trained', 'deployed']))
+            .filter(sort_column.isnot(None))
+            .order_by(sort_column.desc())
+            .limit(limit)
             .all()
+        )
 
         result = [m.to_dict() for m in models]
         leaderboard_cache.set(cache_key, result)
@@ -441,15 +469,13 @@ class ModelService:
 
         # 按模型类型聚合
         type_rows = db.session.execute(
-            _filtered_query(ModelRecord.model_type, func.count(ModelRecord.id))
-            .group_by(ModelRecord.model_type)
+            _filtered_query(ModelRecord.model_type, func.count(ModelRecord.id)).group_by(ModelRecord.model_type)
         ).all()
         type_counts = {row[0]: row[1] for row in type_rows}
 
         # 按状态聚合
         status_rows = db.session.execute(
-            _filtered_query(ModelRecord.status, func.count(ModelRecord.id))
-            .group_by(ModelRecord.status)
+            _filtered_query(ModelRecord.status, func.count(ModelRecord.id)).group_by(ModelRecord.status)
         ).all()
         status_counts = {row[0]: row[1] for row in status_rows}
 
@@ -509,6 +535,7 @@ class ModelService:
         algo = hp.get('algorithm', '')
         # 算法中文名 (用于卡片展示)
         from app.utils.algorithm_info import ALGORITHM_INFO
+
         algo_display_name = ALGORITHM_INFO.get(algo, {}).get('name', algo) if algo else ''
         now_str = localnow().strftime('%Y-%m-%d')
 
@@ -539,6 +566,7 @@ class ModelService:
         if not feature_names:
             try:
                 from app.services.inference_service import ModelInferenceService
+
                 _, metadata, _, _ = ModelInferenceService.load_model(model)
                 if metadata and metadata.get('feature_names'):
                     feature_names = list(metadata['feature_names'])
@@ -576,37 +604,48 @@ class ModelService:
         model_uuid = model.uuid
 
         # ── 预计算嵌入文本 (避免 f-string 中嵌套引号) ──
-        algo_suffix = f" using the `{algo}` algorithm" if algo else ""
-        nlp_hint = " or text" if task == 'nlp' else ""
+        algo_suffix = f' using the `{algo}` algorithm' if algo else ''
+        nlp_hint = ' or text' if task == 'nlp' else ''
 
         # ── 安全字符串 ──
         safe_name = _escape_yaml_value(model.name)
         safe_owner = _escape_yaml_value(model.owner.username if model.owner else 'unknown')
         safe_bibtex_name = _escape_bibtex_value(model.name)
-        safe_bibtex_owner = _escape_bibtex_value(
-            model.owner.username if model.owner else 'AI Platform'
-        )
+        safe_bibtex_owner = _escape_bibtex_value(model.owner.username if model.owner else 'AI Platform')
         safe_bibtex_fw = _escape_bibtex_value(fw)
         safe_bibtex_task = _escape_bibtex_value(task)
 
         return {
-            'hp': hp, 'mm': mm, 'fw': fw, 'task': task, 'algo': algo,
-            'now_str': now_str, 'task_label': task_label, 'tags_str': tags_str,
-            'feature_names': feature_names, 'class_labels': class_labels,
+            'hp': hp,
+            'mm': mm,
+            'fw': fw,
+            'task': task,
+            'algo': algo,
+            'now_str': now_str,
+            'task_label': task_label,
+            'tags_str': tags_str,
+            'feature_names': feature_names,
+            'class_labels': class_labels,
             'metrics_table': metrics_table,
-            'feature_table': feature_table, 'class_table': class_table,
-            'hp_table': hp_table, 'dataset_info': dataset_info,
-            'model_uuid': model_uuid, 'algo_display_name': algo_display_name,
-            'algo_suffix': algo_suffix, 'nlp_hint': nlp_hint,
-            'safe_name': safe_name, 'safe_owner': safe_owner,
-            'safe_bibtex_name': safe_bibtex_name, 'safe_bibtex_owner': safe_bibtex_owner,
-            'safe_bibtex_fw': safe_bibtex_fw, 'safe_bibtex_task': safe_bibtex_task,
+            'feature_table': feature_table,
+            'class_table': class_table,
+            'hp_table': hp_table,
+            'dataset_info': dataset_info,
+            'model_uuid': model_uuid,
+            'algo_display_name': algo_display_name,
+            'algo_suffix': algo_suffix,
+            'nlp_hint': nlp_hint,
+            'safe_name': safe_name,
+            'safe_owner': safe_owner,
+            'safe_bibtex_name': safe_bibtex_name,
+            'safe_bibtex_owner': safe_bibtex_owner,
+            'safe_bibtex_fw': safe_bibtex_fw,
+            'safe_bibtex_task': safe_bibtex_task,
             'model': model,
         }
 
     @staticmethod
-    def _build_metrics_rows(task: str, model: ModelRecord,
-                            mm: dict) -> list:
+    def _build_metrics_rows(task: str, model: ModelRecord, mm: dict) -> list:
         """Build individual metric row strings for the evaluation table."""
         rows = []
         if task == 'classification':
@@ -647,10 +686,7 @@ class ModelService:
             return ''
         shown = feature_names[:20]
         table = '| # | Feature |\n|---|--------|\n'
-        table += '\n'.join(
-            f'| {i + 1} | `{name}` |'
-            for i, name in enumerate(shown)
-        )
+        table += '\n'.join(f'| {i + 1} | `{name}` |' for i, name in enumerate(shown))
         if len(feature_names) > 20:
             table += f'\n| ... | *{len(feature_names) - 20} more features* |'
         return table
@@ -661,9 +697,7 @@ class ModelService:
         if not class_labels:
             return ''
         table = '\n| Index | Class |\n|-------|-------|\n'
-        table += '\n'.join(
-            f'| {i} | `{c}` |' for i, c in enumerate(class_labels)
-        )
+        table += '\n'.join(f'| {i} | `{c}` |' for i, c in enumerate(class_labels))
         return table
 
     @staticmethod
@@ -672,11 +706,10 @@ class ModelService:
         if not hp:
             return ''
         table = '| Parameter | Value |\n|-----------|-------|\n'
-        show_hp = {k: v for k, v in hp.items()
-                   if not k.startswith('_') and k not in ('task_type', 'ml_task_type', 'tuned')}
-        table += '\n'.join(
-            f'| `{k}` | {v} |' for k, v in sorted(show_hp.items())
-        )
+        show_hp = {
+            k: v for k, v in hp.items() if not k.startswith('_') and k not in ('task_type', 'ml_task_type', 'tuned')
+        }
+        table += '\n'.join(f'| `{k}` | {v} |' for k, v in sorted(show_hp.items()))
         return table
 
     @staticmethod
@@ -694,7 +727,7 @@ class ModelService:
     def _render_card_frontmatter(ctx: dict) -> str:
         """Render the YAML frontmatter section of the model card."""
         model = ctx['model']
-        return f'''---
+        return f"""---
 language: zh
 tags:
   - {ctx['tags_str']}
@@ -708,7 +741,7 @@ created_at: {model.created_at.strftime('%Y-%m-%d') if model.created_at else '-'}
 updated_at: {model.updated_at.strftime('%Y-%m-%d') if model.updated_at else '-'}
 pipeline_tag: {ctx['task'].replace('_', '-')}
 ---
-'''
+"""
 
     @staticmethod
     def _render_card_body(ctx: dict) -> str:
@@ -730,7 +763,7 @@ pipeline_tag: {ctx['task'].replace('_', '-')}
         parts = []
 
         # ── 模型描述 ──
-        parts.append(f'''
+        parts.append(f"""
 # {model.name}
 
 > **Version**: {model.version} | **Framework**: {fw} | **Task**: {task_label}
@@ -743,59 +776,56 @@ pipeline_tag: {ctx['task'].replace('_', '-')}
 This is a **{task_label}** model built with **{fw}**{ctx['algo_suffix']}.
 The model has been trained and evaluated on the AI Model Training Platform, and is ready
 for inference via the platform API or as a standalone Docker container.
-''')
+""")
 
         # ── 预期用途 ──
-        parts.append(ModelService._render_intended_use_section(
-            task_label, fw, algo, feature_names, ctx['nlp_hint']
-        ))
+        parts.append(ModelService._render_intended_use_section(task_label, fw, algo, feature_names, ctx['nlp_hint']))
 
         # ── 训练数据 + 过程 ──
-        parts.append(ModelService._render_training_section(
-            ctx['dataset_info'], ctx['hp_table'], model
-        ))
+        parts.append(ModelService._render_training_section(ctx['dataset_info'], ctx['hp_table'], model))
 
         # ── 评估结果 ──
-        parts.append(ModelService._render_evaluation_section(
-            ctx['metrics_table'], ctx['mm']
-        ))
+        parts.append(ModelService._render_evaluation_section(ctx['metrics_table'], ctx['mm']))
 
         # ── 模型架构 + 特征 ──
-        parts.append(ModelService._render_architecture_section(
-            fw, algo, model, ctx['feature_table'], ctx['class_table']
-        ))
+        parts.append(
+            ModelService._render_architecture_section(fw, algo, model, ctx['feature_table'], ctx['class_table'])
+        )
 
         # ── 使用方法 ──
-        parts.append(ModelService._render_usage_section(
-            model_uuid, task, feature_names
-        ))
+        parts.append(ModelService._render_usage_section(model_uuid, task, feature_names))
 
         # ── 局限性 ──
         parts.append(ModelService._render_limitations_section(fw))
 
         # ── 引用 ──
-        parts.append(ModelService._render_citation_section(
-            model, now_str, ctx['safe_bibtex_name'], ctx['safe_bibtex_owner'],
-            ctx['safe_bibtex_fw'], ctx['safe_bibtex_task']
-        ))
+        parts.append(
+            ModelService._render_citation_section(
+                model,
+                now_str,
+                ctx['safe_bibtex_name'],
+                ctx['safe_bibtex_owner'],
+                ctx['safe_bibtex_fw'],
+                ctx['safe_bibtex_task'],
+            )
+        )
 
         return ''.join(parts)
 
     @staticmethod
-    def _render_intended_use_section(task_label: str, fw: str, algo: str,
-                                     feature_names: list, nlp_hint: str) -> str:
+    def _render_intended_use_section(task_label: str, fw: str, algo: str, feature_names: list, nlp_hint: str) -> str:
         """Render the Intended Use section."""
-        section = f'''
+        section = f"""
 ## Intended Use
 
 - **Primary Task**: {task_label}
-- **Framework**: {fw}'''
+- **Framework**: {fw}"""
         if algo:
             section += f'\n- **Algorithm**: `{algo}`'
         if feature_names:
             section += f'\n- **Input Features**: {len(feature_names)}'
 
-        section += f'''
+        section += f"""
 
 ### Use Cases
 
@@ -807,34 +837,33 @@ applications requiring automated predictions based on structured data{nlp_hint}.
 - Production-critical systems without additional validation
 - Domains significantly different from the training data distribution
 - Real-time safety-critical applications
-'''
+"""
         return section
 
     @staticmethod
-    def _render_training_section(dataset_info: str, hp_table: str,
-                                 model: ModelRecord) -> str:
+    def _render_training_section(dataset_info: str, hp_table: str, model: ModelRecord) -> str:
         """Render the Training Data + Training Procedure section."""
-        section = f'''
+        section = f"""
 ## Training Data
 
 {dataset_info if dataset_info else '*Training dataset information is not available.*'}
 
 ## Training Procedure
 
-### Hyperparameters'''
+### Hyperparameters"""
 
         if hp_table:
-            section += f'''
+            section += f"""
 
-{hp_table}'''
+{hp_table}"""
         else:
             section += '\n\n*No hyperparameter information available.*'
 
-        section += '''
+        section += """
 
 ### Training Duration
 
-'''
+"""
         if model.training_duration_seconds is not None:
             secs = model.training_duration_seconds
             if secs < 60:
@@ -851,12 +880,12 @@ applications requiring automated predictions based on structured data{nlp_hint}.
     @staticmethod
     def _render_evaluation_section(metrics_table: str, mm: dict) -> str:
         """Render the Evaluation Results section."""
-        section = f'''
+        section = f"""
 ## Evaluation Results
 
 | Metric | Value |
 |--------|-------|
-{metrics_table}'''
+{metrics_table}"""
 
         if mm.get('test_accuracy') is not None:
             section += f'\n| Test Accuracy | {mm["test_accuracy"] * 100:.2f}% |'
@@ -870,42 +899,42 @@ applications requiring automated predictions based on structured data{nlp_hint}.
         return section
 
     @staticmethod
-    def _render_architecture_section(fw: str, algo: str, model: ModelRecord,
-                                     feature_table: str, class_table: str) -> str:
+    def _render_architecture_section(
+        fw: str, algo: str, model: ModelRecord, feature_table: str, class_table: str
+    ) -> str:
         """Render the Model Architecture + Input Features section."""
-        section = f'''
+        section = f"""
 ## Model Architecture
 
-- **Framework**: {fw}'''
+- **Framework**: {fw}"""
 
         if algo:
             section += f'\n- **Algorithm**: `{algo}`'
         if model.file_size:
             section += f'\n- **File Size**: {model.file_size_mb} MB'
 
-        section += '''
+        section += """
 
-## Input Features'''
+## Input Features"""
 
         if feature_table:
-            section += f'''
+            section += f"""
 
-{feature_table}'''
+{feature_table}"""
         else:
             section += '\n\n*Feature information is not available.*'
 
         if class_table:
-            section += f'''
+            section += f"""
 
 ## Class Labels
 
-{class_table}'''
+{class_table}"""
 
         return section
 
     @staticmethod
-    def _render_usage_section(model_uuid: str, task: str,
-                              feature_names: list) -> str:
+    def _render_usage_section(model_uuid: str, task: str, feature_names: list) -> str:
         """Render the How to Use section (Python + curl + Docker)."""
         n_features = min(len(feature_names) if feature_names else 4, 4)
         sample_features = ', '.join(['1.0'] * n_features)
@@ -956,7 +985,7 @@ curl -X POST http://localhost:8000/predict \\
     @staticmethod
     def _render_limitations_section(fw: str) -> str:
         """Render the Limitations section."""
-        return f'''
+        return f"""
 ## Limitations
 
 1. **Training Data Bias**: The model may reflect biases present in the training data.
@@ -969,14 +998,19 @@ curl -X POST http://localhost:8000/predict \\
    above. Missing or extra features may cause errors or degraded performance.
 5. **Version Compatibility**: The model was trained with specific library versions;
    using different versions of {fw} may affect inference results.
-'''
+"""
 
     @staticmethod
-    def _render_citation_section(model: ModelRecord, now_str: str,
-                                 safe_bibtex_name: str, safe_bibtex_owner: str,
-                                 safe_bibtex_fw: str, safe_bibtex_task: str) -> str:
+    def _render_citation_section(
+        model: ModelRecord,
+        now_str: str,
+        safe_bibtex_name: str,
+        safe_bibtex_owner: str,
+        safe_bibtex_fw: str,
+        safe_bibtex_task: str,
+    ) -> str:
         """Render the Citation + Footer section."""
-        return f'''
+        return f"""
 ## Citation
 
 If you use this model in your research or application, please cite:
@@ -996,7 +1030,7 @@ If you use this model in your research or application, please cite:
 ---
 *Model card generated on {now_str} by AI Model Training Platform*
 *Format inspired by HuggingFace model cards*
-'''
+"""
 
     @staticmethod
     def generate_model_card(model: ModelRecord) -> str:

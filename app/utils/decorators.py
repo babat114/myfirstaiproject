@@ -4,6 +4,7 @@
 认证、权限检查、API限流等装饰器
 ============================================
 """
+
 import time
 from functools import wraps
 
@@ -20,6 +21,7 @@ def api_login_required(func):
 
     认证后将 user 存入 g.current_user，避免 get_current_user() 重复验证
     """
+
     @wraps(func)
     def decorated(*args, **kwargs):
         from app.utils.jwt_helpers import get_user_from_jwt
@@ -43,10 +45,12 @@ def api_login_required(func):
                 g.current_user = user
                 return func(*args, **kwargs)
 
-        return jsonify({
-            'success': False,
-            'message': '认证失败。请提供有效的 Bearer Token、API Key 或登录。',
-        }), 401
+        return jsonify(
+            {
+                'success': False,
+                'message': '认证失败。请提供有效的 Bearer Token、API Key 或登录。',
+            }
+        ), 401
 
     return decorated
 
@@ -56,6 +60,7 @@ def api_admin_required(func):
     API 管理员权限装饰器
     支持三种认证方式: Session、JWT Bearer Token、API Key
     """
+
     @wraps(func)
     def decorated(*args, **kwargs):
         from app.utils.jwt_helpers import get_user_from_jwt
@@ -85,10 +90,12 @@ def api_admin_required(func):
                 g.current_user = user
                 return func(*args, **kwargs)
 
-        return jsonify({
-            'success': False,
-            'message': '认证失败。请提供有效的凭据。',
-        }), 401
+        return jsonify(
+            {
+                'success': False,
+                'message': '认证失败。请提供有效的凭据。',
+            }
+        ), 401
 
     return decorated
 
@@ -105,20 +112,21 @@ def rate_limit(max_calls: int = 60, period: int = 60):
           每 100 次请求触发一次惰性清理, 移除超过 2*period 未活动的 IP 记录。
     """
     import threading
+
     _store = {}
     _lock = threading.Lock()
     _cleanup_counter = [0]  # 可变容器: 请求计数器, 每100次触发清理
 
     def _cleanup_expired(now_ts: float, horizon: float):
         """移除超过 horizon 秒未活动的 IP 记录"""
-        stale = [ip for ip, calls in _store.items()
-                 if not calls or max(calls) < now_ts - horizon]
+        stale = [ip for ip, calls in _store.items() if not calls or max(calls) < now_ts - horizon]
         for ip in stale:
             del _store[ip]
         if stale:
             # 安全获取 logger (不在应用上下文时静默跳过)
             try:
                 from flask import current_app
+
                 current_app.logger.debug(f'rate_limit: 清理 {len(stale)} 个过期 IP 记录')
             except RuntimeError:
                 pass
@@ -129,6 +137,7 @@ def rate_limit(max_calls: int = 60, period: int = 60):
             # 测试环境跳过限流 (避免跨测试状态累积)
             try:
                 from flask import current_app
+
                 if current_app.config.get('TESTING'):
                     return func(*args, **kwargs)
             except RuntimeError:
@@ -163,13 +172,16 @@ def rate_limit(max_calls: int = 60, period: int = 60):
             if exceeded:
                 # API 请求返回 JSON, Web 请求返回 HTML 错误页
                 if request.path.startswith('/api/'):
-                    return jsonify({
-                        'success': False,
-                        'message': f'请求过于频繁，请在 {retry_after} 秒后重试。',
-                        'retry_after': retry_after,
-                    }), 429
+                    return jsonify(
+                        {
+                            'success': False,
+                            'message': f'请求过于频繁，请在 {retry_after} 秒后重试。',
+                            'retry_after': retry_after,
+                        }
+                    ), 429
                 else:
                     from flask import flash, redirect
+
                     flash(f'请求过于频繁，请在 {retry_after} 秒后重试。', 'warning')
                     return redirect(request.referrer or request.url)
 
@@ -184,14 +196,15 @@ def log_execution_time(func):
     """
     记录函数执行时间的装饰器
     """
+
     @wraps(func)
     def wrapper(*args, **kwargs):
         start = time.perf_counter()
         result = func(*args, **kwargs)
         elapsed = time.perf_counter() - start
         from flask import current_app
-        current_app.logger.debug(
-            f'{func.__name__} 执行耗时: {elapsed:.4f} 秒'
-        )
+
+        current_app.logger.debug(f'{func.__name__} 执行耗时: {elapsed:.4f} 秒')
         return result
+
     return wrapper

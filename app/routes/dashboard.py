@@ -4,6 +4,7 @@
 首页和数据总览
 ============================================
 """
+
 from flask import Blueprint, flash, redirect, render_template, url_for
 from flask_login import current_user, login_required
 
@@ -23,17 +24,11 @@ def index():
     job_stats = TrainingService.get_job_statistics(user_id=current_user.id)
 
     # 获取最近的记录
-    recent_datasets = DatasetService.list_datasets(
-        owner_id=current_user.id, per_page=5
-    )['items']
+    recent_datasets = DatasetService.list_datasets(owner_id=current_user.id, per_page=5)['items']
 
-    recent_models = ModelService.list_models(
-        owner_id=current_user.id, per_page=5
-    )['items']
+    recent_models = ModelService.list_models(owner_id=current_user.id, per_page=5)['items']
 
-    recent_jobs = TrainingService.list_jobs(
-        owner_id=current_user.id, per_page=5
-    )['items']
+    recent_jobs = TrainingService.list_jobs(owner_id=current_user.id, per_page=5)['items']
 
     return render_template(
         'dashboard.html',
@@ -75,6 +70,7 @@ def admin_users():
         return redirect(url_for('dashboard.index'))
 
     from app.services.auth_service import AuthService
+
     users_result = AuthService.list_users(per_page=200)
 
     return render_template(

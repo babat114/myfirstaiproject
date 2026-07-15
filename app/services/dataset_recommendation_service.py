@@ -4,6 +4,7 @@
 分析数据集特征，推荐最佳模型类型、算法和框架
 ============================================
 """
+
 import os
 
 import numpy as np
@@ -25,8 +26,7 @@ class DatasetAnalyzer:
     """
 
     @staticmethod
-    def analyze(file_path: str, target_col: str = None,
-                file_format: str = 'csv') -> dict:
+    def analyze(file_path: str, target_col: str = None, file_format: str = 'csv') -> dict:
         """完整分析数据集，返回所有特征指标"""
         try:
             df = DatasetAnalyzer._load(file_path, file_format)
@@ -55,8 +55,7 @@ class DatasetAnalyzer:
                 result.update(DatasetAnalyzer._analyze_target(df, df.columns[-1]))
 
             # 文本特征检测
-            text_cols = [c for c in df.columns
-                        if df[c].dtype == 'object' and df[c].nunique() > len(df) * 0.1]
+            text_cols = [c for c in df.columns if df[c].dtype == 'object' and df[c].nunique() > len(df) * 0.1]
             result['text_column_count'] = len(text_cols)
             result['text_heavy'] = len(text_cols) >= max(1, len(df.columns) * 0.2)
             result['text_columns'] = text_cols
@@ -78,18 +77,21 @@ class DatasetAnalyzer:
             result['wide_data'] = result['n_features'] > result['n_samples']
             result['high_dim'] = result['n_features'] > 100
 
-            logger.info(f"数据集分析完成: {result.get('n_samples')}样本, "
-                        f"{result.get('n_features')}特征, "
-                        f"类别数={result.get('n_classes', 'N/A')}")
+            logger.info(
+                f'数据集分析完成: {result.get("n_samples")}样本, '
+                f'{result.get("n_features")}特征, '
+                f'类别数={result.get("n_classes", "N/A")}'
+            )
             return result
 
         except Exception as e:
-            logger.error(f"数据集分析失败: {e}")
+            logger.error(f'数据集分析失败: {e}')
             return {'error': str(e)}
 
     @staticmethod
     def _load(df_path: str, fmt: str) -> pd.DataFrame | None:
         from app.utils.data_io import load_dataframe
+
         # 加载最多 100000 行以准确分析数据集特征，避免因采样不足导致推荐偏差
         return load_dataframe(df_path, fmt, nrows=100000)
 
@@ -149,8 +151,9 @@ class DatasetRecommendationService:
     """
 
     @staticmethod
-    def recommend(file_path: str, target_col: str = None,
-                  file_format: str = 'csv', known_n_samples: int = None) -> dict:
+    def recommend(
+        file_path: str, target_col: str = None, file_format: str = 'csv', known_n_samples: int = None
+    ) -> dict:
         """分析数据集并返回推荐结果
 
         Args:
@@ -179,7 +182,6 @@ class DatasetRecommendationService:
         analysis.get('wide_data', False)
         analysis.get('missing_rate', 0)
 
-
         # 确定最佳模型类型
         if text_heavy:
             primary_type = 'nlp'
@@ -191,7 +193,11 @@ class DatasetRecommendationService:
         elif target_type == 'continuous':
             primary_type = 'regression'
             types = [
-                {'model_type': 'regression', 'confidence': 0.90, 'reason': f'目标变量为连续值 (std={analysis.get("target_std", "?"):.2f})'},
+                {
+                    'model_type': 'regression',
+                    'confidence': 0.90,
+                    'reason': f'目标变量为连续值 (std={analysis.get("target_std", "?"):.2f})',
+                },
                 {'model_type': 'clustering', 'confidence': 0.30, 'reason': '无监督替代方案'},
             ]
         elif target_type == 'categorical':
@@ -206,14 +212,10 @@ class DatasetRecommendationService:
             types = [{'model_type': 'other', 'confidence': 0.50, 'reason': '自动检测'}]
 
         # 推荐具体算法
-        algorithms = DatasetRecommendationService._recommend_algorithms(
-            analysis, target_type, n_classes, text_heavy
-        )
+        algorithms = DatasetRecommendationService._recommend_algorithms(analysis, target_type, n_classes, text_heavy)
 
         # 推荐框架
-        frameworks = DatasetRecommendationService._recommend_frameworks(
-            analysis, text_heavy
-        )
+        frameworks = DatasetRecommendationService._recommend_frameworks(analysis, text_heavy)
 
         # 推荐超参数预设
         param_presets = DatasetRecommendationService._recommend_params(analysis)
@@ -240,50 +242,145 @@ class DatasetRecommendationService:
 
         if text_heavy:
             algorithms = [
-                {'algorithm': 'transformer_bert', 'display': 'BERT Transformer 微调', 'confidence': 0.95, 'reason': '预训练迁移学习，NLP首选方案'},
-                {'algorithm': 'tfidf_logistic', 'display': 'TF-IDF + LogisticRegression', 'confidence': 0.70, 'reason': '轻量文本分类，快速baseline'},
-                {'algorithm': 'tfidf_svm', 'display': 'TF-IDF + SVM', 'confidence': 0.65, 'reason': '高维稀疏文本数据SVM效果好'},
+                {
+                    'algorithm': 'transformer_bert',
+                    'display': 'BERT Transformer 微调',
+                    'confidence': 0.95,
+                    'reason': '预训练迁移学习，NLP首选方案',
+                },
+                {
+                    'algorithm': 'tfidf_logistic',
+                    'display': 'TF-IDF + LogisticRegression',
+                    'confidence': 0.70,
+                    'reason': '轻量文本分类，快速baseline',
+                },
+                {
+                    'algorithm': 'tfidf_svm',
+                    'display': 'TF-IDF + SVM',
+                    'confidence': 0.65,
+                    'reason': '高维稀疏文本数据SVM效果好',
+                },
             ]
         elif high_dim and n_features > 200:
             # 视觉embedding特征 → PyTorch深度学习
             algorithms = [
-                {'algorithm': 'mlp', 'display': 'PyTorch MLP (宽网络)', 'confidence': 0.88, 'reason': f'{n_features}维视觉特征适合深度MLP'},
-                {'algorithm': 'random_forest', 'display': 'Random Forest', 'confidence': 0.55, 'reason': '传统方法baseline'},
+                {
+                    'algorithm': 'mlp',
+                    'display': 'PyTorch MLP (宽网络)',
+                    'confidence': 0.88,
+                    'reason': f'{n_features}维视觉特征适合深度MLP',
+                },
+                {
+                    'algorithm': 'random_forest',
+                    'display': 'Random Forest',
+                    'confidence': 0.55,
+                    'reason': '传统方法baseline',
+                },
             ]
         elif target_type == 'continuous':
             if n_samples > 5000:
                 algorithms = [
-                    {'algorithm': 'gradient_boosting_regressor', 'display': 'Gradient Boosting Regressor', 'confidence': 0.88, 'reason': '大数据集回归首选'},
-                    {'algorithm': 'random_forest_regressor', 'display': 'Random Forest Regressor', 'confidence': 0.82, 'reason': '鲁棒性好，不易过拟合'},
-                    {'algorithm': 'ridge', 'display': 'Ridge Regression', 'confidence': 0.70, 'reason': '线性基线，快速训练'},
-                    {'algorithm': 'mlp', 'display': 'PyTorch MLP Regressor', 'confidence': 0.65, 'reason': f'{n_features}个特征适合MLP'},
+                    {
+                        'algorithm': 'gradient_boosting_regressor',
+                        'display': 'Gradient Boosting Regressor',
+                        'confidence': 0.88,
+                        'reason': '大数据集回归首选',
+                    },
+                    {
+                        'algorithm': 'random_forest_regressor',
+                        'display': 'Random Forest Regressor',
+                        'confidence': 0.82,
+                        'reason': '鲁棒性好，不易过拟合',
+                    },
+                    {
+                        'algorithm': 'ridge',
+                        'display': 'Ridge Regression',
+                        'confidence': 0.70,
+                        'reason': '线性基线，快速训练',
+                    },
+                    {
+                        'algorithm': 'mlp',
+                        'display': 'PyTorch MLP Regressor',
+                        'confidence': 0.65,
+                        'reason': f'{n_features}个特征适合MLP',
+                    },
                 ]
             else:
                 algorithms = [
-                    {'algorithm': 'ridge', 'display': 'Ridge Regression', 'confidence': 0.85, 'reason': '小样本首选线性模型'},
-                    {'algorithm': 'random_forest_regressor', 'display': 'Random Forest Regressor', 'confidence': 0.75, 'reason': '集成方法，控制过拟合'},
-                    {'algorithm': 'knn_regressor', 'display': 'KNN Regressor', 'confidence': 0.60, 'reason': '简单非参数方法'},
+                    {
+                        'algorithm': 'ridge',
+                        'display': 'Ridge Regression',
+                        'confidence': 0.85,
+                        'reason': '小样本首选线性模型',
+                    },
+                    {
+                        'algorithm': 'random_forest_regressor',
+                        'display': 'Random Forest Regressor',
+                        'confidence': 0.75,
+                        'reason': '集成方法，控制过拟合',
+                    },
+                    {
+                        'algorithm': 'knn_regressor',
+                        'display': 'KNN Regressor',
+                        'confidence': 0.60,
+                        'reason': '简单非参数方法',
+                    },
                 ]
         elif target_type == 'categorical':
             if n_samples > 5000 and not imbalanced:
                 algorithms = [
-                    {'algorithm': 'random_forest', 'display': 'Random Forest', 'confidence': 0.90, 'reason': '综合性能最佳'},
-                    {'algorithm': 'gradient_boosting', 'display': 'Gradient Boosting', 'confidence': 0.87, 'reason': '高准确率，大数据集表现好'},
-                    {'algorithm': 'mlp', 'display': 'PyTorch MLP', 'confidence': 0.72, 'reason': f'{n_features}维特征深度学习'},
+                    {
+                        'algorithm': 'random_forest',
+                        'display': 'Random Forest',
+                        'confidence': 0.90,
+                        'reason': '综合性能最佳',
+                    },
+                    {
+                        'algorithm': 'gradient_boosting',
+                        'display': 'Gradient Boosting',
+                        'confidence': 0.87,
+                        'reason': '高准确率，大数据集表现好',
+                    },
+                    {
+                        'algorithm': 'mlp',
+                        'display': 'PyTorch MLP',
+                        'confidence': 0.72,
+                        'reason': f'{n_features}维特征深度学习',
+                    },
                 ]
             elif imbalanced:
                 algorithms = [
-                    {'algorithm': 'random_forest', 'display': 'Random Forest (class_weight=balanced)', 'confidence': 0.88, 'reason': '处理不平衡数据'},
-                    {'algorithm': 'gradient_boosting', 'display': 'Gradient Boosting', 'confidence': 0.82, 'reason': '集成方法对不平衡鲁棒'},
+                    {
+                        'algorithm': 'random_forest',
+                        'display': 'Random Forest (class_weight=balanced)',
+                        'confidence': 0.88,
+                        'reason': '处理不平衡数据',
+                    },
+                    {
+                        'algorithm': 'gradient_boosting',
+                        'display': 'Gradient Boosting',
+                        'confidence': 0.82,
+                        'reason': '集成方法对不平衡鲁棒',
+                    },
                 ]
             elif n_samples < 1000:
                 algorithms = [
                     {'algorithm': 'svm', 'display': 'SVM (RBF Kernel)', 'confidence': 0.82, 'reason': '小样本高精度'},
-                    {'algorithm': 'logistic_regression', 'display': 'Logistic Regression', 'confidence': 0.78, 'reason': '简单可解释'},
+                    {
+                        'algorithm': 'logistic_regression',
+                        'display': 'Logistic Regression',
+                        'confidence': 0.78,
+                        'reason': '简单可解释',
+                    },
                 ]
             else:
                 algorithms = [
-                    {'algorithm': 'random_forest', 'display': 'Random Forest', 'confidence': 0.88, 'reason': '通用分类首选'},
+                    {
+                        'algorithm': 'random_forest',
+                        'display': 'Random Forest',
+                        'confidence': 0.88,
+                        'reason': '通用分类首选',
+                    },
                     {'algorithm': 'svm', 'display': 'SVM', 'confidence': 0.75, 'reason': '高维数据效果好'},
                     {'algorithm': 'knn', 'display': 'KNN', 'confidence': 0.65, 'reason': '简单直观'},
                 ]
@@ -380,21 +477,24 @@ class DatasetRecommendationService:
         imbalanced = analysis.get('imbalanced', False)
 
         type_cn = {
-            'classification': '分类', 'regression': '回归',
-            'nlp': '自然语言处理', 'clustering': '聚类',
-            'computer_vision': '计算机视觉', 'other': '其他'
+            'classification': '分类',
+            'regression': '回归',
+            'nlp': '自然语言处理',
+            'clustering': '聚类',
+            'computer_vision': '计算机视觉',
+            'other': '其他',
         }
 
         parts = [
-            f"检测到 {n_samples:,} 个样本、{n_features} 个特征的数据集",
-            f"目标类型: {target_type}" + (f" ({n_classes}类)" if target_type == 'categorical' else ''),
-            f"推荐模型类型: {type_cn.get(primary_type, primary_type)}",
+            f'检测到 {n_samples:,} 个样本、{n_features} 个特征的数据集',
+            f'目标类型: {target_type}' + (f' ({n_classes}类)' if target_type == 'categorical' else ''),
+            f'推荐模型类型: {type_cn.get(primary_type, primary_type)}',
         ]
         if missing > 0.05:
-            parts.append(f"⚠ 缺失值较多 ({missing:.1%})，建议先做数据清洗")
+            parts.append(f'⚠ 缺失值较多 ({missing:.1%})，建议先做数据清洗')
         if imbalanced:
-            parts.append("⚠ 类别不平衡，建议使用balanced权重或重采样")
+            parts.append('⚠ 类别不平衡，建议使用balanced权重或重采样')
         if analysis.get('high_corr_pairs', 0) > 3:
-            parts.append("💡 存在多重共线性，可考虑降维")
+            parts.append('💡 存在多重共线性，可考虑降维')
 
         return '。'.join(parts) + '。'

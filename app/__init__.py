@@ -4,6 +4,7 @@ AI Model & Dataset Management Platform
 应用工厂 - 创建和配置 Flask 应用
 ============================================
 """
+
 import logging
 import os
 from datetime import UTC
@@ -49,7 +50,7 @@ def create_app(config_name=None):
     migrate.init_app(app, db)
     # CORS 配置从环境变量读取
     cors_origins = app.config.get('CORS_ORIGINS', '*')
-    cors.init_app(app, resources={r"/api/*": {"origins": cors_origins}})
+    cors.init_app(app, resources={r'/api/*': {'origins': cors_origins}})
     csrf.init_app(app)
 
     # 登录管理器配置
@@ -97,23 +98,25 @@ def create_app(config_name=None):
     # 首次部署运行: flask db upgrade
     # 生成迁移: flask db migrate -m "描述"
 
-    logger.info(f"应用启动成功 - 环境: {config_name}")
+    logger.info(f'应用启动成功 - 环境: {config_name}')
     return app
 
 
 def configure_logging(app):
     """配置应用日志"""
     handler = colorlog.StreamHandler()
-    handler.setFormatter(colorlog.ColoredFormatter(
-        '%(log_color)s%(asctime)s [%(levelname)s] %(name)s:%(lineno)d - %(message)s',
-        log_colors={
-            'DEBUG': 'cyan',
-            'INFO': 'green',
-            'WARNING': 'yellow',
-            'ERROR': 'red',
-            'CRITICAL': 'red,bg_white',
-        }
-    ))
+    handler.setFormatter(
+        colorlog.ColoredFormatter(
+            '%(log_color)s%(asctime)s [%(levelname)s] %(name)s:%(lineno)d - %(message)s',
+            log_colors={
+                'DEBUG': 'cyan',
+                'INFO': 'green',
+                'WARNING': 'yellow',
+                'ERROR': 'red',
+                'CRITICAL': 'red,bg_white',
+            },
+        )
+    )
 
     log_level = getattr(logging, app.config.get('LOG_LEVEL', 'INFO'))
     app.logger.setLevel(log_level)
@@ -124,26 +127,19 @@ def configure_assets(app):
     """配置 Flask-Assets 静态资源合并压缩 (仅生产环境)"""
     try:
         from flask_assets import Bundle, Environment
+
         assets = Environment(app)
         # 仅生产环境启用压缩
         assets.debug = app.config.get('DEBUG', True)
 
-        css_bundle = Bundle(
-            'css/style.css',
-            filters='cssmin',
-            output='dist/style.min.css'
-        )
-        js_bundle = Bundle(
-            'js/main.js',
-            filters='jsmin',
-            output='dist/app.min.js'
-        )
+        css_bundle = Bundle('css/style.css', filters='cssmin', output='dist/style.min.css')
+        js_bundle = Bundle('js/main.js', filters='jsmin', output='dist/app.min.js')
         assets.register('css_all', css_bundle)
         assets.register('js_all', js_bundle)
     except ImportError:
-        logger.warning("Flask-Assets 未安装，静态资源合并压缩已禁用")
+        logger.warning('Flask-Assets 未安装，静态资源合并压缩已禁用')
     except Exception as e:
-        logger.error(f"Flask-Assets 配置失败: {type(e).__name__}: {e}")
+        logger.error(f'Flask-Assets 配置失败: {type(e).__name__}: {e}')
 
 
 def register_blueprints(app):
@@ -211,9 +207,7 @@ def setup_api_compat_middleware(app):
 
     def _api_v1_compat_middleware(environ, start_response):
         path = environ.get('PATH_INFO', '')
-        if (path.startswith('/api/')
-                and not path.startswith('/api/v1/')
-                and not path.startswith(_SWAGGER_PREFIXES)):
+        if path.startswith('/api/') and not path.startswith('/api/v1/') and not path.startswith(_SWAGGER_PREFIXES):
             environ = dict(environ)
             environ['HTTP_X_API_ORIGINAL_PATH'] = path
             environ['PATH_INFO'] = path.replace('/api/', '/api/v1/', 1)
@@ -224,10 +218,13 @@ def setup_api_compat_middleware(app):
     @app.after_request
     def _api_deprecation_header(response):
         from flask import request as req
+
         original = req.environ.get('HTTP_X_API_ORIGINAL_PATH', '')
-        if (original.startswith('/api/')
-                and not original.startswith('/api/v1/')
-                and not original.startswith(_SWAGGER_PREFIXES)):
+        if (
+            original.startswith('/api/')
+            and not original.startswith('/api/v1/')
+            and not original.startswith(_SWAGGER_PREFIXES)
+        ):
             response.headers['X-API-Deprecated'] = 'Use /api/v1/ instead. Will be removed in v2.0'
             response.headers['Sunset'] = 'Sat, 01 Jan 2027 00:00:00 GMT'
         return response
@@ -244,10 +241,12 @@ def register_error_handlers(app):
         """CSRF 验证失败 — 刷新页面并提示用户"""
         # API 请求返回 JSON
         if request.path.startswith('/api/'):
-            return jsonify({
-                'success': False,
-                'message': 'CSRF 验证失败，请刷新页面后重试。',
-            }), 400
+            return jsonify(
+                {
+                    'success': False,
+                    'message': 'CSRF 验证失败，请刷新页面后重试。',
+                }
+            ), 400
         flash('安全验证已过期，请刷新页面后重试。', 'warning')
         return redirect(request.referrer or url_for('auth.login'))
 
@@ -258,38 +257,47 @@ def register_error_handlers(app):
     @app.errorhandler(404)
     def not_found(e):
         if _is_api_request():
-            return jsonify({
-                'success': False,
-                'message': '请求的资源不存在。',
-                'error': 'Not Found',
-            }), 404
+            return jsonify(
+                {
+                    'success': False,
+                    'message': '请求的资源不存在。',
+                    'error': 'Not Found',
+                }
+            ), 404
         return render_template('errors/404.html'), 404
 
     @app.errorhandler(500)
     def internal_error(e):
         db.session.rollback()
-        app.logger.error(f"Internal Server Error: {e}")
+        app.logger.error(f'Internal Server Error: {e}')
         if _is_api_request():
-            return jsonify({
-                'success': False,
-                'message': '服务器内部错误，请稍后重试。',
-                'error': 'Internal Server Error',
-            }), 500
+            return jsonify(
+                {
+                    'success': False,
+                    'message': '服务器内部错误，请稍后重试。',
+                    'error': 'Internal Server Error',
+                }
+            ), 500
         return render_template('errors/500.html'), 500
 
     @app.errorhandler(HTTPException)
     def handle_http_exception(e):
         if _is_api_request():
-            return jsonify({
-                'success': False,
-                'message': e.description or str(e),
-                'error': e.name,
-                'code': e.code,
-            }), e.code
-        return render_template('errors/error.html',
-            error_code=e.code, error_title=e.name,
+            return jsonify(
+                {
+                    'success': False,
+                    'message': e.description or str(e),
+                    'error': e.name,
+                    'code': e.code,
+                }
+            ), e.code
+        return render_template(
+            'errors/error.html',
+            error_code=e.code,
+            error_title=e.name,
             error_message=e.description,
-            error_color='text-muted'), e.code
+            error_color='text-muted',
+        ), e.code
 
 
 def register_security_headers(app):
@@ -304,15 +312,10 @@ def register_security_headers(app):
         # 引用策略
         response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
         # 权限策略
-        response.headers['Permissions-Policy'] = (
-            'camera=(), microphone=(), geolocation=(), '
-            'interest-cohort=()'
-        )
+        response.headers['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=(), interest-cohort=()'
         # HSTS (仅生产环境启用)
         if not app.debug:
-            response.headers['Strict-Transport-Security'] = (
-                'max-age=31536000; includeSubDomains; preload'
-            )
+            response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains; preload'
         # CSP: 允许本站 + CDN 的脚本/样式/字体/图片
         response.headers['Content-Security-Policy'] = (
             "default-src 'self'; "
@@ -330,7 +333,7 @@ def register_security_headers(app):
 
 def register_health_check(app):
     """注册健康检查端点 /health 和 /healthz (Kubernetes 兼容)"""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from flask import jsonify
 
@@ -347,17 +350,19 @@ def register_health_check(app):
             db_error = str(e) if app.debug else 'database unavailable'
 
         status_code = 200 if db_ok else 503
-        return jsonify({
-            'status': 'healthy' if db_ok else 'unhealthy',
-            'version': '1.0.0',
-            'timestamp': datetime.now(UTC).isoformat(),
-            'checks': {
-                'database': {
-                    'status': 'ok' if db_ok else 'error',
-                    'error': db_error,
+        return jsonify(
+            {
+                'status': 'healthy' if db_ok else 'unhealthy',
+                'version': '1.0.0',
+                'timestamp': datetime.now(UTC).isoformat(),
+                'checks': {
+                    'database': {
+                        'status': 'ok' if db_ok else 'error',
+                        'error': db_error,
+                    },
                 },
-            },
-        }), status_code
+            }
+        ), status_code
 
 
 def register_context_processors(app):
@@ -371,6 +376,7 @@ def register_context_processors(app):
     @app.context_processor
     def inject_config():
         from app.models.dataset import CATEGORY_LABELS
+
         # 模型类型中英文映射 (模板全局可用)
         model_type_labels = {
             'classification': '分类',
@@ -393,8 +399,8 @@ def register_context_processors(app):
     def inject_algorithm_info():
         """注入算法元数据 (中文名+描述) 到所有模板"""
         from app.utils.algorithm_info import ALGORITHM_INFO
-        return {'algorithm_info': ALGORITHM_INFO}
 
+        return {'algorithm_info': ALGORITHM_INFO}
 
 
 def configure_swagger(app):

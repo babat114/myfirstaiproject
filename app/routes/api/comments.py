@@ -4,6 +4,7 @@
 JSON 接口 — 支持 JWT/Session/API Key 认证
 ============================================
 """
+
 from flask import Blueprint, jsonify, request
 
 from app.services.comment_service import CommentService
@@ -111,18 +112,22 @@ def add_comment(model_id):
 
     if error and comment:
         # 评论被自动屏蔽
-        return jsonify({
-            'success': True,
-            'message': error,
-            'data': comment.to_dict(),
-            'flagged': True,
-        }), 201
+        return jsonify(
+            {
+                'success': True,
+                'message': error,
+                'data': comment.to_dict(),
+                'flagged': True,
+            }
+        ), 201
 
-    return jsonify({
-        'success': True,
-        'message': '评论发表成功。',
-        'data': comment.to_dict(),
-    }), 201
+    return jsonify(
+        {
+            'success': True,
+            'message': '评论发表成功。',
+            'data': comment.to_dict(),
+        }
+    ), 201
 
 
 @comments_api_bp.route('/comments/<int:comment_id>', methods=['DELETE'])

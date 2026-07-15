@@ -4,6 +4,7 @@ AI模型 Web 路由
 模型注册表管理的页面路由
 ============================================
 """
+
 import json
 
 from flask import Blueprint, current_app, flash, redirect, render_template, request, url_for
@@ -30,23 +31,36 @@ def list_models():
     if visibility == 'public':
         # 仅公开模型 (不限owner)
         result = ModelService.list_models(
-            page=page, model_type=model_type, framework=framework,
-            search=search, is_public=True,
-            sort_by=sort_by, sort_order=sort_order,
+            page=page,
+            model_type=model_type,
+            framework=framework,
+            search=search,
+            is_public=True,
+            sort_by=sort_by,
+            sort_order=sort_order,
         )
     elif visibility == 'all':
         # 我的 + 其他公开模型
         result = ModelService.list_models(
-            page=page, model_type=model_type, framework=framework,
-            search=search, owner_id=current_user.id, include_public=True,
-            sort_by=sort_by, sort_order=sort_order,
+            page=page,
+            model_type=model_type,
+            framework=framework,
+            search=search,
+            owner_id=current_user.id,
+            include_public=True,
+            sort_by=sort_by,
+            sort_order=sort_order,
         )
     else:
         # 仅我的模型
         result = ModelService.list_models(
-            page=page, model_type=model_type, framework=framework,
-            search=search, owner_id=current_user.id,
-            sort_by=sort_by, sort_order=sort_order,
+            page=page,
+            model_type=model_type,
+            framework=framework,
+            search=search,
+            owner_id=current_user.id,
+            sort_by=sort_by,
+            sort_order=sort_order,
         )
 
     return render_template(
@@ -167,6 +181,7 @@ def model_detail(model_id):
     comments_data = None
     if model.is_public:
         from app.services.comment_service import CommentService
+
         page = request.args.get('comment_page', 1, type=int)
         comments_data = CommentService.get_comments_for_model(
             model_id=model.id,
@@ -238,9 +253,7 @@ def upload_model_file(model_id):
         flash('请选择文件。', 'danger')
         return redirect(url_for('models.model_detail', model_id=model.id))
 
-    success, error = ModelService.upload_model_file(
-        model, file, upload_folder=current_app.config['UPLOAD_FOLDER']
-    )
+    success, error = ModelService.upload_model_file(model, file, upload_folder=current_app.config['UPLOAD_FOLDER'])
     if success:
         flash('模型文件上传成功！', 'success')
     else:
@@ -306,18 +319,14 @@ def compare():
     else:
         for mid in model_ids:
             m = ModelService.get_model_by_id(mid)
-            if m:
-                # 权限检查
-                if m.is_public or m.owner_id == current_user.id or current_user.is_admin:
-                    models_to_compare.append(m)
+            if m and (m.is_public or m.owner_id == current_user.id or current_user.is_admin):
+                models_to_compare.append(m)
 
         if len(models_to_compare) < 2:
             error = '没有足够的有权限模型可供对比。'
 
     # 获取用户的所有模型列表 (供选择)
-    user_models_result = ModelService.list_models(
-        owner_id=current_user.id, per_page=100
-    )
+    user_models_result = ModelService.list_models(owner_id=current_user.id, per_page=100)
     user_models = user_models_result['items']
 
     # 对比指标列表
@@ -333,8 +342,9 @@ def compare():
     best_values = {}
     if models_to_compare:
         for metric in compare_metrics:
-            values = [(getattr(m, metric['key']), m) for m in models_to_compare
-                      if getattr(m, metric['key']) is not None]
+            values = [
+                (getattr(m, metric['key']), m) for m in models_to_compare if getattr(m, metric['key']) is not None
+            ]
             if values:
                 best_values[metric['key']] = (
                     max(values, key=lambda x: x[0])[1].id
@@ -397,14 +407,50 @@ def _build_model_hints(model, metadata, hyperparams, feature_names):
             break
 
     domain_config = {
-        'movie':      {'label': '电影评论',    'placeholder': '输入电影评论，例如: 这部电影非常精彩，演员表现出色，剧情扣人心弦。', 'examples': ['这部电影非常精彩，演员表现出色，剧情扣人心弦。', '剧情太拖沓了，浪费了两个小时。', '特效很棒但故事一般，总体还行。']},
-        'shopping':   {'label': '购物评价',    'placeholder': '输入商品评价，例如: 质量很好，做工精细，物流也很快，非常满意！', 'examples': ['质量很好，做工精细，物流也很快，非常满意！', '跟描述不符，质量很差，不建议购买。', '性价比不错，对得起这个价格。']},
-        'restaurant': {'label': '餐厅点评',    'placeholder': '输入餐厅评价，例如: 菜品口味地道，环境优雅，服务周到。', 'examples': ['菜品口味地道，环境优雅，服务周到。', '上菜太慢了，味道也一般。']},
-        'hotel':      {'label': '酒店评价',    'placeholder': '输入酒店评价，例如: 房间干净整洁，前台服务热情，地理位置方便。', 'examples': ['房间干净整洁，前台服务热情，地理位置方便。', '隔音太差，一晚上没睡好。']},
-        'finance':    {'label': '财经文本',    'placeholder': '输入财经相关文本，例如: 今日大盘震荡上行，科技板块领涨。', 'examples': ['今日大盘震荡上行，科技板块领涨。']},
-        'social':     {'label': '社交媒体',    'placeholder': '输入社交媒体文本，例如: 今天天气真好，出去玩了一天！', 'examples': ['今天天气真好，出去玩了一天！']},
-        'news':       {'label': '新闻文本',    'placeholder': '输入新闻文本，例如: 据新华社报道，今日国家统计局发布了最新经济数据。', 'examples': ['据新华社报道，今日国家统计局发布了最新经济数据。']},
-        'general':    {'label': '文本内容',    'placeholder': '输入文本内容进行预测...', 'examples': []},
+        'movie': {
+            'label': '电影评论',
+            'placeholder': '输入电影评论，例如: 这部电影非常精彩，演员表现出色，剧情扣人心弦。',
+            'examples': [
+                '这部电影非常精彩，演员表现出色，剧情扣人心弦。',
+                '剧情太拖沓了，浪费了两个小时。',
+                '特效很棒但故事一般，总体还行。',
+            ],
+        },
+        'shopping': {
+            'label': '购物评价',
+            'placeholder': '输入商品评价，例如: 质量很好，做工精细，物流也很快，非常满意！',
+            'examples': [
+                '质量很好，做工精细，物流也很快，非常满意！',
+                '跟描述不符，质量很差，不建议购买。',
+                '性价比不错，对得起这个价格。',
+            ],
+        },
+        'restaurant': {
+            'label': '餐厅点评',
+            'placeholder': '输入餐厅评价，例如: 菜品口味地道，环境优雅，服务周到。',
+            'examples': ['菜品口味地道，环境优雅，服务周到。', '上菜太慢了，味道也一般。'],
+        },
+        'hotel': {
+            'label': '酒店评价',
+            'placeholder': '输入酒店评价，例如: 房间干净整洁，前台服务热情，地理位置方便。',
+            'examples': ['房间干净整洁，前台服务热情，地理位置方便。', '隔音太差，一晚上没睡好。'],
+        },
+        'finance': {
+            'label': '财经文本',
+            'placeholder': '输入财经相关文本，例如: 今日大盘震荡上行，科技板块领涨。',
+            'examples': ['今日大盘震荡上行，科技板块领涨。'],
+        },
+        'social': {
+            'label': '社交媒体',
+            'placeholder': '输入社交媒体文本，例如: 今天天气真好，出去玩了一天！',
+            'examples': ['今天天气真好，出去玩了一天！'],
+        },
+        'news': {
+            'label': '新闻文本',
+            'placeholder': '输入新闻文本，例如: 据新华社报道，今日国家统计局发布了最新经济数据。',
+            'examples': ['据新华社报道，今日国家统计局发布了最新经济数据。'],
+        },
+        'general': {'label': '文本内容', 'placeholder': '输入文本内容进行预测...', 'examples': []},
     }
     dc = domain_config.get(detected_domain, domain_config['general'])
     hints['domain'] = detected_domain
@@ -528,6 +574,7 @@ def test_model(model_id):
             if file and file.filename:
                 try:
                     import pandas as pd
+
                     fmt = file.filename.rsplit('.', 1)[-1].lower()
                     if fmt == 'csv':
                         df = pd.read_csv(file)
@@ -551,6 +598,7 @@ def test_model(model_id):
             # 手动输入特征值 — 使用模型真实特征名
             try:
                 import pandas as pd
+
                 fnames_json = request.form.get('feature_names_json', '[]')
                 try:
                     fnames = json.loads(fnames_json)
@@ -579,6 +627,7 @@ def test_model(model_id):
             else:
                 try:
                     import pandas as pd
+
                     # 优先使用训练时保存的 TF-IDF vectorizer
                     _, _md, _, _le = ModelInferenceService.load_model(model)
                     _vec = (_md or {}).get('vectorizer')
@@ -593,18 +642,16 @@ def test_model(model_id):
                             df = pd.DataFrame(X_dense)
                     else:
                         from app.services.feature_extractor import FeatureExtractor
+
                         n_features = len(_fn) if _fn else 100
-                        features, feat_error = FeatureExtractor.extract_text_features(
-                            text_input, max(n_features, 10)
-                        )
+                        features, feat_error = FeatureExtractor.extract_text_features(text_input, max(n_features, 10))
                         if feat_error:
                             error = feat_error
                             df = None
                         else:
                             df = pd.DataFrame(
                                 features,
-                                columns=[_fn[i] if i < len(_fn) else f'feature_{i}'
-                                         for i in range(features.shape[1])]
+                                columns=[_fn[i] if i < len(_fn) else f'feature_{i}' for i in range(features.shape[1])],
                             )
                     if df is not None:
                         result = ModelInferenceService.predict(model, df)
@@ -619,28 +666,27 @@ def test_model(model_id):
             else:
                 try:
                     from app.services.feature_extractor import FeatureExtractor
+
                     _, _md, _, _le = ModelInferenceService.load_model(model)
                     _fn = (_md or {}).get('feature_names', [])
                     image_data = img_file.read()
                     n_features = len(_fn) if _fn else 100
-                    features, feat_error = FeatureExtractor.extract_image_features(
-                        image_data, max(n_features, 10)
-                    )
+                    features, feat_error = FeatureExtractor.extract_image_features(image_data, max(n_features, 10))
                     if feat_error:
                         error = feat_error
                     else:
                         import pandas as pd
+
                         df = pd.DataFrame(
                             features,
-                            columns=[_fn[i] if i < len(_fn)
-                                     else f'feature_{i}'
-                                     for i in range(features.shape[1])]
+                            columns=[_fn[i] if i < len(_fn) else f'feature_{i}' for i in range(features.shape[1])],
                         )
                         result = ModelInferenceService.predict(model, df)
                         # 生成缩略图用于前端回显
                         thumb = FeatureExtractor.load_image_thumbnail(image_data)
                         if thumb:
                             import base64
+
                             image_preview = base64.b64encode(thumb).decode('utf-8')
                 except Exception as e:
                     error = f'图像预测失败: {str(e)}'
@@ -665,6 +711,7 @@ def test_model(model_id):
     # 尝试从模型文件元数据中获取 (PyTorch/sklearn/Transformers saved config)
     try:
         from app.services.inference_service import ModelInferenceService
+
         _, metadata, _, load_error = ModelInferenceService.load_model(model)
         if load_error:
             model_file_error = load_error
@@ -675,7 +722,11 @@ def test_model(model_id):
     # 回退: 从数据集 summary 中获取
     if not feature_names and model.training_dataset and model.training_dataset.summary_json:
         try:
-            summary = json.loads(model.training_dataset.summary_json) if isinstance(model.training_dataset.summary_json, str) else model.training_dataset.summary_json
+            summary = (
+                json.loads(model.training_dataset.summary_json)
+                if isinstance(model.training_dataset.summary_json, str)
+                else model.training_dataset.summary_json
+            )
             cols = summary.get('columns', [])
             target_col = hyperparams.get('target_column', cols[-1] if cols else None)
             feature_names = [c for c in cols if c != target_col]

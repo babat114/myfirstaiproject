@@ -10,6 +10,7 @@
 
 所有生成使用 seed=999 (训练时用seed=42), 确保可复现且独立于训练切分
 """
+
 import logging
 
 import numpy as np
@@ -27,8 +28,9 @@ class TestDataGenerator:
     # ---- 主入口 ----
 
     @staticmethod
-    def from_training_data(df: pd.DataFrame, target_col: str, task_type: str,
-                           n_samples: int = None, perturbation: float = 0.05) -> pd.DataFrame:
+    def from_training_data(
+        df: pd.DataFrame, target_col: str, task_type: str, n_samples: int = None, perturbation: float = 0.05
+    ) -> pd.DataFrame:
         """
         从训练数据分布生成独立测试集
 
@@ -137,7 +139,7 @@ class TestDataGenerator:
         result = gen_X.copy()
         result[target_col] = gen_y
 
-        logger.info(f"Generate classification test: {len(result)} samples, {n_classes} classes")
+        logger.info(f'Generate classification test: {len(result)} samples, {n_classes} classes')
         return result
 
     # ---- 回归任务 ----
@@ -162,9 +164,7 @@ class TestDataGenerator:
         # 用经验协方差矩阵采样
         cov = np.cov(data_std.values.T)
         try:
-            generated = rng.multivariate_normal(
-                np.zeros(len(mean)), cov, size=n_samples
-            )
+            generated = rng.multivariate_normal(np.zeros(len(mean)), cov, size=n_samples)
         except np.linalg.LinAlgError:
             # 协方差矩阵奇异, 逐列采样
             generated = np.zeros((n_samples, len(mean)))
@@ -187,7 +187,7 @@ class TestDataGenerator:
         result = gen_df[X.columns].copy()
         result[target_col] = gen_df[target_col]
 
-        logger.info(f"Generate regression test: {len(result)} samples")
+        logger.info(f'Generate regression test: {len(result)} samples')
         return result
 
     # ---- 聚类任务 ----
@@ -200,6 +200,7 @@ class TestDataGenerator:
         """
         try:
             from sklearn.mixture import GaussianMixture
+
             X_num = X.select_dtypes(include=[np.number])
 
             n_components = min(8, max(2, n_samples // 50))
@@ -224,14 +225,15 @@ class TestDataGenerator:
 
             # 聚类无真实标签: 用聚类结果作为伪标签
             from sklearn.cluster import KMeans
+
             km = KMeans(n_clusters=n_components, random_state=INDEPENDENT_SEED, n_init=10)
             gen_df[target_col] = km.fit_predict(gen_df.values)
 
-            logger.info(f"Generate clustering test: {len(gen_df)} samples")
+            logger.info(f'Generate clustering test: {len(gen_df)} samples')
             return gen_df
 
         except Exception as e:
-            logger.warning(f"GMM generation failed ({e}), falling back to bootstrap")
+            logger.warning(f'GMM generation failed ({e}), falling back to bootstrap')
             indices = rng.choice(len(X), size=min(n_samples, len(X)), replace=True)
             return X.iloc[indices].assign(**{target_col: 0}).reset_index(drop=True)
 
@@ -251,7 +253,7 @@ class TestDataGenerator:
 
         if text_col is None:
             # 单列数据
-            logger.warning("NLP: no text column found, returning bootstrap sample")
+            logger.warning('NLP: no text column found, returning bootstrap sample')
             indices = rng.choice(len(df), size=min(n_samples, len(df)), replace=True)
             return df.iloc[indices].reset_index(drop=True)
 
@@ -275,24 +277,20 @@ class TestDataGenerator:
                     gen_texts.append(aug_list[0])  # 取第一个增强版
                     gen_labels.append(labels[i])
 
-            result = pd.DataFrame({
-                text_col: gen_texts,
-                target_col: gen_labels
-            })
+            result = pd.DataFrame({text_col: gen_texts, target_col: gen_labels})
 
-            logger.info(f"Generate NLP test: {len(result)} samples (augmented)")
+            logger.info(f'Generate NLP test: {len(result)} samples (augmented)')
             return result
 
         except Exception as e:
-            logger.warning(f"NLP augmentation failed ({e}), falling back to bootstrap")
+            logger.warning(f'NLP augmentation failed ({e}), falling back to bootstrap')
             indices = rng.choice(len(df), size=min(n_samples, len(df)), replace=False)
             return df.iloc[indices].reset_index(drop=True)
 
     # ---- 验证工具 ----
 
     @staticmethod
-    def validate_test_data(test_df: pd.DataFrame, train_df: pd.DataFrame,
-                           target_col: str) -> dict:
+    def validate_test_data(test_df: pd.DataFrame, train_df: pd.DataFrame, target_col: str) -> dict:
         """
         验证生成的测试数据质量
 
@@ -304,7 +302,7 @@ class TestDataGenerator:
 
         # 1. 行数检查
         if len(test_df) < 20:
-            issues.append(f"test set too small: {len(test_df)} rows (need >= 20)")
+            issues.append(f'test set too small: {len(test_df)} rows (need >= 20)')
 
         # 2. 目标列存在
         if target_col not in test_df.columns:
@@ -316,14 +314,14 @@ class TestDataGenerator:
         missing = train_cols - test_cols
         extra = test_cols - train_cols
         if missing:
-            issues.append(f"missing feature columns: {missing}")
+            issues.append(f'missing feature columns: {missing}')
         if extra:
-            warnings.append(f"extra columns in test set: {extra}")
+            warnings.append(f'extra columns in test set: {extra}')
 
         # 4. NaN检查
         nan_count = test_df.isnull().sum().sum()
         if nan_count > 0:
-            warnings.append(f"test set contains {nan_count} NaN values")
+            warnings.append(f'test set contains {nan_count} NaN values')
 
         # 5. 目标列值域检查
         if target_col in test_df.columns and target_col in train_df.columns:
@@ -331,10 +329,6 @@ class TestDataGenerator:
             test_vals = set(test_df[target_col].dropna().unique())
             unseen = test_vals - train_vals
             if unseen:
-                warnings.append(f"test set contains {len(unseen)} unseen target values: {list(unseen)[:5]}")
+                warnings.append(f'test set contains {len(unseen)} unseen target values: {list(unseen)[:5]}')
 
-        return {
-            'valid': len(issues) == 0,
-            'issues': issues,
-            'warnings': warnings
-        }
+        return {'valid': len(issues) == 0, 'issues': issues, 'warnings': warnings}

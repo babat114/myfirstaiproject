@@ -4,18 +4,17 @@
 通用的格式转换、验证和工具方法
 ============================================
 """
+
+import contextlib
 import hashlib
 import json
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from app._timezone import localnow  # noqa: F401 — re-export for backward compatibility
+
 # 北京时区 (UTC+8) — 保留供外部引用
 BEIJING_TZ = timezone(timedelta(hours=8))
-
-# 统一使用 _timezone 模块的 localnow，避免重复实现
-import contextlib
-
-from app._timezone import localnow  # noqa: E402, F401 — re-export for backward compatibility
 
 
 def format_file_size(size_bytes: int) -> str:
@@ -89,7 +88,7 @@ def truncate_text(text: str, max_length: int = 100, suffix: str = '...') -> str:
         return ''
     if len(text) <= max_length:
         return text
-    return text[:max_length - len(suffix)] + suffix
+    return text[: max_length - len(suffix)] + suffix
 
 
 def get_status_color(status: str) -> str:
@@ -139,14 +138,22 @@ def get_status_icon(status: str) -> str:
 def chart_colors() -> list:
     """返回图表颜色调色板"""
     return [
-        '#4e73df', '#1cc88a', '#36b9cc', '#f6c23e',
-        '#e74a3b', '#858796', '#5a5c69', '#2e59d9',
-        '#17a673', '#2c9faf',
+        '#4e73df',
+        '#1cc88a',
+        '#36b9cc',
+        '#f6c23e',
+        '#e74a3b',
+        '#858796',
+        '#5a5c69',
+        '#2e59d9',
+        '#17a673',
+        '#2c9faf',
     ]
 
 
-def parse_form_params(form_data: dict, int_fields: set = None, float_fields: set = None,
-                     str_fields: set = None) -> dict:
+def parse_form_params(
+    form_data: dict, int_fields: set = None, float_fields: set = None, str_fields: set = None
+) -> dict:
     """解析表单参数为强类型 dict — 减少路由层重复的类型转换代码
 
     Args:
@@ -170,10 +177,8 @@ def parse_form_params(form_data: dict, int_fields: set = None, float_fields: set
         if key_lower in str_fields or key_lower == 'hidden_layers_str':
             result[key] = val
         elif key_lower in float_fields:
-            try:
+            with contextlib.suppress(ValueError, TypeError):
                 result[key] = float(val)
-            except (ValueError, TypeError):
-                pass  # 跳过无效数值
         elif key_lower in int_fields:
             with contextlib.suppress(ValueError, TypeError):
                 result[key] = int(val)
@@ -232,6 +237,7 @@ def sanitize_error(error: Exception | str, fallback: str = '操作失败，请�
     """
     try:
         from flask import current_app
+
         if current_app.config.get('DEBUG'):
             return str(error)
     except RuntimeError:
@@ -254,6 +260,7 @@ def sanitize_service_error(error: Exception, log_message: str = None) -> str:
         脱敏后的客户端消息
     """
     from app import logger as _logger
+
     detail = str(error)
     if log_message:
         _logger.error(f'{log_message}: {detail}')
@@ -262,9 +269,9 @@ def sanitize_service_error(error: Exception, log_message: str = None) -> str:
     return sanitize_error(error)
 
 
-def paginate_query(query, page: int = 1, per_page: int = 20,
-                   item_key: str = 'items',
-                   transform_fn: callable = None) -> dict:
+def paginate_query(
+    query, page: int = 1, per_page: int = 20, item_key: str = 'items', transform_fn: callable = None
+) -> dict:
     """通用分页辅助 — 消除 5 个 Service 中重复的分页返回构造逻辑
 
     支持两种查询对象:

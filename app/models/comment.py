@@ -4,6 +4,7 @@
 管理公开模型的用户评论区 — 支持审核、回复、删除
 ============================================
 """
+
 from app import db
 from app._timezone import localnow
 
@@ -44,11 +45,9 @@ class Comment(db.Model):
     content = db.Column(db.Text, nullable=False)
 
     # 审核字段
-    is_visible = db.Column(db.Boolean, default=True, nullable=False,
-                           comment='False=被屏蔽/待审核，True=正常显示')
+    is_visible = db.Column(db.Boolean, default=True, nullable=False, comment='False=被屏蔽/待审核，True=正常显示')
     moderation_reason = db.Column(
-        db.String(200), nullable=True,
-        comment='屏蔽原因: auto_filtered(自动过滤)/admin_removed(管理员删除)'
+        db.String(200), nullable=True, comment='屏蔽原因: auto_filtered(自动过滤)/admin_removed(管理员删除)'
     )
 
     # 回复支持 (自引用外键)

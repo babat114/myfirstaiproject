@@ -4,6 +4,7 @@
 支持 ONNX 导出和 Docker 部署包生成的后台进度跟踪
 ============================================
 """
+
 import threading
 import time
 import uuid
@@ -19,10 +20,10 @@ class ExportTask:
         self.task_id = task_id
         self.model_uuid = model_uuid
         self.task_type = task_type  # 'onnx' | 'deploy'
-        self.status = 'pending'     # pending | running | completed | failed
-        self.progress = 0           # 0-100
+        self.status = 'pending'  # pending | running | completed | failed
+        self.progress = 0  # 0-100
         self.message = ''
-        self.result = None          # 成功时的结果数据
+        self.result = None  # 成功时的结果数据
         self.error = None
         self.created_at = localnow()
         self.completed_at = None
@@ -99,9 +100,9 @@ class ExportTaskTracker:
             task_id: 任务 ID
             fn: 导出函数 (应返回 (success: bool, message: str, result: any))
         """
+
         def _run():
-            self.update_task(task_id, status='running', progress=10,
-                           message='任务已启动...')
+            self.update_task(task_id, status='running', progress=10, message='任务已启动...')
             try:
                 # 模拟进度 (实际导出通常很快, 但大模型可能需要时间)
                 self._simulate_progress(task_id, 10, 50)
@@ -116,24 +117,22 @@ class ExportTaskTracker:
 
                 if success:
                     self.update_task(
-                        task_id, status='completed', progress=100,
-                        message=message, result=result_data,
-                        completed_at=localnow()
+                        task_id,
+                        status='completed',
+                        progress=100,
+                        message=message,
+                        result=result_data,
+                        completed_at=localnow(),
                     )
                 else:
                     self.update_task(
-                        task_id, status='failed', progress=0,
-                        error=message or '导出失败',
-                        completed_at=localnow()
+                        task_id, status='failed', progress=0, error=message or '导出失败', completed_at=localnow()
                     )
             except Exception as e:
-                self.update_task(
-                    task_id, status='failed', progress=0,
-                    error=str(e),
-                    completed_at=localnow()
-                )
+                self.update_task(task_id, status='failed', progress=0, error=str(e), completed_at=localnow())
             finally:
                 from app import db
+
                 db.session.remove()
 
         thread = threading.Thread(target=_run, daemon=True)
@@ -146,8 +145,7 @@ class ExportTaskTracker:
         for i in range(1, steps + 1):
             time.sleep(0.3)
             pct = start + step_size * i
-            self.update_task(task_id, progress=min(pct, end),
-                           message=f'处理中 ({min(pct, end)}%)...')
+            self.update_task(task_id, progress=min(pct, end), message=f'处理中 ({min(pct, end)}%)...')
 
     def cleanup_old_tasks(self, max_age_seconds: int = 3600):
         """清理超过 max_age_seconds 的已完成/失败任务"""
@@ -155,8 +153,9 @@ class ExportTaskTracker:
         with self._lock:
             stale = []
             for tid, task in self._tasks.items():
-                if task.status in ('completed', 'failed') and task.completed_at:
-                    if (now - task.completed_at).total_seconds() > max_age_seconds:
-                        stale.append(tid)
+                is_stale = (task.status in ('completed', 'failed') and task.completed_at
+                            and (now - task.completed_at).total_seconds() > max_age_seconds)
+                if is_stale:
+                    stale.append(tid)
             for tid in stale:
                 del self._tasks[tid]

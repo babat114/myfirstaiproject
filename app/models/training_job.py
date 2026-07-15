@@ -4,6 +4,7 @@
 追踪AI模型训练任务的状态和结果
 ============================================
 """
+
 import json
 import uuid
 
@@ -44,26 +45,18 @@ class TrainingJob(AccessControlMixin, db.Model):
 
     # 任务配置
     task_type = db.Column(
-        db.Enum(
-            'training', 'fine_tuning', 'evaluation',
-            'inference', 'data_preprocessing',
-            name='task_types'
-        ),
+        db.Enum('training', 'fine_tuning', 'evaluation', 'inference', 'data_preprocessing', name='task_types'),
         default='training',
-        nullable=False
+        nullable=False,
     )
     framework = db.Column(db.String(50), nullable=True)
 
     # 状态追踪
     status = db.Column(
-        db.Enum(
-            'queued', 'preparing', 'running', 'paused',
-            'completed', 'failed', 'cancelled',
-            name='job_status'
-        ),
+        db.Enum('queued', 'preparing', 'running', 'paused', 'completed', 'failed', 'cancelled', name='job_status'),
         default='queued',
         nullable=False,
-        index=True
+        index=True,
     )
 
     # 进度信息
@@ -98,22 +91,19 @@ class TrainingJob(AccessControlMixin, db.Model):
     # 外键
     owner_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
     dataset_id = db.Column(db.Integer, db.ForeignKey('datasets.id'), nullable=True, index=True)
-    model_id = db.Column(db.Integer, db.ForeignKey('model_records.id', use_alter=True, name='fk_training_jobs_model_id'), nullable=True)
+    model_id = db.Column(
+        db.Integer, db.ForeignKey('model_records.id', use_alter=True, name='fk_training_jobs_model_id'), nullable=True
+    )
 
     # 时间戳
     created_at = db.Column(db.DateTime, default=lambda: localnow(), nullable=False)
-    updated_at = db.Column(
-        db.DateTime,
-        default=lambda: localnow(),
-        onupdate=lambda: localnow(),
-        nullable=False
-    )
+    updated_at = db.Column(db.DateTime, default=lambda: localnow(), onupdate=lambda: localnow(), nullable=False)
 
     # 表级约束: 进度值域检查 + 复合索引
     __table_args__ = (
         CheckConstraint(
             'progress_percent IS NULL OR (progress_percent >= 0.0 AND progress_percent <= 100.0)',
-            name='ck_progress_range'
+            name='ck_progress_range',
         ),
         db.Index('ix_training_jobs_owner_status', 'owner_id', 'status'),  # 复合索引优化列表查询
     )

@@ -4,6 +4,7 @@
 支持从 sklearn、UCI、OpenML 等源导入经典数据集
 ============================================
 """
+
 import hashlib
 import json
 import os
@@ -30,8 +31,8 @@ PUBLIC_DATASETS = {
         'loader': 'load_iris',
         'task_type': 'classification',  # 多分类 (3类)
         'n_samples': 150,
-        'n_features': 4,   # 花萼长度, 花萼宽度, 花瓣长度, 花瓣宽度
-        'n_classes': 3,    # setosa, versicolor, virginica
+        'n_features': 4,  # 花萼长度, 花萼宽度, 花瓣长度, 花瓣宽度
+        'n_classes': 3,  # setosa, versicolor, virginica
         'category': 'biology',
         'difficulty': 'beginner',
     },
@@ -43,7 +44,7 @@ PUBLIC_DATASETS = {
         'task_type': 'classification',  # 多分类 (3类)
         'n_samples': 178,
         'n_features': 13,  # 酒精, 苹果酸, 灰分, 镁, 酚类等13种化学指标
-        'n_classes': 3,    # 3个不同产地的葡萄酒
+        'n_classes': 3,  # 3个不同产地的葡萄酒
         'category': 'chemistry',
         'difficulty': 'beginner',
     },
@@ -55,7 +56,7 @@ PUBLIC_DATASETS = {
         'task_type': 'classification',  # 二分类
         'n_samples': 569,
         'n_features': 30,  # 细胞核的10个特征的均值/标准差/最大值
-        'n_classes': 2,    # 恶性 / 良性
+        'n_classes': 2,  # 恶性 / 良性
         'category': 'medical',
         'difficulty': 'beginner',
     },
@@ -67,11 +68,10 @@ PUBLIC_DATASETS = {
         'task_type': 'classification',  # 多分类 (10类)
         'n_samples': 1797,
         'n_features': 64,  # 8×8灰度像素值展开
-        'n_classes': 10,   # 数字0-9
+        'n_classes': 10,  # 数字0-9
         'category': 'vision',
         'difficulty': 'beginner',
     },
-
     # ===== sklearn 回归数据集 =====
     'diabetes': {
         'name': 'Diabetes (糖尿病进展)',
@@ -80,7 +80,7 @@ PUBLIC_DATASETS = {
         'loader': 'load_diabetes',
         'task_type': 'regression',  # 回归任务
         'n_samples': 442,
-        'n_features': 10,   # 年龄, 性别, BMI, 血压, 6项血清指标
+        'n_features': 10,  # 年龄, 性别, BMI, 血压, 6项血清指标
         'target_metric': 'MSE',  # 评估指标: 均方误差
         'category': 'medical',
         'difficulty': 'beginner',
@@ -92,12 +92,11 @@ PUBLIC_DATASETS = {
         'loader': 'fetch_california_housing',
         'task_type': 'regression',  # 回归任务
         'n_samples': 20640,
-        'n_features': 8,    # 收入中位数, 房龄, 房间数, 卧室数, 人口, 住户数, 纬度, 经度
+        'n_features': 8,  # 收入中位数, 房龄, 房间数, 卧室数, 人口, 住户数, 纬度, 经度
         'target_metric': 'MSE',
         'category': 'economics',
         'difficulty': 'beginner',
     },
-
     # ===== sklearn 生成式数据集 (适用于原型验证和算法测试) =====
     'make_classification': {
         'name': 'Synthetic Classification (合成分类)',
@@ -106,7 +105,7 @@ PUBLIC_DATASETS = {
         'loader': 'make_classification_small',
         'task_type': 'classification',
         'n_samples': 1000,
-        'n_features': 20,   # 其中10个信息特征, 其余为冗余+噪声
+        'n_features': 20,  # 其中10个信息特征, 其余为冗余+噪声
         'n_classes': 2,
         'category': 'synthetic',
         'difficulty': 'beginner',
@@ -118,7 +117,7 @@ PUBLIC_DATASETS = {
         'loader': 'make_moons_noisy',
         'task_type': 'classification',
         'n_samples': 500,
-        'n_features': 2,    # x1, x2 二维坐标
+        'n_features': 2,  # x1, x2 二维坐标
         'n_classes': 2,
         'category': 'synthetic',
         'difficulty': 'intermediate',
@@ -135,7 +134,6 @@ PUBLIC_DATASETS = {
         'category': 'synthetic',
         'difficulty': 'beginner',
     },
-
     # ===== UCI 真实世界数据集 =====
     'wine_quality': {
         'name': 'Wine Quality (葡萄酒质量评分)',
@@ -144,12 +142,11 @@ PUBLIC_DATASETS = {
         'loader': 'fetch_wine_quality',
         'task_type': 'regression',  # 回归: 预测0-10质量评分
         'n_samples': 4898,
-        'n_features': 11,   # 固定酸度, 挥发酸, 柠檬酸, 残糖, 氯, 硫化物, 密度, pH等
+        'n_features': 11,  # 固定酸度, 挥发酸, 柠檬酸, 残糖, 氯, 硫化物, 密度, pH等
         'target_metric': 'MAE',  # 平均绝对误差
         'category': 'chemistry',
         'difficulty': 'intermediate',
     },
-
     # ===== 深度学习适用数据集 (10K+ 样本, 适合 PyTorch MLP/CNN) =====
     'fashion_mnist': {
         'name': 'Fashion-MNIST (服装图像分类)',
@@ -159,7 +156,7 @@ PUBLIC_DATASETS = {
         'task_type': 'classification',  # 多分类 (10类)
         'n_samples': 70000,
         'n_features': 784,  # 28×28像素展开
-        'n_classes': 10,    # T恤, 裤子, 套头衫, 连衣裙, 外套, 凉鞋, 衬衫, 运动鞋, 包, 短靴
+        'n_classes': 10,  # T恤, 裤子, 套头衫, 连衣裙, 外套, 凉鞋, 衬衫, 运动鞋, 包, 短靴
         'category': 'vision',
         'difficulty': 'intermediate',  # 比MNIST更难, 更适合评估深度学习模型
     },
@@ -170,8 +167,8 @@ PUBLIC_DATASETS = {
         'loader': 'fetch_covertype',
         'task_type': 'classification',  # 多分类 (7类)
         'n_samples': 581012,  # 超50万样本 — 需要较长的训练时间
-        'n_features': 54,     # 海拔, 坡度, 水文距离, 土壤类型等地理特征
-        'n_classes': 7,       # 云杉/冷杉, 松树, 白杨等植被类型
+        'n_features': 54,  # 海拔, 坡度, 水文距离, 土壤类型等地理特征
+        'n_classes': 7,  # 云杉/冷杉, 松树, 白杨等植被类型
         'category': 'ecology',
         'difficulty': 'advanced',  # 大规模数据 + 类别不平衡
     },
@@ -182,8 +179,8 @@ PUBLIC_DATASETS = {
         'loader': 'fetch_adult',
         'task_type': 'classification',  # 二分类
         'n_samples': 48842,
-        'n_features': 14,    # 年龄, 工种, 教育程度, 婚姻状况, 职业, 每周工时等 混合特征类型
-        'n_classes': 2,      # <=50K / >50K
+        'n_features': 14,  # 年龄, 工种, 教育程度, 婚姻状况, 职业, 每周工时等 混合特征类型
+        'n_classes': 2,  # <=50K / >50K
         'category': 'economics',
         'difficulty': 'intermediate',
     },
@@ -194,7 +191,7 @@ PUBLIC_DATASETS = {
         'loader': 'make_classification_dl',
         'task_type': 'classification',  # 多分类 (4类)
         'n_samples': 50000,
-        'n_features': 50,    # 30个信息特征 + 10个冗余 + 5个重复, 含3%标签噪声
+        'n_features': 50,  # 30个信息特征 + 10个冗余 + 5个重复, 含3%标签噪声
         'n_classes': 4,
         'category': 'synthetic',
         'difficulty': 'intermediate',
@@ -206,7 +203,7 @@ PUBLIC_DATASETS = {
         'loader': 'make_regression_dl',
         'task_type': 'regression',  # 回归任务
         'n_samples': 30000,
-        'n_features': 30,    # 20个信息特征, effective_rank=25
+        'n_features': 30,  # 20个信息特征, effective_rank=25
         'target_metric': 'MSE',
         'category': 'synthetic',
         'difficulty': 'intermediate',
@@ -224,18 +221,20 @@ class DatasetImportService:
         for key, info in PUBLIC_DATASETS.items():
             if category and info.get('category') != category:
                 continue
-            datasets.append({
-                'key': key,
-                'name': info['name'],
-                'description': info['description'],
-                'source': info['source'].upper(),
-                'task_type': info['task_type'],
-                'n_samples': info['n_samples'],
-                'n_features': info['n_features'],
-                'n_classes': info.get('n_classes'),
-                'category': info.get('category', 'general'),
-                'difficulty': info.get('difficulty', 'beginner'),
-            })
+            datasets.append(
+                {
+                    'key': key,
+                    'name': info['name'],
+                    'description': info['description'],
+                    'source': info['source'].upper(),
+                    'task_type': info['task_type'],
+                    'n_samples': info['n_samples'],
+                    'n_features': info['n_features'],
+                    'n_classes': info.get('n_classes'),
+                    'category': info.get('category', 'general'),
+                    'difficulty': info.get('difficulty', 'beginner'),
+                }
+            )
         return datasets
 
     @staticmethod
@@ -393,25 +392,39 @@ class DatasetImportService:
         if loader == 'load_digits':
             data = datasets.load_digits()
             feat_names = [f'pixel_{i}' for i in range(data.data.shape[1])]
-            return DatasetImportService._build_sklearn_df(
-                data.data, feat_names, data.target.astype(str)
-            )
+            return DatasetImportService._build_sklearn_df(data.data, feat_names, data.target.astype(str))
 
         # 生成式数据集
         generated_map = {
             'make_classification_small': lambda: datasets.make_classification(
-                n_samples=1000, n_features=20, n_informative=10, n_classes=2, random_state=42),
-            'make_moons_noisy': lambda: datasets.make_moons(
-                n_samples=500, noise=0.2, random_state=42),
+                n_samples=1000, n_features=20, n_informative=10, n_classes=2, random_state=42
+            ),
+            'make_moons_noisy': lambda: datasets.make_moons(n_samples=500, noise=0.2, random_state=42),
             'make_blobs_multi': lambda: datasets.make_blobs(
-                n_samples=1000, n_features=5, centers=4, cluster_std=1.5, random_state=42),
+                n_samples=1000, n_features=5, centers=4, cluster_std=1.5, random_state=42
+            ),
             'make_classification_dl': lambda: datasets.make_classification(
-                n_samples=50000, n_features=50, n_informative=30, n_redundant=10,
-                n_repeated=5, n_classes=4, n_clusters_per_class=2, flip_y=0.03,
-                class_sep=0.8, random_state=42),
+                n_samples=50000,
+                n_features=50,
+                n_informative=30,
+                n_redundant=10,
+                n_repeated=5,
+                n_classes=4,
+                n_clusters_per_class=2,
+                flip_y=0.03,
+                class_sep=0.8,
+                random_state=42,
+            ),
             'make_regression_dl': lambda: datasets.make_regression(
-                n_samples=30000, n_features=30, n_informative=20, noise=15.0,
-                bias=3.0, effective_rank=25, tail_strength=0.5, random_state=42),
+                n_samples=30000,
+                n_features=30,
+                n_informative=20,
+                noise=15.0,
+                bias=3.0,
+                effective_rank=25,
+                tail_strength=0.5,
+                random_state=42,
+            ),
         }
         if loader in generated_map:
             X, y = generated_map[loader]()
@@ -424,10 +437,10 @@ class DatasetImportService:
             try:
                 fmnist = datasets.fetch_openml('Fashion-MNIST', version=1, as_frame=False, parser='auto')
                 feat_names = [f'pixel_{i}' for i in range(fmnist.data.shape[1])]
-                return DatasetImportService._build_sklearn_df(
-                    fmnist.data, feat_names, fmnist.target.astype(str))
+                return DatasetImportService._build_sklearn_df(fmnist.data, feat_names, fmnist.target.astype(str))
             except Exception:
                 from tensorflow.keras.datasets import fashion_mnist
+
                 (X_train, y_train), (X_test, y_test) = fashion_mnist.load_data()
                 X_all = np.concatenate([X_train, X_test]).reshape(-1, 784)
                 y_all = np.concatenate([y_train, y_test])
@@ -449,19 +462,25 @@ class DatasetImportService:
             except Exception:
                 np.random.seed(42)
                 n = 48842
-                df = pd.DataFrame({
-                    'age': np.random.randint(17, 90, n),
-                    'workclass': np.random.choice(['Private', 'Self-emp', 'Gov', 'Unknown'], n),
-                    'education_num': np.random.randint(1, 16, n),
-                    'marital_status': np.random.choice(['Married', 'Single', 'Divorced', 'Widowed'], n),
-                    'occupation': np.random.choice(['Tech', 'Sales', 'Craft', 'Manager', 'Other'], n),
-                    'hours_per_week': np.random.randint(1, 99, n),
-                    'capital_gain': np.random.exponential(1000, n).astype(int),
-                    'capital_loss': np.random.exponential(500, n).astype(int),
-                })
-                logit = (0.03 * df['age'] + 0.5 * df['education_num']
-                         + 0.01 * df['hours_per_week'] + 0.0001 * df['capital_gain']
-                         - 2 * np.random.randn(n))
+                df = pd.DataFrame(
+                    {
+                        'age': np.random.randint(17, 90, n),
+                        'workclass': np.random.choice(['Private', 'Self-emp', 'Gov', 'Unknown'], n),
+                        'education_num': np.random.randint(1, 16, n),
+                        'marital_status': np.random.choice(['Married', 'Single', 'Divorced', 'Widowed'], n),
+                        'occupation': np.random.choice(['Tech', 'Sales', 'Craft', 'Manager', 'Other'], n),
+                        'hours_per_week': np.random.randint(1, 99, n),
+                        'capital_gain': np.random.exponential(1000, n).astype(int),
+                        'capital_loss': np.random.exponential(500, n).astype(int),
+                    }
+                )
+                logit = (
+                    0.03 * df['age']
+                    + 0.5 * df['education_num']
+                    + 0.01 * df['hours_per_week']
+                    + 0.0001 * df['capital_gain']
+                    - 2 * np.random.randn(n)
+                )
                 df['target'] = (1 / (1 + np.exp(-logit)) > 0.5).astype(str)
                 return df, 'target'
 
@@ -480,20 +499,22 @@ class DatasetImportService:
                 logger.warning(f'UCI 下载失败，使用备用数据生成: {e}')
                 np.random.seed(42)
                 n = 1599
-                df = pd.DataFrame({
-                    'fixed_acidity': np.random.uniform(4, 16, n),
-                    'volatile_acidity': np.random.uniform(0.1, 1.6, n),
-                    'citric_acid': np.random.uniform(0, 1, n),
-                    'residual_sugar': np.random.uniform(0.5, 16, n),
-                    'chlorides': np.random.uniform(0.01, 0.6, n),
-                    'free_sulfur_dioxide': np.random.uniform(1, 70, n),
-                    'total_sulfur_dioxide': np.random.uniform(6, 290, n),
-                    'density': np.random.uniform(0.99, 1.004, n),
-                    'pH': np.random.uniform(2.7, 4, n),
-                    'sulphates': np.random.uniform(0.3, 2, n),
-                    'alcohol': np.random.uniform(8, 15, n),
-                    'quality': np.random.randint(3, 9, n),
-                })
+                df = pd.DataFrame(
+                    {
+                        'fixed_acidity': np.random.uniform(4, 16, n),
+                        'volatile_acidity': np.random.uniform(0.1, 1.6, n),
+                        'citric_acid': np.random.uniform(0, 1, n),
+                        'residual_sugar': np.random.uniform(0.5, 16, n),
+                        'chlorides': np.random.uniform(0.01, 0.6, n),
+                        'free_sulfur_dioxide': np.random.uniform(1, 70, n),
+                        'total_sulfur_dioxide': np.random.uniform(6, 290, n),
+                        'density': np.random.uniform(0.99, 1.004, n),
+                        'pH': np.random.uniform(2.7, 4, n),
+                        'sulphates': np.random.uniform(0.3, 2, n),
+                        'alcohol': np.random.uniform(8, 15, n),
+                        'quality': np.random.randint(3, 9, n),
+                    }
+                )
                 return df, 'quality'
         return None, None
 
@@ -515,10 +536,9 @@ class DatasetImportService:
         return None, None
 
     @staticmethod
-    def import_from_url(user: User, url: str, name: str,
-                        file_format: str = 'csv',
-                        target_column: str = None,
-                        description: str = None) -> tuple[Dataset | None, str | None]:
+    def import_from_url(
+        user: User, url: str, name: str, file_format: str = 'csv', target_column: str = None, description: str = None
+    ) -> tuple[Dataset | None, str | None]:
         """
         从URL导入数据集 (支持 Kaggle raw URL 等)
 
@@ -649,9 +669,9 @@ class DatasetImportService:
             return None, f'导入失败: {str(e)}'
 
     @staticmethod
-    def import_from_kaggle(user: User, dataset_path: str, name: str,
-                           target_column: str = None,
-                           description: str = None) -> tuple[Dataset | None, str | None]:
+    def import_from_kaggle(
+        user: User, dataset_path: str, name: str, target_column: str = None, description: str = None
+    ) -> tuple[Dataset | None, str | None]:
         """
         从 Kaggle 数据集导入 (需要已配置 kaggle credentials)
 
@@ -667,6 +687,7 @@ class DatasetImportService:
         """
         try:
             import kagglehub
+
             download_path = kagglehub.dataset_download(dataset_path)
             logger.info(f'Kaggle 数据集已下载: {download_path}')
 

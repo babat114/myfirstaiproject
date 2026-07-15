@@ -3,6 +3,7 @@
 在训练过程中更新数据库进度、日志和指标
 训练完成后自动保存实验记录到 experiments/{job_uuid}/
 """
+
 import json
 import os
 import pickle
@@ -22,6 +23,7 @@ class TrainingCallback:
         """发布事件到事件总线 (非阻塞，总线不可用时静默丢弃)"""
         try:
             from app.utils.event_bus import get_event_bus
+
             get_event_bus().publish(self.job_id, event_type, data)
         except Exception:
             pass  # 事件总线故障不应影响训练
@@ -49,14 +51,17 @@ class TrainingCallback:
         db.session.commit()
 
         # 推送实时事件 — 携带完整 history 让前端直接渲染 (无需额外 HTTP 轮询)
-        self._publish('metrics', {
-            'current_epoch': job.current_epoch,
-            'total_epochs': job.total_epochs,
-            'progress_percent': job.progress_percent,
-            'metrics': metrics,
-            'metrics_history': history,          # 完整历史 → 前端直接渲染图表+关键帧
-            'log_tail': job.log_tail_last(3),    # 最近3行日志 → 前端增量追加
-        })
+        self._publish(
+            'metrics',
+            {
+                'current_epoch': job.current_epoch,
+                'total_epochs': job.total_epochs,
+                'progress_percent': job.progress_percent,
+                'metrics': metrics,
+                'metrics_history': history,  # 完整历史 → 前端直接渲染图表+关键帧
+                'log_tail': job.log_tail_last(3),  # 最近3行日志 → 前端增量追加
+            },
+        )
 
     def on_log(self, message: str):
         """追加训练日志"""
@@ -116,6 +121,7 @@ class TrainingCallback:
             try:
                 if final_metrics:
                     from app.models.model_record import ModelRecord
+
                     model = db.session.get(ModelRecord, job.model.id)
                     if model:
                         # 委托给 ModelRecord.set_metrics() — 自动检测分类/回归/聚类
@@ -123,9 +129,7 @@ class TrainingCallback:
                         # 同时保存完整的评估指标到 metrics_json
                         model.metrics_json = json.dumps(final_metrics, ensure_ascii=False)
                         model.status = 'trained'
-                        model.training_duration_seconds = self._safe_timedelta(
-                            job.started_at, job.completed_at
-                        )
+                        model.training_duration_seconds = self._safe_timedelta(job.started_at, job.completed_at)
                         model.training_job_id = job.id
                         model.training_dataset_id = job.dataset_id
                         # 设置模型文件路径为实验目录下的模型文件
@@ -144,13 +148,13 @@ class TrainingCallback:
                         if final_metrics and job.dataset_id:
                             try:
                                 from app.models.dataset import Dataset as DsModel
+
                                 ind_test = DsModel.query.filter_by(
-                                    source_dataset_id=job.dataset_id,
-                                    is_test_set=True,
-                                    status='ready'
+                                    source_dataset_id=job.dataset_id, is_test_set=True, status='ready'
                                 ).first()
                                 if ind_test:
                                     from app.services.inference_service import ModelInferenceService
+
                                     ind_result = ModelInferenceService.test_model_with_split(
                                         model, test_dataset=ind_test
                                     )
@@ -170,9 +174,7 @@ class TrainingCallback:
                                             f'accuracy={ind_result.get("accuracy")}'
                                         )
                                     else:
-                                        job.append_log(
-                                            f'[独立评估] 评估失败: {ind_result.get("error", "未知错误")}'
-                                        )
+                                        job.append_log(f'[独立评估] 评估失败: {ind_result.get("error", "未知错误")}')
                             except Exception as e:
                                 job.append_log(f'[独立评估] 自动评估异常 (非致命): {e}')
 
@@ -269,6 +271,7 @@ class TrainingCallback:
 # 训练完成后捕获实际 sklearn 模型参数
 # ═══════════════════════════════════════════════════════════════
 
+
 def _backfill_sklearn_params_to_model(model, job):
     """从保存的 .pkl 文件中提取 sklearn 估计器的实际参数，
     合并到 ModelRecord.hyperparameters_json 中。
@@ -304,12 +307,21 @@ def _backfill_sklearn_params_to_model(model, job):
 
     # 保留用户显式传入的非基础参数 (如来自 ParameterGuidanceService 的数据感知参数)
     for k, v in hp.items():
-        if k not in merged and k not in ('epochs', 'batch_size', 'val_size',
-                                          'random_state', 'ml_task_type',
-                                          'actual_params', 'param_source',
-                                          'backfilled_at', 'tuned',
-                                          'tuning_method', 'best_cv_score',
-                                          'tuning_result', 'best_params'):
+        if k not in merged and k not in (
+            'epochs',
+            'batch_size',
+            'val_size',
+            'random_state',
+            'ml_task_type',
+            'actual_params',
+            'param_source',
+            'backfilled_at',
+            'tuned',
+            'tuning_method',
+            'best_cv_score',
+            'tuning_result',
+            'best_params',
+        ):
             merged[k] = v
 
     # 过滤掉不应作为超参数的 meta keys
@@ -331,12 +343,11 @@ def _backfill_sklearn_params_to_model(model, job):
 
     # 判断参数来源
     from app.executor.trainers.sklearn_trainer import SklearnTrainer
+
     defaults = SklearnTrainer._REGULARIZE_DEFAULTS.get(hp.get('algorithm', ''), {})
     if hp.get('tuned'):
         merged['param_source'] = 'hyperparameter_tuning'
-    elif defaults and any(
-        str(filtered.get(k)) == str(v) for k, v in defaults.items()
-    ):
+    elif defaults and any(str(filtered.get(k)) == str(v) for k, v in defaults.items()):
         merged['param_source'] = 'regularize_defaults'
     elif 'algorithm_params' in hp:
         merged['param_source'] = 'user_specified'
@@ -346,7 +357,4 @@ def _backfill_sklearn_params_to_model(model, job):
     merged['backfilled_at'] = localnow().isoformat()
 
     model.set_hyperparameters(merged)
-    job.append_log(
-        f'[参数] 已捕获实际sklearn模型参数 '
-        f'({len(filtered)} keys, source={merged["param_source"]})'
-    )
+    job.append_log(f'[参数] 已捕获实际sklearn模型参数 ({len(filtered)} keys, source={merged["param_source"]})')

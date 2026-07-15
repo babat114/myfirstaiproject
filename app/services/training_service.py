@@ -4,6 +4,7 @@
 管理AI模型训练任务的生命周期
 ============================================
 """
+
 import contextlib
 import json
 
@@ -22,17 +23,25 @@ class TrainingService:
     """训练任务管理服务"""
 
     @staticmethod
-    def create_job(user: User, name: str, dataset_id: int = None,
-                   description: str = None, task_type: str = 'training',
-                   framework: str = None, total_epochs: int = 0,
-                   total_steps: int = 0, gpu_count: int = 0,
-                   cpu_cores: int = 1, memory_gb: float = 4.0,
-                   hyperparameters: dict = None,
-                   ml_task_type: str = 'classification',
-                   algorithm: str = 'random_forest',
-                   target_column: str = None,
-                   test_size: float = 0.2,
-                   model_type: str = None) -> tuple[TrainingJob | None, str | None]:
+    def create_job(
+        user: User,
+        name: str,
+        dataset_id: int = None,
+        description: str = None,
+        task_type: str = 'training',
+        framework: str = None,
+        total_epochs: int = 0,
+        total_steps: int = 0,
+        gpu_count: int = 0,
+        cpu_cores: int = 1,
+        memory_gb: float = 4.0,
+        hyperparameters: dict = None,
+        ml_task_type: str = 'classification',
+        algorithm: str = 'random_forest',
+        target_column: str = None,
+        test_size: float = 0.2,
+        model_type: str = None,
+    ) -> tuple[TrainingJob | None, str | None]:
         """
         创建新训练任务
 
@@ -67,16 +76,19 @@ class TrainingService:
 
         # 构建完整的超参数字典
         full_hyperparams = hyperparameters or {}
-        full_hyperparams.update({
-            'task_type': ml_task_type,
-            'algorithm': algorithm,
-            'target_column': target_column,
-            'test_size': test_size,
-        })
+        full_hyperparams.update(
+            {
+                'task_type': ml_task_type,
+                'algorithm': algorithm,
+                'target_column': target_column,
+                'test_size': test_size,
+            }
+        )
 
         try:
             # 创建关联的模型记录 — 使用增强描述 (应用场景+使用方式+算法原理)
             from app.services.model_recommender import generate_enhanced_description
+
             dataset_name = dataset.name if dataset_id and dataset else ''
             model_description = generate_enhanced_description(
                 dataset_name=dataset_name,
@@ -121,8 +133,7 @@ class TrainingService:
             dashboard_cache.invalidate('job_stats:')
             dashboard_cache.invalidate('dashboard:')
 
-            logger.info(f"训练任务创建: {name} (by {user.username}), "
-                        f"算法: {algorithm}, 类型: {ml_task_type}")
+            logger.info(f'训练任务创建: {name} (by {user.username}), 算法: {algorithm}, 类型: {ml_task_type}')
             return job, None
 
         except Exception as e:
@@ -151,7 +162,7 @@ class TrainingService:
             if not success:
                 return False, '任务提交失败，可能已在运行中。'
 
-            logger.info(f"训练任务已提交到执行引擎: {job.name}")
+            logger.info(f'训练任务已提交到执行引擎: {job.name}')
             return True, None
         except Exception as e:
             return False, str(e)
@@ -163,6 +174,7 @@ class TrainingService:
             return False, '只能暂停正在运行的任务。'
 
         from app.executor.engine import get_executor
+
         executor = get_executor()
         if executor.pause(job.id):
             return True, None
@@ -175,6 +187,7 @@ class TrainingService:
             return False, '只能恢复已暂停的任务。'
 
         from app.executor.engine import get_executor
+
         executor = get_executor()
         if executor.resume(job.id):
             return True, None
@@ -191,7 +204,7 @@ class TrainingService:
         db.session.commit()
         dashboard_cache.invalidate('job_stats:')
         dashboard_cache.invalidate('dashboard:')
-        logger.info(f"训练完成: {job.name}")
+        logger.info(f'训练完成: {job.name}')
         return True, None
 
     @staticmethod
@@ -202,7 +215,7 @@ class TrainingService:
         db.session.commit()
         dashboard_cache.invalidate('job_stats:')
         dashboard_cache.invalidate('dashboard:')
-        logger.error(f"训练失败: {job.name} - {error}")
+        logger.error(f'训练失败: {job.name} - {error}')
         return True, None
 
     @staticmethod
@@ -212,6 +225,7 @@ class TrainingService:
             return False, '任务已结束，无法取消。'
 
         from app.executor.engine import get_executor
+
         executor = get_executor()
         if executor.cancel(job.id):
             return True, None
@@ -222,7 +236,7 @@ class TrainingService:
         db.session.commit()
         dashboard_cache.invalidate('job_stats:')
         dashboard_cache.invalidate('dashboard:')
-        logger.info(f"训练取消: {job.name}")
+        logger.info(f'训练取消: {job.name}')
         return True, None
 
     @staticmethod
@@ -261,6 +275,7 @@ class TrainingService:
             # ── 新参数模式: 更新模型超参数 ──
             if new_params and job.model:
                 from app.utils.algorithm_helpers import fix_kmeans_algorithm
+
                 try:
                     existing = job.model.hyperparameters_dict
                     existing.update(new_params)
@@ -298,8 +313,11 @@ class TrainingService:
 
             # ── 清理并重置 (共用) ──
             TrainingService._reset_job_to_queued(job)
-            log_msg = f'[重训] 使用新参数重置: {json.dumps(new_params, ensure_ascii=False)}' if new_params \
-                      else '[重训] 任务重置，准备重新训练...'
+            log_msg = (
+                f'[重训] 使用新参数重置: {json.dumps(new_params, ensure_ascii=False)}'
+                if new_params
+                else '[重训] 任务重置，准备重新训练...'
+            )
             job.append_log(log_msg)
             db.session.commit()
 
@@ -308,7 +326,7 @@ class TrainingService:
             if not success:
                 return False, '重新训练提交失败，请稍后重试。'
 
-            logger.info(f"训练任务已重置并提交: {job.name} (id={job.id}), 新参数: {bool(new_params)}")
+            logger.info(f'训练任务已重置并提交: {job.name} (id={job.id}), 新参数: {bool(new_params)}')
             return True, None
         except Exception as e:
             db.session.rollback()
@@ -318,12 +336,12 @@ class TrainingService:
     def get_job_status(job_id: int) -> dict | None:
         """获取训练任务的实时运行状态 (含进度/日志)"""
         from app.executor.engine import get_executor
+
         executor = get_executor()
         return executor.get_status(job_id)
 
     @staticmethod
-    def update_progress(job: TrainingJob, epoch: int, step: int,
-                        metrics: dict = None) -> tuple[bool, str | None]:
+    def update_progress(job: TrainingJob, epoch: int, step: int, metrics: dict = None) -> tuple[bool, str | None]:
         """更新训练进度"""
         if job.status != 'running':
             return False, '任务未在运行中。'
@@ -336,28 +354,22 @@ class TrainingService:
     def get_job_by_id(job_id: int) -> TrainingJob | None:
         """根据 ID 获取任务 (预加载关联对象, 避免模板中 DetachedInstanceError)"""
         from sqlalchemy.orm import joinedload
+
         return db.session.execute(
             db.select(TrainingJob)
             .filter_by(id=job_id)
-            .options(
-                joinedload(TrainingJob.owner),
-                joinedload(TrainingJob.dataset),
-                joinedload(TrainingJob.model)
-            )
+            .options(joinedload(TrainingJob.owner), joinedload(TrainingJob.dataset), joinedload(TrainingJob.model))
         ).scalar_one_or_none()
 
     @staticmethod
     def get_job_by_uuid(job_uuid: str) -> TrainingJob | None:
         """根据 UUID 获取任务 (预加载关联对象, 避免 N+1)"""
         from sqlalchemy.orm import joinedload
+
         return db.session.execute(
             db.select(TrainingJob)
             .filter_by(uuid=job_uuid)
-            .options(
-                joinedload(TrainingJob.owner),
-                joinedload(TrainingJob.dataset),
-                joinedload(TrainingJob.model)
-            )
+            .options(joinedload(TrainingJob.owner), joinedload(TrainingJob.dataset), joinedload(TrainingJob.model))
         ).scalar_one_or_none()
 
     @staticmethod
@@ -368,17 +380,22 @@ class TrainingService:
             db.session.commit()
             dashboard_cache.invalidate('job_stats:')
             dashboard_cache.invalidate('dashboard:')
-            logger.info(f"训练任务已删除: {job.name}")
+            logger.info(f'训练任务已删除: {job.name}')
             return True, None
         except Exception as e:
             db.session.rollback()
             return False, sanitize_service_error(e, '删除训练任务失败')
 
     @staticmethod
-    def list_jobs(page: int = 1, per_page: int = 15,
-                  status: str = None, task_type: str = None,
-                  owner_id: int = None, dataset_id: int = None,
-                  search: str = None) -> dict:
+    def list_jobs(
+        page: int = 1,
+        per_page: int = 15,
+        status: str = None,
+        task_type: str = None,
+        owner_id: int = None,
+        dataset_id: int = None,
+        search: str = None,
+    ) -> dict:
         """
         获取训练任务列表
 
@@ -416,8 +433,9 @@ class TrainingService:
     _TUNING_CONFLICT_KEYS = {'algorithm', 'ml_task_type', 'task_type', 'framework'}
 
     @staticmethod
-    def apply_tuning_hyperparameters(job: TrainingJob, best_params: dict,
-                                     best_score: float, search_time: float = None) -> bool:
+    def apply_tuning_hyperparameters(
+        job: TrainingJob, best_params: dict, best_score: float, search_time: float = None
+    ) -> bool:
         """将调优结果写入训练任务关联模型 (封装 DB 写入, 供路由层调用)
 
         Returns:
@@ -447,8 +465,11 @@ class TrainingService:
         """
         extra = {}
         numeric_fields = {
-            'val_size': float, 'dropout': float, 'learning_rate': float,
-            'weight_decay': float, 'batch_size': int,
+            'val_size': float,
+            'dropout': float,
+            'learning_rate': float,
+            'weight_decay': float,
+            'batch_size': int,
             'early_stopping_patience': int,
         }
         for field, cast in numeric_fields.items():
@@ -468,9 +489,9 @@ class TrainingService:
         return extra
 
     @staticmethod
-    def build_retrain_params(best_params: dict, existing_hparams: dict,
-                             algorithm: str, ml_task_type: str,
-                             is_mlp: bool = False) -> dict:
+    def build_retrain_params(
+        best_params: dict, existing_hparams: dict, algorithm: str, ml_task_type: str, is_mlp: bool = False
+    ) -> dict:
         """从调优结果构建重训练参数 — 跳过冲突键, 保留既有参数
 
         解决 gridsearch_retrain / apply_tuning_result 中的重复合并逻辑。
@@ -507,15 +528,13 @@ class TrainingService:
 
         # 按状态聚合
         status_rows = db.session.execute(
-            _filtered_query(TrainingJob.status, func.count(TrainingJob.id))
-            .group_by(TrainingJob.status)
+            _filtered_query(TrainingJob.status, func.count(TrainingJob.id)).group_by(TrainingJob.status)
         ).all()
         status_counts = {row[0]: row[1] for row in status_rows}
 
         # 按任务类型聚合
         type_rows = db.session.execute(
-            _filtered_query(TrainingJob.task_type, func.count(TrainingJob.id))
-            .group_by(TrainingJob.task_type)
+            _filtered_query(TrainingJob.task_type, func.count(TrainingJob.id)).group_by(TrainingJob.task_type)
         ).all()
         type_counts = {row[0]: row[1] for row in type_rows}
 
@@ -525,11 +544,9 @@ class TrainingService:
         avg_duration = None
         try:
             avg_row = db.session.execute(
-                _filtered_query(func.avg(
-                    func.timestampdiff(db.text('SECOND'),
-                                       TrainingJob.started_at,
-                                       TrainingJob.completed_at)
-                )).filter(
+                _filtered_query(
+                    func.avg(func.timestampdiff(db.text('SECOND'), TrainingJob.started_at, TrainingJob.completed_at))
+                ).filter(
                     TrainingJob.status == 'completed',
                     TrainingJob.started_at.isnot(None),
                     TrainingJob.completed_at.isnot(None),
@@ -541,8 +558,7 @@ class TrainingService:
             # SQLite 不支持 TIMESTAMPDIFF, 回退到 Python 计算
             try:
                 completed_jobs = db.session.execute(
-                    _filtered_query(TrainingJob.started_at, TrainingJob.completed_at)
-                    .filter(
+                    _filtered_query(TrainingJob.started_at, TrainingJob.completed_at).filter(
                         TrainingJob.status == 'completed',
                         TrainingJob.started_at.isnot(None),
                         TrainingJob.completed_at.isnot(None),

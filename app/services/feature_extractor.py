@@ -11,6 +11,7 @@ v2.1 优化:
   - 经典 CV 增强: LBP 纹理 + ORB 关键点统计
 ============================================
 """
+
 import io
 import logging
 
@@ -37,9 +38,7 @@ class FeatureExtractor:
     # ============ 文本特征提取 ============
 
     @staticmethod
-    def extract_text_features(
-        text: str, n_features: int, language: str = 'zh'
-    ) -> tuple[np.ndarray | None, str | None]:
+    def extract_text_features(text: str, n_features: int, language: str = 'zh') -> tuple[np.ndarray | None, str | None]:
         """
         将文本转换为 TF-IDF 特征向量, 截断/填充至目标维度
 
@@ -69,6 +68,7 @@ class FeatureExtractor:
             if language == 'zh':
                 try:
                     import jieba
+
                     text = ' '.join(jieba.cut(text))
                 except ImportError:
                     # 无 jieba 则按字符级处理 (单字 gram)
@@ -104,8 +104,7 @@ class FeatureExtractor:
             features = FeatureExtractor._pad_or_truncate(features, n_features)
 
             logger.info(
-                f'文本特征提取完成: {len(text)}字符 -> {n_features}维特征, '
-                f'词汇量={len(vectorizer.vocabulary_)}'
+                f'文本特征提取完成: {len(text)}字符 -> {n_features}维特征, 词汇量={len(vectorizer.vocabulary_)}'
             )
             return features, None
 
@@ -119,8 +118,7 @@ class FeatureExtractor:
 
     @staticmethod
     def extract_image_features(
-        image_data: bytes, n_features: int,
-        multi_scale: bool = True
+        image_data: bytes, n_features: int, multi_scale: bool = True
     ) -> tuple[np.ndarray | None, str | None]:
         """
         从图像字节数据中提取特征向量
@@ -140,9 +138,7 @@ class FeatureExtractor:
             return None, '请上传图像文件。'
 
         # 尝试 PyTorch 路径
-        features, error = FeatureExtractor._extract_with_cnn(
-            image_data, n_features, multi_scale=multi_scale
-        )
+        features, error = FeatureExtractor._extract_with_cnn(image_data, n_features, multi_scale=multi_scale)
         if features is not None:
             return features, None
 
@@ -174,23 +170,23 @@ class FeatureExtractor:
             if FeatureExtractor._cnn_model is None:
                 logger.info('加载预训练 ResNet-18 特征提取器...')
                 model = models.resnet18(weights='DEFAULT')
-                FeatureExtractor._cnn_model = torch.nn.Sequential(
-                    *list(model.children())[:-1]
-                )
+                FeatureExtractor._cnn_model = torch.nn.Sequential(*list(model.children())[:-1])
                 FeatureExtractor._cnn_model.eval()
 
             # 打开图像
             img = Image.open(io.BytesIO(image_data)).convert('RGB')
 
             # 基础预处理 (除 resize 外)
-            base_transforms = transforms.Compose([
-                transforms.CenterCrop(224),
-                transforms.ToTensor(),
-                transforms.Normalize(
-                    mean=[0.485, 0.456, 0.406],
-                    std=[0.229, 0.224, 0.225],
-                ),
-            ])
+            base_transforms = transforms.Compose(
+                [
+                    transforms.CenterCrop(224),
+                    transforms.ToTensor(),
+                    transforms.Normalize(
+                        mean=[0.485, 0.456, 0.406],
+                        std=[0.229, 0.224, 0.225],
+                    ),
+                ]
+            )
 
             if multi_scale:
                 # 三尺度提取
@@ -202,12 +198,16 @@ class FeatureExtractor:
                     img_resized.thumbnail((size, size), Image.LANCZOS)
                     # 如果缩略图小于目标, 填充到至少 size×size
                     if img_resized.size[0] < 224 or img_resized.size[1] < 224:
-                        new_img = Image.new('RGB', (max(img_resized.size[0], 224),
-                                           max(img_resized.size[1], 224)), (0, 0, 0))
-                        new_img.paste(img_resized, (
-                            (new_img.size[0] - img_resized.size[0]) // 2,
-                            (new_img.size[1] - img_resized.size[1]) // 2,
-                        ))
+                        new_img = Image.new(
+                            'RGB', (max(img_resized.size[0], 224), max(img_resized.size[1], 224)), (0, 0, 0)
+                        )
+                        new_img.paste(
+                            img_resized,
+                            (
+                                (new_img.size[0] - img_resized.size[0]) // 2,
+                                (new_img.size[1] - img_resized.size[1]) // 2,
+                            ),
+                        )
                         img_resized = new_img
                     img_tensor = base_transforms(img_resized).unsqueeze(0)
                     with torch.no_grad():
@@ -219,15 +219,17 @@ class FeatureExtractor:
                 features = np.mean(all_features, axis=0)
             else:
                 # 单尺度 (兼容旧行为)
-                preprocess = transforms.Compose([
-                    transforms.Resize(256),
-                    transforms.CenterCrop(224),
-                    transforms.ToTensor(),
-                    transforms.Normalize(
-                        mean=[0.485, 0.456, 0.406],
-                        std=[0.229, 0.224, 0.225],
-                    ),
-                ])
+                preprocess = transforms.Compose(
+                    [
+                        transforms.Resize(256),
+                        transforms.CenterCrop(224),
+                        transforms.ToTensor(),
+                        transforms.Normalize(
+                            mean=[0.485, 0.456, 0.406],
+                            std=[0.229, 0.224, 0.225],
+                        ),
+                    ]
+                )
                 img_tensor = preprocess(img).unsqueeze(0)
                 with torch.no_grad():
                     features = FeatureExtractor._cnn_model(img_tensor)
@@ -239,10 +241,7 @@ class FeatureExtractor:
             # 对齐维度
             features = FeatureExtractor._pad_or_truncate(features, n_features)
 
-            logger.info(
-                f'CNN 特征提取完成 (multi_scale={multi_scale}): '
-                f'{img.size} -> {n_features}维特征 (L2归一化)'
-            )
+            logger.info(f'CNN 特征提取完成 (multi_scale={multi_scale}): {img.size} -> {n_features}维特征 (L2归一化)')
             return features, None
 
         except ImportError as e:
@@ -252,9 +251,7 @@ class FeatureExtractor:
             return None, f'CNN特征提取失败: {str(e)}'
 
     @staticmethod
-    def _extract_with_classical_cv(
-        image_data: bytes, n_features: int
-    ) -> tuple[np.ndarray | None, str | None]:
+    def _extract_with_classical_cv(image_data: bytes, n_features: int) -> tuple[np.ndarray | None, str | None]:
         """回退方案: 使用 HOG + LBP 纹理 + 颜色直方图 + ORB关键点统计
 
         增强说明 (v2.1):
@@ -296,8 +293,7 @@ class FeatureExtractor:
                 radius = 1
                 n_points = 8 * radius
                 lbp = local_binary_pattern(img_uint8, n_points, radius, method='uniform')
-                lbp_hist, _ = np.histogram(lbp.ravel(), bins=np.arange(0, n_points + 4),
-                                           range=(0, n_points + 3))
+                lbp_hist, _ = np.histogram(lbp.ravel(), bins=np.arange(0, n_points + 4), range=(0, n_points + 3))
                 lbp_hist = lbp_hist.astype(np.float32)
                 if lbp_hist.sum() > 0:
                     lbp_hist = lbp_hist / lbp_hist.sum()
@@ -308,15 +304,19 @@ class FeatureExtractor:
             # 3. ORB 关键点统计 (特征丰富度, 匹配质量指标)
             try:
                 from skimage.feature import ORB
+
                 detector = ORB(n_keypoints=50, fast_n=9)
                 detector.detect_and_extract(img_uint8)
                 n_kp = len(detector.keypoints)
-                kp_stats = np.array([
-                    float(n_kp),
-                    float(np.mean(detector.responses)) if n_kp > 0 else 0.0,
-                    float(np.std(detector.responses)) if n_kp > 1 else 0.0,
-                    float(np.max(detector.responses)) if n_kp > 0 else 0.0,
-                ], dtype=np.float32)
+                kp_stats = np.array(
+                    [
+                        float(n_kp),
+                        float(np.mean(detector.responses)) if n_kp > 0 else 0.0,
+                        float(np.std(detector.responses)) if n_kp > 1 else 0.0,
+                        float(np.max(detector.responses)) if n_kp > 0 else 0.0,
+                    ],
+                    dtype=np.float32,
+                )
                 feature_parts.append(kp_stats)
             except Exception:
                 # ORB 不可用则不添加
@@ -330,13 +330,16 @@ class FeatureExtractor:
             feature_parts.append(hist)
 
             # 5. 简单统计特征
-            stats = np.array([
-                np.mean(img_array),
-                np.std(img_array),
-                np.min(img_array),
-                np.max(img_array),
-                np.median(img_array),
-            ], dtype=np.float32)
+            stats = np.array(
+                [
+                    np.mean(img_array),
+                    np.std(img_array),
+                    np.min(img_array),
+                    np.max(img_array),
+                    np.median(img_array),
+                ],
+                dtype=np.float32,
+            )
             feature_parts.append(stats)
 
             # 拼接所有特征 → L2归一化
@@ -349,8 +352,8 @@ class FeatureExtractor:
 
             dims = [len(p) for p in feature_parts]
             logger.info(
-                f'经典CV特征提取完成: HOG={dims[0]} + LBP={dims[1] if len(dims)>1 else 0}'
-                f' + ORB_kp={dims[2] if len(dims)>2 else 0} + Hist=64 + Stats=5'
+                f'经典CV特征提取完成: HOG={dims[0]} + LBP={dims[1] if len(dims) > 1 else 0}'
+                f' + ORB_kp={dims[2] if len(dims) > 2 else 0} + Hist=64 + Stats=5'
                 f' = {sum(dims)} -> {n_features}维 (L2归一化)'
             )
             return features, None
@@ -426,43 +429,44 @@ class FeatureExtractor:
         """
         if not image_data_a or not image_data_b:
             return {
-                'similarity': 0.0, 'distance': 2.0, 'feat_dims': 0,
-                'method': 'none', 'match_level': 'none',
+                'similarity': 0.0,
+                'distance': 2.0,
+                'feat_dims': 0,
+                'method': 'none',
+                'match_level': 'none',
                 'error': '请提供两张图像的数据。',
             }
 
         try:
             # 提取两张图的特征
-            feats_a, err_a = FeatureExtractor.extract_image_features(
-                image_data_a, n_features
-            )
-            feats_b, err_b = FeatureExtractor.extract_image_features(
-                image_data_b, n_features
-            )
+            feats_a, err_a = FeatureExtractor.extract_image_features(image_data_a, n_features)
+            feats_b, err_b = FeatureExtractor.extract_image_features(image_data_b, n_features)
 
             method = 'cnn'
             # 如果 CNN 失败则回退到经典 CV
             if err_a and 'CNN' in (err_a or ''):
-                feats_a, err_a = FeatureExtractor._extract_with_classical_cv(
-                    image_data_a, n_features
-                )
+                feats_a, err_a = FeatureExtractor._extract_with_classical_cv(image_data_a, n_features)
                 method = 'classical_cv'
             if err_b and 'CNN' in (err_b or ''):
-                feats_b, err_b = FeatureExtractor._extract_with_classical_cv(
-                    image_data_b, n_features
-                )
+                feats_b, err_b = FeatureExtractor._extract_with_classical_cv(image_data_b, n_features)
                 method = 'classical_cv'
 
             if err_a:
                 return {
-                    'similarity': 0.0, 'distance': 2.0, 'feat_dims': 0,
-                    'method': method, 'match_level': 'none',
+                    'similarity': 0.0,
+                    'distance': 2.0,
+                    'feat_dims': 0,
+                    'method': method,
+                    'match_level': 'none',
                     'error': f'图像A处理失败: {err_a}',
                 }
             if err_b:
                 return {
-                    'similarity': 0.0, 'distance': 2.0, 'feat_dims': 0,
-                    'method': method, 'match_level': 'none',
+                    'similarity': 0.0,
+                    'distance': 2.0,
+                    'feat_dims': 0,
+                    'method': method,
+                    'match_level': 'none',
                     'error': f'图像B处理失败: {err_b}',
                 }
 
@@ -485,10 +489,7 @@ class FeatureExtractor:
             else:
                 level = 'none'
 
-            logger.info(
-                f'图像对比完成: similarity={sim:.4f}, level={level}, '
-                f'method={method}, dims={feats_a.shape[1]}'
-            )
+            logger.info(f'图像对比完成: similarity={sim:.4f}, level={level}, method={method}, dims={feats_a.shape[1]}')
             return {
                 'similarity': round(sim, 4),
                 'distance': round(dist, 4),
@@ -501,8 +502,11 @@ class FeatureExtractor:
         except Exception as e:
             logger.error(f'图像对比失败: {e}', exc_info=True)
             return {
-                'similarity': 0.0, 'distance': 2.0, 'feat_dims': 0,
-                'method': 'none', 'match_level': 'none',
+                'similarity': 0.0,
+                'distance': 2.0,
+                'feat_dims': 0,
+                'method': 'none',
+                'match_level': 'none',
                 'error': f'对比失败: {str(e)}',
             }
 
@@ -528,38 +532,39 @@ class FeatureExtractor:
             return {'matches': [], 'query_dims': 0, 'error': '查询图或候选集为空'}
 
         # 提取查询图特征
-        query_feat, err = FeatureExtractor.extract_image_features(
-            image_data, n_features
-        )
+        query_feat, err = FeatureExtractor.extract_image_features(image_data, n_features)
         if err:
             # 回退到经典 CV
-            query_feat, err = FeatureExtractor._extract_with_classical_cv(
-                image_data, n_features
-            )
+            query_feat, err = FeatureExtractor._extract_with_classical_cv(image_data, n_features)
         if err:
             return {'matches': [], 'query_dims': 0, 'error': f'查询图处理失败: {err}'}
 
         results = []
         for idx, cand in enumerate(candidates):
             try:
-                cand_feat, _ = FeatureExtractor.extract_image_features(
-                    cand, n_features
-                )
+                cand_feat, _ = FeatureExtractor.extract_image_features(cand, n_features)
                 if cand_feat is None:
                     continue
                 sim = float(np.dot(query_feat, cand_feat.T)[0, 0])
                 sim = max(-1.0, min(1.0, sim))
-                results.append({
-                    'index': idx,
-                    'similarity': round(sim, 4),
-                    'distance': round(1.0 - sim, 4),
-                    'match_level': (
-                        'identical' if sim >= 0.99 else
-                        'high' if sim >= 0.90 else
-                        'medium' if sim >= 0.70 else
-                        'low' if sim >= 0.50 else 'none'
-                    ),
-                })
+                results.append(
+                    {
+                        'index': idx,
+                        'similarity': round(sim, 4),
+                        'distance': round(1.0 - sim, 4),
+                        'match_level': (
+                            'identical'
+                            if sim >= 0.99
+                            else 'high'
+                            if sim >= 0.90
+                            else 'medium'
+                            if sim >= 0.70
+                            else 'low'
+                            if sim >= 0.50
+                            else 'none'
+                        ),
+                    }
+                )
             except Exception:
                 continue
 
@@ -567,9 +572,7 @@ class FeatureExtractor:
         results.sort(key=lambda x: x['similarity'], reverse=True)
         top_results = results[:top_k]
 
-        logger.info(
-            f'批量对比完成: {len(results)}个候选 → top {len(top_results)}'
-        )
+        logger.info(f'批量对比完成: {len(results)}个候选 → top {len(top_results)}')
         return {
             'matches': top_results,
             'query_dims': int(query_feat.shape[1]),
@@ -588,6 +591,7 @@ class FeatureExtractor:
         """
         try:
             from PIL import Image
+
             img = Image.open(io.BytesIO(image_data))
             img.thumbnail(max_size, Image.LANCZOS)
             buf = io.BytesIO()
@@ -600,46 +604,274 @@ class FeatureExtractor:
 
     # 中文情感词典 (正面/负面关键词)
     _POSITIVE_WORDS: set = {
-        '好', '棒', '优秀', '出色', '完美', '喜欢', '爱', '赞', '精彩', '推荐',
-        '满意', '不错', '给力', '厉害', '牛', '强', '快乐', '开心', '高兴', '幸福',
-        '好看', '好听', '好吃', '好玩', '舒服', '方便', '实用', '简单', '轻松',
-        '便宜', '划算', '实惠', '值', '超值', '惊艳', '惊喜', '感动', '温暖',
-        '专业', '认真', '负责', '细心', '耐心', '热情', '友好', '靠谱', '值得',
-        '放心', '安全', '稳定', '流畅', '清晰', '漂亮', '精致', '高级', '大气',
-        '不错哦', '太棒了', '非常好', '很不错', '太好了', '真不错', '好评',
-        '物超所值', '性价比高', '良心', '顶级', '一流', '无敌', '绝了', '神',
-        '优雅', '舒适', '便捷', '高效', '智能', '创新', '领先', '突破',
+        '好',
+        '棒',
+        '优秀',
+        '出色',
+        '完美',
+        '喜欢',
+        '爱',
+        '赞',
+        '精彩',
+        '推荐',
+        '满意',
+        '不错',
+        '给力',
+        '厉害',
+        '牛',
+        '强',
+        '快乐',
+        '开心',
+        '高兴',
+        '幸福',
+        '好看',
+        '好听',
+        '好吃',
+        '好玩',
+        '舒服',
+        '方便',
+        '实用',
+        '简单',
+        '轻松',
+        '便宜',
+        '划算',
+        '实惠',
+        '值',
+        '超值',
+        '惊艳',
+        '惊喜',
+        '感动',
+        '温暖',
+        '专业',
+        '认真',
+        '负责',
+        '细心',
+        '耐心',
+        '热情',
+        '友好',
+        '靠谱',
+        '值得',
+        '放心',
+        '安全',
+        '稳定',
+        '流畅',
+        '清晰',
+        '漂亮',
+        '精致',
+        '高级',
+        '大气',
+        '不错哦',
+        '太棒了',
+        '非常好',
+        '很不错',
+        '太好了',
+        '真不错',
+        '好评',
+        '物超所值',
+        '性价比高',
+        '良心',
+        '顶级',
+        '一流',
+        '无敌',
+        '绝了',
+        '神',
+        '优雅',
+        '舒适',
+        '便捷',
+        '高效',
+        '智能',
+        '创新',
+        '领先',
+        '突破',
         # v2.2 扩充: 常见短表达/口语化好评
-        '还行', '还可以', '挺好的', '不错啊', '很棒', '超级好',
-        '太好了吧', '真好', '好极了', '妙', '绝', '正点', '地道', '正宗',
-        '过瘾', '爽', '赞一个', '顶', '支持', '给个好评', '五星', '满分',
-        '强烈推荐', '必买', '入手', '不亏', '血赚', '香', '真香',
-        '爱了', '爱了爱了', 'yyds', '永远的神', 'YYDS',
-        '到位', '讲究', '用心', '贴心', '周到', '细致', '到位了',
-        '美', '美丽', '华丽', '炫酷', '酷', '时尚', '新潮', '潮流',
-        '温和', '清爽', '滋润', '保湿', '服帖', '持久', '显色',
+        '还行',
+        '还可以',
+        '挺好的',
+        '不错啊',
+        '很棒',
+        '超级好',
+        '太好了吧',
+        '真好',
+        '好极了',
+        '妙',
+        '绝',
+        '正点',
+        '地道',
+        '正宗',
+        '过瘾',
+        '爽',
+        '赞一个',
+        '顶',
+        '支持',
+        '给个好评',
+        '五星',
+        '满分',
+        '强烈推荐',
+        '必买',
+        '入手',
+        '不亏',
+        '血赚',
+        '香',
+        '真香',
+        '爱了',
+        '爱了爱了',
+        'yyds',
+        '永远的神',
+        'YYDS',
+        '到位',
+        '讲究',
+        '用心',
+        '贴心',
+        '周到',
+        '细致',
+        '到位了',
+        '美',
+        '美丽',
+        '华丽',
+        '炫酷',
+        '酷',
+        '时尚',
+        '新潮',
+        '潮流',
+        '温和',
+        '清爽',
+        '滋润',
+        '保湿',
+        '服帖',
+        '持久',
+        '显色',
     }
     _NEGATIVE_WORDS: set = {
-        '差', '烂', '糟糕', '失望', '讨厌', '恶心', '垃圾', '坑', '骗', '假',
-        '不行', '不好', '难用', '复杂', '麻烦', '慢', '卡', '丑', '难听', '难吃',
-        '贵', '不值', '坑爹', '生气', '愤怒', '伤心', '难过', '无聊', '烦',
-        '垃圾货', '太差了', '很差', '非常差', '差评', '不好用', '太难了',
-        '质量差', '服务差', '态度差', '不专业', '不负责', '敷衍', '忽悠',
-        '不安全', '不稳定', '故障', 'bug', '崩溃', '闪退', '卡顿', '延迟',
-        '粗糙', '劣质', '山寨', '盗版', '假冒', '虚假', '误导', '欺骗',
-        '坑人', '黑心', '无良', '差劲', '低劣', '不堪', '恶劣',
+        '差',
+        '烂',
+        '糟糕',
+        '失望',
+        '讨厌',
+        '恶心',
+        '垃圾',
+        '坑',
+        '骗',
+        '假',
+        '不行',
+        '不好',
+        '难用',
+        '复杂',
+        '麻烦',
+        '慢',
+        '卡',
+        '丑',
+        '难听',
+        '难吃',
+        '贵',
+        '不值',
+        '坑爹',
+        '生气',
+        '愤怒',
+        '伤心',
+        '难过',
+        '无聊',
+        '烦',
+        '垃圾货',
+        '太差了',
+        '很差',
+        '非常差',
+        '差评',
+        '不好用',
+        '太难了',
+        '质量差',
+        '服务差',
+        '态度差',
+        '不专业',
+        '不负责',
+        '敷衍',
+        '忽悠',
+        '不安全',
+        '不稳定',
+        '故障',
+        'bug',
+        '崩溃',
+        '闪退',
+        '卡顿',
+        '延迟',
+        '粗糙',
+        '劣质',
+        '山寨',
+        '盗版',
+        '假冒',
+        '虚假',
+        '误导',
+        '欺骗',
+        '坑人',
+        '黑心',
+        '无良',
+        '差劲',
+        '低劣',
+        '不堪',
+        '恶劣',
         # v2.2 扩充: 常见短表达/口语化差评
-        '不太好', '不怎么样', '一般般', '马马虎虎', '凑合', '勉强',
-        '没用', '没啥用', '废物', '就那样', '也就那样',
-        '坑货', '雷', '踩雷', '翻车', '后悔', '血亏', '亏了', '上当了',
-        '别买', '不要买', '千万别买', '避雷', '避坑', '拔草',
-        '糊弄', '糊弄人', '蒙人', '骗人', '骗子', '诈骗',
-        '异味', '臭味', '难闻', '刺鼻', '过敏', '烂脸', '刺激',
-        '掉色', '缩水', '起球', '变形', '开胶', '断裂', '生锈',
-        '无语', '醉了', '服了', '呵呵', '？？？', '？？',
+        '不太好',
+        '不怎么样',
+        '一般般',
+        '马马虎虎',
+        '凑合',
+        '勉强',
+        '没用',
+        '没啥用',
+        '废物',
+        '就那样',
+        '也就那样',
+        '坑货',
+        '雷',
+        '踩雷',
+        '翻车',
+        '后悔',
+        '血亏',
+        '亏了',
+        '上当了',
+        '别买',
+        '不要买',
+        '千万别买',
+        '避雷',
+        '避坑',
+        '拔草',
+        '糊弄',
+        '糊弄人',
+        '蒙人',
+        '骗人',
+        '骗子',
+        '诈骗',
+        '异味',
+        '臭味',
+        '难闻',
+        '刺鼻',
+        '过敏',
+        '烂脸',
+        '刺激',
+        '掉色',
+        '缩水',
+        '起球',
+        '变形',
+        '开胶',
+        '断裂',
+        '生锈',
+        '无语',
+        '醉了',
+        '服了',
+        '呵呵',
+        '？？？',
+        '？？',
     }
     _NEGATION_WORDS: set = {
-        '不', '没', '无', '非', '别', '未', '否', '勿', '莫', '休',
+        '不',
+        '没',
+        '无',
+        '非',
+        '别',
+        '未',
+        '否',
+        '勿',
+        '莫',
+        '休',
     }
 
     @staticmethod
@@ -652,14 +884,14 @@ class FeatureExtractor:
         """
         text = text.strip()
         if not text:
-            return {'label': '中性', 'confidence': 0.0,
-                    'positive_count': 0, 'negative_count': 0}
+            return {'label': '中性', 'confidence': 0.0, 'positive_count': 0, 'negative_count': 0}
 
         # 尝试用 jieba 分词 + 字符 n-gram 补充 (解决 jieba 拆分短语问题)
         # 例: "还行" → jieba: ["还","行"], n-gram: ["还行"] → 命中词典
         words = []
         try:
             import jieba
+
             words = list(jieba.cut(text))
             # 补充字符 n-gram (2-4字窗口), 捕获被 jieba 拆分的短语
             clean_text = text.strip()
@@ -732,8 +964,7 @@ class FeatureExtractor:
 
         total = pos_count + neg_count
         if total == 0:
-            return {'label': '中性', 'confidence': 0.0,
-                    'positive_count': 0, 'negative_count': 0}
+            return {'label': '中性', 'confidence': 0.0, 'positive_count': 0, 'negative_count': 0}
 
         if pos_count > neg_count:
             label = '正面'

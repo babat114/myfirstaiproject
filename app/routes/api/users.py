@@ -4,6 +4,7 @@
 RESTful 用户管理接口 (仅管理员)
 ============================================
 """
+
 from flask import Blueprint, jsonify, request
 
 from app import db, logger
@@ -65,14 +66,14 @@ def list_users():
     role = request.args.get('role')
     search = request.args.get('search', '').strip() or None
 
-    result = AuthService.list_users(
-        page=page, per_page=per_page, role=role, search=search
-    )
+    result = AuthService.list_users(page=page, per_page=per_page, role=role, search=search)
 
-    return jsonify({
-        'success': True,
-        'data': result,
-    })
+    return jsonify(
+        {
+            'success': True,
+            'data': result,
+        }
+    )
 
 
 @users_api_bp.route('/<int:user_id>', methods=['GET'])
@@ -103,10 +104,12 @@ def get_user(user_id):
     if not user:
         return jsonify({'success': False, 'message': '用户不存在。'}), 404
 
-    return jsonify({
-        'success': True,
-        'data': user.to_dict(include_private=True),
-    })
+    return jsonify(
+        {
+            'success': True,
+            'data': user.to_dict(include_private=True),
+        }
+    )
 
 
 @users_api_bp.route('/<int:user_id>', methods=['PUT'])
@@ -167,20 +170,24 @@ def update_user(user_id):
         for field, value in data.items():
             if field in updatable and hasattr(user, field):
                 if field == 'role' and value not in VALID_ROLES:
-                    return jsonify({
-                        'success': False,
-                        'message': f'无效的角色值: {value}。有效值: {", ".join(sorted(VALID_ROLES))}',
-                    }), 400
+                    return jsonify(
+                        {
+                            'success': False,
+                            'message': f'无效的角色值: {value}。有效值: {", ".join(sorted(VALID_ROLES))}',
+                        }
+                    ), 400
                 setattr(user, field, value)
 
         user.updated_at = localnow()
         db.session.commit()
 
-        return jsonify({
-            'success': True,
-            'message': '用户信息已更新。',
-            'data': user.to_dict(),
-        })
+        return jsonify(
+            {
+                'success': True,
+                'message': '用户信息已更新。',
+                'data': user.to_dict(),
+            }
+        )
     except Exception as e:
         db.session.rollback()
         logger.error(f'更新用户 {user_id} 失败: {e}', exc_info=True)
@@ -236,11 +243,13 @@ def update_user_role(user_id):
         user.updated_at = localnow()
         db.session.commit()
 
-        return jsonify({
-            'success': True,
-            'message': f'用户 {user.username} 的角色已更新为 {new_role}。',
-            'data': user.to_dict(),
-        })
+        return jsonify(
+            {
+                'success': True,
+                'message': f'用户 {user.username} 的角色已更新为 {new_role}。',
+                'data': user.to_dict(),
+            }
+        )
     except Exception as e:
         db.session.rollback()
         logger.error(f'更新用户 {user_id} 失败: {e}', exc_info=True)
@@ -316,11 +325,13 @@ def reset_user_api_key(user_id):
         return jsonify({'success': False, 'message': '用户不存在。'}), 404
 
     new_key = AuthService.regenerate_api_key(user)
-    return jsonify({
-        'success': True,
-        'message': 'API Key 已重置。',
-        'data': {'api_key': new_key},
-    })
+    return jsonify(
+        {
+            'success': True,
+            'message': 'API Key 已重置。',
+            'data': {'api_key': new_key},
+        }
+    )
 
 
 @users_api_bp.route('/me', methods=['GET'])
@@ -344,10 +355,12 @@ def get_my_profile():
     if not user:
         return jsonify({'success': False, 'message': '未认证。'}), 401
 
-    return jsonify({
-        'success': True,
-        'data': user.to_dict(include_private=True),
-    })
+    return jsonify(
+        {
+            'success': True,
+            'data': user.to_dict(include_private=True),
+        }
+    )
 
 
 @users_api_bp.route('/me', methods=['PUT'])
@@ -391,10 +404,12 @@ def update_my_profile():
     success, error = AuthService.update_profile(user, data)
 
     if success:
-        return jsonify({
-            'success': True,
-            'message': '资料已更新。',
-            'data': user.to_dict(),
-        })
+        return jsonify(
+            {
+                'success': True,
+                'message': '资料已更新。',
+                'data': user.to_dict(),
+            }
+        )
     else:
         return jsonify({'success': False, 'message': error}), 400

@@ -4,6 +4,7 @@ AI模型 API
 RESTful JSON 接口
 ============================================
 """
+
 import contextlib
 import ipaddress
 import json
@@ -103,11 +104,16 @@ def list_models():
         owner_id = user.id  # 未指定筛选时默认显示自己的模型
 
     result = ModelService.list_models(
-        page=page, per_page=per_page,
-        model_type=model_type, framework=framework,
-        owner_id=owner_id, status=status, search=search,
+        page=page,
+        per_page=per_page,
+        model_type=model_type,
+        framework=framework,
+        owner_id=owner_id,
+        status=status,
+        search=search,
         is_public=is_public,
-        sort_by=sort_by, sort_order=sort_order,
+        sort_by=sort_by,
+        sort_order=sort_order,
     )
 
     return jsonify({'success': True, 'data': result})
@@ -137,10 +143,12 @@ def get_model(model_uuid):
     if not model:
         return jsonify({'success': False, 'message': '模型不存在。'}), 404
 
-    return jsonify({
-        'success': True,
-        'data': model.to_dict(include_files=True),
-    })
+    return jsonify(
+        {
+            'success': True,
+            'data': model.to_dict(include_files=True),
+        }
+    )
 
 
 @models_api_bp.route('/', methods=['POST'])
@@ -199,11 +207,13 @@ def create_model():
     if error:
         return jsonify({'success': False, 'message': error}), 400
 
-    return jsonify({
-        'success': True,
-        'message': '模型注册成功。',
-        'data': model.to_dict(),
-    }), 201
+    return jsonify(
+        {
+            'success': True,
+            'message': '模型注册成功。',
+            'data': model.to_dict(),
+        }
+    ), 201
 
 
 @models_api_bp.route('/<string:model_uuid>', methods=['PUT'])
@@ -255,11 +265,13 @@ def update_model(model_uuid):
     if not success:
         return jsonify({'success': False, 'message': error}), 400
 
-    return jsonify({
-        'success': True,
-        'message': '模型已更新。',
-        'data': model.to_dict(),
-    })
+    return jsonify(
+        {
+            'success': True,
+            'message': '模型已更新。',
+            'data': model.to_dict(),
+        }
+    )
 
 
 @models_api_bp.route('/<string:model_uuid>/upload', methods=['POST'])
@@ -307,9 +319,7 @@ def upload_model_file(model_uuid):
     if not file:
         return jsonify({'success': False, 'message': '请选择文件。'}), 400
 
-    success, error = ModelService.upload_model_file(
-        model, file, upload_folder=current_app.config['UPLOAD_FOLDER']
-    )
+    success, error = ModelService.upload_model_file(model, file, upload_folder=current_app.config['UPLOAD_FOLDER'])
 
     if not success:
         return jsonify({'success': False, 'message': error}), 400
@@ -510,21 +520,21 @@ def predict(model_uuid):
             # ── 图像文件 → CNN 特征提取 → DataFrame ──
             try:
                 from app.services.feature_extractor import FeatureExtractor
+
                 image_data = file.read()
 
                 # 获取期望特征数 (从模型元数据)
                 n_features = 100  # 默认值
                 try:
                     from app.services.inference_service import ModelInferenceService
+
                     _, metadata, _, _ = ModelInferenceService.load_model(model)
                     if metadata and metadata.get('feature_names'):
                         n_features = max(len(metadata['feature_names']), 10)
                 except Exception:
                     pass
 
-                features, feat_error = FeatureExtractor.extract_image_features(
-                    image_data, n_features
-                )
+                features, feat_error = FeatureExtractor.extract_image_features(image_data, n_features)
                 if feat_error:
                     return jsonify({'success': False, 'message': feat_error}), 400
 
@@ -535,16 +545,18 @@ def predict(model_uuid):
                 except Exception:
                     fnames = []
                 if fnames and len(fnames) >= features.shape[1]:
-                    cols = fnames[:features.shape[1]]
+                    cols = fnames[: features.shape[1]]
                 else:
                     cols = [f'feature_{i}' for i in range(features.shape[1])]
 
                 df = pd.DataFrame(features, columns=cols)
             except Exception as e:
-                return jsonify({
-                    'success': False,
-                    'message': f'图像特征提取失败: {str(e)}',
-                }), 400
+                return jsonify(
+                    {
+                        'success': False,
+                        'message': f'图像特征提取失败: {str(e)}',
+                    }
+                ), 400
 
         elif fmt == 'csv':
             df = pd.read_csv(file)
@@ -553,19 +565,19 @@ def predict(model_uuid):
         elif fmt == 'json':
             df = pd.read_json(file)
         else:
-            return jsonify({
-                'success': False,
-                'message': f'不支持的文件格式: {fmt or "未知"}。支持 CSV/Excel/JSON 或图像 (JPG/PNG/WebP)。'
-            }), 400
+            return jsonify(
+                {
+                    'success': False,
+                    'message': f'不支持的文件格式: {fmt or "未知"}。支持 CSV/Excel/JSON 或图像 (JPG/PNG/WebP)。',
+                }
+            ), 400
 
     from app.services.inference_service import ModelInferenceService
+
     result = ModelInferenceService.predict(model, df)
 
     if not result.get('success'):
-        return jsonify({
-            'success': False,
-            'message': result.get('message', result.get('error', '预测失败。'))
-        }), 400
+        return jsonify({'success': False, 'message': result.get('message', result.get('error', '预测失败。'))}), 400
 
     return jsonify({'success': True, 'data': result})
 
@@ -618,6 +630,7 @@ def predict_template(model_uuid):
     # 策略 1: 从模型文件元数据获取
     try:
         from app.services.inference_service import ModelInferenceService
+
         _, metadata, _, _ = ModelInferenceService.load_model(model)
         if metadata and metadata.get('feature_names'):
             feature_names = list(metadata['feature_names'])
@@ -627,9 +640,11 @@ def predict_template(model_uuid):
     # 策略 2: 降级 — 从训练数据集 summary 获取
     if not feature_names and model.training_dataset and model.training_dataset.summary_json:
         try:
-            summary = _json.loads(model.training_dataset.summary_json) if isinstance(
-                model.training_dataset.summary_json, str
-            ) else model.training_dataset.summary_json
+            summary = (
+                _json.loads(model.training_dataset.summary_json)
+                if isinstance(model.training_dataset.summary_json, str)
+                else model.training_dataset.summary_json
+            )
             cols = list(summary.get('columns', []))
             hp = model.hyperparameters_dict
             target_col = hp.get('target_column', cols[-1] if cols else None)
@@ -639,13 +654,12 @@ def predict_template(model_uuid):
 
     # 策略 3: 完全无特征名 → 返回错误
     if not feature_names:
-        return jsonify({
-            'success': False,
-            'message': (
-                '无法生成 CSV 模板: 该模型没有特征列信息。'
-                '请先上传模型文件或关联训练数据集。'
-            ),
-        }), 404
+        return jsonify(
+            {
+                'success': False,
+                'message': ('无法生成 CSV 模板: 该模型没有特征列信息。请先上传模型文件或关联训练数据集。'),
+            }
+        ), 404
 
     # 生成 CSV (utf-8-sig BOM → Excel 正确识别中文)
     buf = io.StringIO()
@@ -666,7 +680,7 @@ def predict_template(model_uuid):
         headers={
             'Content-Disposition': f'attachment; filename="{filename}"',
             'Content-Type': 'text/csv; charset=utf-8',
-        }
+        },
     )
 
 
@@ -727,13 +741,11 @@ def predict_export(model_uuid):
 
     # 运行预测
     from app.services.inference_service import ModelInferenceService
+
     result = ModelInferenceService.predict(model, df)
 
     if not result.get('success'):
-        return jsonify({
-            'success': False,
-            'message': result.get('message', result.get('error', '预测失败。'))
-        }), 400
+        return jsonify({'success': False, 'message': result.get('message', result.get('error', '预测失败。'))}), 400
 
     predictions = result.get('predictions', [])
     probabilities = result.get('probabilities', [])
@@ -757,7 +769,7 @@ def predict_export(model_uuid):
             headers={
                 'Content-Disposition': f'attachment; filename="{filename}"',
                 'Content-Type': 'application/json; charset=utf-8',
-            }
+            },
         )
     else:
         # CSV: 原始列 + prediction + confidence + top-N prob 列
@@ -774,7 +786,7 @@ def predict_export(model_uuid):
         writer.writerow(out_columns)
 
         for i, (_, row) in enumerate(df.iterrows()):
-            out_row = [row[c] if c in df.columns else '' for c in out_columns[:len(df.columns)]]
+            out_row = [row[c] if c in df.columns else '' for c in out_columns[: len(df.columns)]]
             out_row.append(str(predictions[i]) if i < len(predictions) else '')
             if prob_classes:
                 probs_i = probabilities[i] if i < len(probabilities) else None
@@ -794,7 +806,7 @@ def predict_export(model_uuid):
             headers={
                 'Content-Disposition': f'attachment; filename="{filename}"',
                 'Content-Type': 'text/csv; charset=utf-8',
-            }
+            },
         )
 
 
@@ -848,18 +860,17 @@ def evaluate(model_uuid):
         from sqlalchemy import select
 
         from app.models.dataset import Dataset
+
         test_dataset = db.session.execute(select(Dataset).where(Dataset.uuid == test_dataset_uuid)).scalar_one_or_none()
         if not test_dataset:
             return jsonify({'success': False, 'message': '指定的测试数据集不存在。'}), 404
 
     from app.services.inference_service import ModelInferenceService
+
     result = ModelInferenceService.test_model_with_split(model, test_dataset=test_dataset)
 
     if not result.get('success'):
-        return jsonify({
-            'success': False,
-            'message': result.get('message', result.get('error', '模型评估失败。'))
-        }), 400
+        return jsonify({'success': False, 'message': result.get('message', result.get('error', '模型评估失败。'))}), 400
 
     # 如果使用独立测试集, 自动保存结果到 ModelRecord
     if test_dataset and test_dataset.is_test_set and result.get('is_independent_test'):
@@ -910,6 +921,7 @@ def feature_importance(model_uuid):
         return jsonify({'success': False, 'message': '模型不存在。'}), 404
 
     from app.services.inference_service import ModelInferenceService
+
     result = ModelInferenceService.get_feature_importance(model)
     return jsonify(result)
 
@@ -946,7 +958,7 @@ def quick_predict(model_uuid):
     responses:
       200:
         description: "{prediction, confidence, probabilities, model_type, input_mode}"
-"""
+    """
 
     model = ModelService.get_model_by_uuid(model_uuid)
     if not model:
@@ -964,27 +976,33 @@ def quick_predict(model_uuid):
     features_input = data.get('features')
 
     if not text_input and not features_input:
-        return jsonify({
-            'success': False,
-            'message': '请提供输入数据。文本: {"text": "..."} 或 特征: {"features": {...}}',
-        }), 400
+        return jsonify(
+            {
+                'success': False,
+                'message': '请提供输入数据。文本: {"text": "..."} 或 特征: {"features": {...}}',
+            }
+        ), 400
 
     # ── 输入校验 ──
     if text_input:
         if len(text_input) > 5000:
-            return jsonify({
-                'success': False,
-                'message': '文本过长，最大支持5000字符。',
-            }), 400
+            return jsonify(
+                {
+                    'success': False,
+                    'message': '文本过长，最大支持5000字符。',
+                }
+            ), 400
         # 纯符号/数字文本检测
         import re
+
         cleaned = re.sub(r'[\s\d\W_]', '', text_input)
         if len(cleaned) == 0:
-            return jsonify({
-                'success': False,
-                'message': '无法分析纯符号/数字文本，请输入有意义的中文或英文内容。',
-            }), 400
-
+            return jsonify(
+                {
+                    'success': False,
+                    'message': '无法分析纯符号/数字文本，请输入有意义的中文或英文内容。',
+                }
+            ), 400
 
     input_mode = 'text' if text_input else 'features'
     hp = model.hyperparameters_dict
@@ -999,8 +1017,7 @@ def quick_predict(model_uuid):
         return jsonify({'success': False, 'message': '未知输入模式。'}), 400
 
 
-def _format_quick_result(result: dict, task_type: str, input_text: str, input_mode: str,
-                         note: str | None = None):
+def _format_quick_result(result: dict, task_type: str, input_text: str, input_mode: str, note: str | None = None):
     """格式化快速预测结果为前端友好的 JSON"""
     predictions = result.get('predictions', [])
     probabilities = result.get('probabilities', [])
@@ -1027,10 +1044,12 @@ def _format_quick_result(result: dict, task_type: str, input_text: str, input_mo
     if note:
         response_data['note'] = note
 
-    return jsonify({
-        'success': True,
-        'data': response_data,
-    })
+    return jsonify(
+        {
+            'success': True,
+            'data': response_data,
+        }
+    )
 
 
 def _handle_text_prediction(model, text_input, input_mode):
@@ -1052,60 +1071,57 @@ def _handle_text_prediction(model, text_input, input_mode):
 
     # 1a. Transformer NLP
     if framework == 'transformers' and tokenizer is not None:
-        pred_result = ModelInferenceService.predict_single(
-            model_obj, tokenizer, metadata, text_input)
+        pred_result = ModelInferenceService.predict_single(model_obj, tokenizer, metadata, text_input)
         if pred_result:
-            return jsonify({
-                'success': True,
-                'data': {
-                    'prediction': pred_result.get('label', str(pred_result.get('prediction', ''))),
-                    'confidence': pred_result.get('confidence', 0),
-                    'probabilities': pred_result.get('probabilities', []),
-                    'model_type': task_type,
-                    'input_mode': 'text',
-                    'input_text': text_input[:200],
+            return jsonify(
+                {
+                    'success': True,
+                    'data': {
+                        'prediction': pred_result.get('label', str(pred_result.get('prediction', ''))),
+                        'confidence': pred_result.get('confidence', 0),
+                        'probabilities': pred_result.get('probabilities', []),
+                        'model_type': task_type,
+                        'input_mode': 'text',
+                        'input_text': text_input[:200],
+                    },
                 }
-            })
-        return jsonify({
-            'success': False,
-            'message': 'NLP 模型预测失败 — 请检查模型文件是否完整。'
-        }), 500
+            )
+        return jsonify({'success': False, 'message': 'NLP 模型预测失败 — 请检查模型文件是否完整。'}), 500
 
     # 1b. sklearn 分类模型 — 尝试 vectorizer 或关键词匹配
     if task_type == 'classification':
         # 尝试从 metadata 获取 vectorizer
-        result = _try_vectorizer_predict(
-            model, metadata, text_input, task_type, input_mode, log)
+        result = _try_vectorizer_predict(model, metadata, text_input, task_type, input_mode, log)
         if result is not None:
             return result
 
         # 无 vectorizer → 关键词匹配
-        result = _try_keyword_match_predict(
-            target_le, metadata, text_input, task_type, input_mode)
+        result = _try_keyword_match_predict(target_le, metadata, text_input, task_type, input_mode)
         if result is not None:
             return result
 
     # 1c. NLP模型 — vectorizer优先 → 情感分析fallback
     if model.model_type == 'nlp':
-        return _handle_nlp_sentiment_predict(
-            model, metadata, text_input, task_type, input_mode)
+        return _handle_nlp_sentiment_predict(model, metadata, text_input, task_type, input_mode)
 
     # 1d. 回归/聚类 — 文本输入不适用
     model_type_label = model.model_type
     extra_hint = ''
     if model_type_label == 'nlp':
         extra_hint = ' (NLP模型缺少文本向量化器, 请确认训练时保存了 vectorizer)'
-    return jsonify({
-        'success': False,
-        'message': (
-            f'当前模型为 {task_type} 类型, 不支持文本直接输入。{extra_hint}'
-            f'请使用特征值输入: {{"features": {{"col1": 1.0, "col2": 2.0, ...}}}}'
-        ),
-        'data': {
-            'feature_names': (metadata or {}).get('feature_names', [])[:15],
-            'model_type': task_type,
+    return jsonify(
+        {
+            'success': False,
+            'message': (
+                f'当前模型为 {task_type} 类型, 不支持文本直接输入。{extra_hint}'
+                f'请使用特征值输入: {{"features": {{"col1": 1.0, "col2": 2.0, ...}}}}'
+            ),
+            'data': {
+                'feature_names': (metadata or {}).get('feature_names', [])[:15],
+                'model_type': task_type,
+            },
         }
-    }), 400
+    ), 400
 
 
 def _try_vectorizer_predict(model, metadata, text_input, task_type, input_mode, log):
@@ -1137,10 +1153,7 @@ def _try_vectorizer_predict(model, metadata, text_input, task_type, input_mode, 
                 note += '; 警告: 未命中任何特征词，预测不可靠'
             elif nnz < 3:
                 note += f'; 提示: 输入仅命中{nnz}个特征，建议输入更长文本'
-            return _format_quick_result(
-                result, task_type, text_input, input_mode,
-                note=note
-            )
+            return _format_quick_result(result, task_type, text_input, input_mode, note=note)
     except Exception as e:
         log.warning(f'Vectorizer transform failed: {e}')
     return None
@@ -1173,22 +1186,30 @@ def _try_keyword_match_predict(target_le, metadata, text_input, task_type, input
 
     if best_class and best_score > 0:
         capped_score = min(best_score, 0.5)
-        probs = [{'class': str(c), 'probability': round(
-            capped_score if str(c) == best_class else (1 - capped_score) / (len(classes) - 1), 3)}
-            for c in classes]
-        probs.sort(key=lambda x: x['probability'], reverse=True)
-        return jsonify({
-            'success': True,
-            'data': {
-                'prediction': best_class,
-                'confidence': round(capped_score, 3),
-                'probabilities': probs[:5],
-                'model_type': task_type,
-                'input_mode': 'text',
-                'input_text': text_input[:200],
-                'note': '关键词匹配模式 (极低置信度，仅作参考)',
+        probs = [
+            {
+                'class': str(c),
+                'probability': round(
+                    capped_score if str(c) == best_class else (1 - capped_score) / (len(classes) - 1), 3
+                ),
             }
-        })
+            for c in classes
+        ]
+        probs.sort(key=lambda x: x['probability'], reverse=True)
+        return jsonify(
+            {
+                'success': True,
+                'data': {
+                    'prediction': best_class,
+                    'confidence': round(capped_score, 3),
+                    'probabilities': probs[:5],
+                    'model_type': task_type,
+                    'input_mode': 'text',
+                    'input_text': text_input[:200],
+                    'note': '关键词匹配模式 (极低置信度，仅作参考)',
+                },
+            }
+        )
     return None
 
 
@@ -1211,8 +1232,7 @@ def _handle_nlp_sentiment_predict(model, metadata, text_input, task_type, input_
             # nnz=0: 输入文本完全不在训练词汇表中, 模型预测不可靠
             if nnz == 0:
                 logger.warning(
-                    f'quick-predict: nnz=0 for text="{text_input[:50]}", '
-                    f'falling back to sentiment dictionary'
+                    f'quick-predict: nnz=0 for text="{text_input[:50]}", falling back to sentiment dictionary'
                 )
                 raise ValueError('nnz=0, 回退到情感词典')
 
@@ -1234,17 +1254,13 @@ def _handle_nlp_sentiment_predict(model, metadata, text_input, task_type, input_
                     pred_label = str(result['predictions'][0]) if result.get('predictions') else ''
                     sent_pos = sentiment.get('positive_count', 0)
                     sent_neg = sentiment.get('negative_count', 0)
-                    if (sent_pos + sent_neg > 0 and sent_label != '中性'
-                            and sent_label != pred_label):
+                    if sent_pos + sent_neg > 0 and sent_label != '中性' and sent_label != pred_label:
                         note += (
                             f'; 注意: 情感词典判定为「{sent_label}」'
                             f'(正{sent_pos}/负{sent_neg}), 与模型预测冲突, 建议输入更长文本'
                         )
 
-                return _format_quick_result(
-                    result, task_type, text_input, input_mode,
-                    note=note
-                )
+                return _format_quick_result(result, task_type, text_input, input_mode, note=note)
         except Exception:
             pass
 
@@ -1264,21 +1280,23 @@ def _handle_nlp_sentiment_predict(model, metadata, text_input, task_type, input_
     else:
         sent_probs = [{'class': '中性', 'probability': 1.0}]
 
-    return jsonify({
-        'success': True,
-        'data': {
-            'prediction': sent_label,
-            'confidence': sent_conf,
-            'probabilities': sent_probs,
-            'model_type': 'nlp',
-            'input_mode': 'text',
-            'input_preview': text_input[:200],
-            'num_samples': 1,
-            'note': '关键词情感分析 (基于内置情感词典, 模型未保存向量化器)',
-            'positive_count': sent_pos,
-            'negative_count': sent_neg,
+    return jsonify(
+        {
+            'success': True,
+            'data': {
+                'prediction': sent_label,
+                'confidence': sent_conf,
+                'probabilities': sent_probs,
+                'model_type': 'nlp',
+                'input_mode': 'text',
+                'input_preview': text_input[:200],
+                'num_samples': 1,
+                'note': '关键词情感分析 (基于内置情感词典, 模型未保存向量化器)',
+                'positive_count': sent_pos,
+                'negative_count': sent_neg,
+            },
         }
-    })
+    )
 
 
 def _handle_features_prediction(model, features_input, input_mode):
@@ -1292,13 +1310,15 @@ def _handle_features_prediction(model, features_input, input_mode):
         result = ModelInferenceService.predict(model, df)
         if not result.get('success'):
             return jsonify({'success': False, 'message': result.get('error', '预测失败')}), 400
-        return _format_quick_result(result, result.get('task_type', model.model_type),
-                                    str(features_input)[:200], input_mode)
+        return _format_quick_result(
+            result, result.get('task_type', model.model_type), str(features_input)[:200], input_mode
+        )
     except Exception as e:
         return jsonify({'success': False, 'message': f'特征解析失败: {str(e)}'}), 400
 
 
 # ============ 模型文件直接下载 ============
+
 
 @models_api_bp.route('/<string:model_uuid>/download', methods=['GET'])
 @api_login_required
@@ -1346,10 +1366,7 @@ def download_model_file(model_uuid):
         file_path = model.model_file_path
 
     if not file_path or not os.path.exists(file_path):
-        return jsonify({
-            'success': False,
-            'message': '模型文件不存在。请先上传模型文件。'
-        }), 404
+        return jsonify({'success': False, 'message': '模型文件不存在。请先上传模型文件。'}), 404
 
     download_name = os.path.basename(file_path)
     return send_file(
@@ -1360,6 +1377,7 @@ def download_model_file(model_uuid):
 
 
 # ============ 模型导出与部署 API ============
+
 
 @models_api_bp.route('/<string:model_uuid>/export/info', methods=['GET'])
 @api_login_required
@@ -1384,6 +1402,7 @@ def export_info(model_uuid):
         return jsonify({'success': False, 'message': '模型不存在。'}), 404
 
     from app.services.model_export_service import ModelExportService
+
     info = ModelExportService.get_export_info(model)
     return jsonify({'success': True, 'data': info})
 
@@ -1420,19 +1439,22 @@ def export_onnx(model_uuid):
         return jsonify({'success': False, 'message': '权限不足。'}), 403
 
     from app.services.model_export_service import ModelExportService
+
     success, message, onnx_path = ModelExportService.export_onnx(model)
 
     if not success:
         return jsonify({'success': False, 'message': message}), 400
 
-    return jsonify({
-        'success': True,
-        'message': message,
-        'data': {
-            'onnx_path': onnx_path,
-            'filename': os.path.basename(onnx_path) if onnx_path else None,
+    return jsonify(
+        {
+            'success': True,
+            'message': message,
+            'data': {
+                'onnx_path': onnx_path,
+                'filename': os.path.basename(onnx_path) if onnx_path else None,
+            },
         }
-    })
+    )
 
 
 @models_api_bp.route('/<string:model_uuid>/export/deploy', methods=['POST'])
@@ -1465,20 +1487,23 @@ def export_deploy(model_uuid):
         return jsonify({'success': False, 'message': '权限不足。'}), 403
 
     from app.services.model_export_service import ModelExportService
+
     success, message, package_dir, zip_file = ModelExportService.generate_deployment_package(model)
 
     if not success:
         return jsonify({'success': False, 'message': message}), 400
 
-    return jsonify({
-        'success': True,
-        'message': message,
-        'data': {
-            'package_dir': package_dir,
-            'zip_file': zip_file,
-            'download_url': f'/api/models/{model_uuid}/export/download/{zip_file}',
+    return jsonify(
+        {
+            'success': True,
+            'message': message,
+            'data': {
+                'package_dir': package_dir,
+                'zip_file': zip_file,
+                'download_url': f'/api/models/{model_uuid}/export/download/{zip_file}',
+            },
         }
-    })
+    )
 
 
 @models_api_bp.route('/<string:model_uuid>/export/download/<path:filename>', methods=['GET'])
@@ -1538,6 +1563,7 @@ def export_download(model_uuid, filename):
 
 # ============ 异步导出进度跟踪 ============
 
+
 @models_api_bp.route('/<string:model_uuid>/export/async/<string:export_type>', methods=['POST'])
 @api_login_required
 def export_async(model_uuid, export_type):
@@ -1588,14 +1614,17 @@ def export_async(model_uuid, export_type):
 
     tracker.run_async(task_id, fn, model)
 
-    return jsonify({
-        'success': True,
-        'message': f'{export_type} 导出任务已启动',
-        'data': {'task_id': task_id, 'export_type': export_type},
-    }), 202
+    return jsonify(
+        {
+            'success': True,
+            'message': f'{export_type} 导出任务已启动',
+            'data': {'task_id': task_id, 'export_type': export_type},
+        }
+    ), 202
 
 
 # ============ HuggingFace 风格模型卡片 ============
+
 
 @models_api_bp.route('/<string:model_uuid>/model-card', methods=['GET'])
 @api_login_required
@@ -1641,17 +1670,19 @@ def model_card(model_uuid):
     markdown = ModelService.generate_model_card(model)
 
     if output_format == 'json':
-        return jsonify({
-            'success': True,
-            'data': {
-                'model_name': model.name,
-                'model_uuid': model.uuid,
-                'model_version': model.version,
-                'framework': model.framework,
-                'task_type': model.model_type,
-                'markdown': markdown,
+        return jsonify(
+            {
+                'success': True,
+                'data': {
+                    'model_name': model.name,
+                    'model_uuid': model.uuid,
+                    'model_version': model.version,
+                    'framework': model.framework,
+                    'task_type': model.model_type,
+                    'markdown': markdown,
+                },
             }
-        })
+        )
 
     # 默认返回 Markdown
     filename = f'{model.name_slug}_model_card.md'
@@ -1660,11 +1691,12 @@ def model_card(model_uuid):
         mimetype='text/markdown; charset=utf-8',
         headers={
             'Content-Disposition': f'inline; filename="{filename}"',
-        }
+        },
     )
 
 
 # ============ 直接模型服务端点 (镜像 Docker 容器 API) ============
+
 
 @models_api_bp.route('/<string:model_uuid>/serve', methods=['POST'])
 @api_login_required
@@ -1713,26 +1745,32 @@ def serve_model(model_uuid):
 
     data = request.get_json(silent=True) or {}
     if not isinstance(data, dict):
-        return jsonify({
-            'success': False,
-            'message': '请求体必须是 JSON 对象 (dict)。',
-            'code': 400,
-        }), 400
+        return jsonify(
+            {
+                'success': False,
+                'message': '请求体必须是 JSON 对象 (dict)。',
+                'code': 400,
+            }
+        ), 400
     features = data.get('features')
 
     if features is None:
-        return jsonify({
-            'success': False,
-            'message': '缺少 features 字段。请提供 {"features": [[...], ...]}',
-            'code': 400,
-        }), 400
+        return jsonify(
+            {
+                'success': False,
+                'message': '缺少 features 字段。请提供 {"features": [[...], ...]}',
+                'code': 400,
+            }
+        ), 400
 
     if not isinstance(features, list) or len(features) == 0:
-        return jsonify({
-            'success': False,
-            'message': 'features 必须是非空数组。',
-            'code': 400,
-        }), 400
+        return jsonify(
+            {
+                'success': False,
+                'message': 'features 必须是非空数组。',
+                'code': 400,
+            }
+        ), 400
 
     # 构建 DataFrame
     try:
@@ -1743,6 +1781,7 @@ def serve_model(model_uuid):
             # 尝试使用模型特征名作为列名
             try:
                 from app.services.inference_service import ModelInferenceService
+
                 _, metadata, _, _ = ModelInferenceService.load_model(model)
                 if metadata and metadata.get('feature_names'):
                     fnames = metadata['feature_names']
@@ -1751,25 +1790,31 @@ def serve_model(model_uuid):
             except Exception:
                 pass
         else:
-            return jsonify({
-                'success': False,
-                'message': 'features 每项必须是数组 [v1, v2, ...] 或字典 {col: val}。',
-                'code': 400,
-            }), 400
+            return jsonify(
+                {
+                    'success': False,
+                    'message': 'features 每项必须是数组 [v1, v2, ...] 或字典 {col: val}。',
+                    'code': 400,
+                }
+            ), 400
     except Exception as e:
         return jsonify({'success': False, 'message': f'features 解析失败: {str(e)}', 'code': 400}), 400
 
     # 执行预测
     try:
         from app.services.inference_service import ModelInferenceService
+
         result = ModelInferenceService.predict(model, df)
     except Exception as e:
         from app.utils.helpers import sanitize_service_error
-        return jsonify({
-            'success': False,
-            'message': sanitize_service_error(e, '模型推理异常'),
-            'code': 500,
-        }), 500
+
+        return jsonify(
+            {
+                'success': False,
+                'message': sanitize_service_error(e, '模型推理异常'),
+                'code': 500,
+            }
+        ), 500
 
     if not result.get('success'):
         error_msg = result.get('error', '模型预测失败')
@@ -1778,26 +1823,28 @@ def serve_model(model_uuid):
             return jsonify({'success': False, 'message': error_msg, 'code': 503}), 503
         return jsonify({'success': False, 'message': error_msg, 'code': 400}), 400
 
-    return jsonify({
-        'predictions': result.get('predictions', []),
-        'task_type': result.get('task_type', model.model_type),
-    })
+    return jsonify(
+        {
+            'predictions': result.get('predictions', []),
+            'task_type': result.get('task_type', model.model_type),
+        }
+    )
 
 
 # ============ 部署健康检查 ============
 
 # SSRF 防护: 内部/私有 IP 段黑名单
 _SSRF_BLOCKED_NETWORKS = [
-    ipaddress.ip_network('127.0.0.0/8'),        # loopback
-    ipaddress.ip_network('10.0.0.0/8'),         # private A
-    ipaddress.ip_network('172.16.0.0/12'),      # private B
-    ipaddress.ip_network('192.168.0.0/16'),     # private C
-    ipaddress.ip_network('169.254.0.0/16'),     # link-local / AWS metadata
-    ipaddress.ip_network('0.0.0.0/8'),          # current network
-    ipaddress.ip_network('100.64.0.0/10'),      # CGNAT
-    ipaddress.ip_network('198.18.0.0/15'),      # benchmark
-    ipaddress.ip_network('224.0.0.0/4'),        # multicast
-    ipaddress.ip_network('240.0.0.0/4'),        # reserved
+    ipaddress.ip_network('127.0.0.0/8'),  # loopback
+    ipaddress.ip_network('10.0.0.0/8'),  # private A
+    ipaddress.ip_network('172.16.0.0/12'),  # private B
+    ipaddress.ip_network('192.168.0.0/16'),  # private C
+    ipaddress.ip_network('169.254.0.0/16'),  # link-local / AWS metadata
+    ipaddress.ip_network('0.0.0.0/8'),  # current network
+    ipaddress.ip_network('100.64.0.0/10'),  # CGNAT
+    ipaddress.ip_network('198.18.0.0/15'),  # benchmark
+    ipaddress.ip_network('224.0.0.0/4'),  # multicast
+    ipaddress.ip_network('240.0.0.0/4'),  # reserved
 ]
 
 
@@ -1873,11 +1920,13 @@ def deploy_health(model_uuid):
     health_url = None
     if model.deployment_url:
         if not _validate_deployment_url(model.deployment_url):
-            return jsonify({
-                'success': False,
-                'message': '部署URL不安全: 仅允许公网域名或 localhost。',
-                'code': 400,
-            }), 400
+            return jsonify(
+                {
+                    'success': False,
+                    'message': '部署URL不安全: 仅允许公网域名或 localhost。',
+                    'code': 400,
+                }
+            ), 400
         health_url = model.deployment_url.rstrip('/') + '/health'
     elif deploy_exists:
         health_url = 'http://localhost:8000/health'
@@ -1919,15 +1968,18 @@ def deploy_health(model_uuid):
             container_info['error'] = f'检查异常: {str(e)}'
 
     from datetime import datetime
-    return jsonify({
-        'success': True,
-        'data': {
-            'status': status,
-            'deploy_exists': deploy_exists,
-            'container_info': container_info,
-            'checked_at': datetime.now(UTC).isoformat(),
+
+    return jsonify(
+        {
+            'success': True,
+            'data': {
+                'status': status,
+                'deploy_exists': deploy_exists,
+                'container_info': container_info,
+                'checked_at': datetime.now(UTC).isoformat(),
+            },
         }
-    })
+    )
 
 
 @models_api_bp.route('/<string:model_uuid>/export/status', methods=['GET'])
@@ -1969,6 +2021,7 @@ def export_status(model_uuid):
         return jsonify({'success': False, 'message': '权限不足。'}), 403
 
     from app.services.export_task_tracker import ExportTaskTracker
+
     tracker = ExportTaskTracker()
     task = tracker.get_task(task_id)
 
@@ -1984,6 +2037,7 @@ def export_status(model_uuid):
 # ============ 模型导入 (双向) ============
 # 辅助函数 (模块级, 供 import_model_preview 使用)
 
+
 def _model_class_name(model_obj) -> str:
     """获取模型对象的类名"""
     if model_obj is None:
@@ -1996,6 +2050,7 @@ def _model_class_name(model_obj) -> str:
 def _extract_from_pkl(extracted: dict, pkl_path: str):
     """从 .pkl 模型文件中提取元数据"""
     import pickle
+
     try:
         with open(pkl_path, 'rb') as f:
             bundle = pickle.load(f)
@@ -2080,6 +2135,7 @@ def import_model_preview():
         # ── 解析 ZIP 部署包 ──
         if ext == '.zip':
             import zipfile
+
             with zipfile.ZipFile(temp_path, 'r') as zf:
                 namelist = zf.namelist()
                 meta_members = [n for n in namelist if n.endswith('metadata.json')]
@@ -2090,17 +2146,20 @@ def import_model_preview():
                     extracted['existing_metadata'] = meta_data
                     extracted['framework'] = meta_data.get('framework')
                     extracted['model_type'] = meta_data.get('model_type')
-                    extracted['metadata_fields'] = [k for k in meta_data
-                                                    if not k.startswith('_') and k != 'model_file_path']
+                    extracted['metadata_fields'] = [
+                        k for k in meta_data if not k.startswith('_') and k != 'model_file_path'
+                    ]
                     infer = meta_data.get('_inference_meta', {})
                     extracted['algorithm'] = infer.get('algorithm')
                     extracted['feature_names'] = infer.get('feature_names', [])
                     extracted['class_labels'] = infer.get('class_labels', [])
 
                 model_exts = ('.pkl', '.pt', '.keras', '.h5', '.joblib')
-                model_members = [n for n in namelist
-                                 if any(n.endswith(e) for e in model_exts)
-                                 and os.path.basename(n).startswith('model')]
+                model_members = [
+                    n
+                    for n in namelist
+                    if any(n.endswith(e) for e in model_exts) and os.path.basename(n).startswith('model')
+                ]
                 if model_members:
                     extracted['has_model_file'] = True
                     if not extracted['has_metadata_json']:
@@ -2113,10 +2172,9 @@ def import_model_preview():
             extracted['has_model_file'] = True
             _extract_from_pkl(extracted, temp_path)
         else:
-            return jsonify({
-                'success': False,
-                'message': f'不支持的文件格式 "{ext}"。支持: .pkl, .pt, .h5, .keras, .zip (部署包)'
-            }), 400
+            return jsonify(
+                {'success': False, 'message': f'不支持的文件格式 "{ext}"。支持: .pkl, .pt, .h5, .keras, .zip (部署包)'}
+            ), 400
 
         # 推断 model_type
         if not extracted.get('model_type'):
@@ -2134,17 +2192,19 @@ def import_model_preview():
         # ── AI 推荐 ──
         recommendations = ModelRecommender.recommend(extracted)
 
-        return jsonify({
-            'success': True,
-            'data': {
-                'extracted': extracted,
-                'recommendations': recommendations,
-                'requires_manual': ['name', 'description', 'version'],
+        return jsonify(
+            {
+                'success': True,
+                'data': {
+                    'extracted': extracted,
+                    'recommendations': recommendations,
+                    'requires_manual': ['name', 'description', 'version'],
+                },
             }
-        })
+        )
 
     except Exception as e:
-        logger.error(f"导入预览失败: {e}", exc_info=True)
+        logger.error(f'导入预览失败: {e}', exc_info=True)
         return jsonify({'success': False, 'message': f'解析失败: {str(e)}'}), 400
     finally:
         with contextlib.suppress(Exception):
@@ -2226,27 +2286,39 @@ def import_model_confirm():
 
     if not framework:
         ext = os.path.splitext(file.filename)[1].lower()
-        fw_map = {'.pt': 'pytorch', '.pth': 'pytorch', '.pkl': 'sklearn',
-                  '.joblib': 'sklearn', '.h5': 'tensorflow', '.keras': 'tensorflow'}
+        fw_map = {
+            '.pt': 'pytorch',
+            '.pth': 'pytorch',
+            '.pkl': 'sklearn',
+            '.joblib': 'sklearn',
+            '.h5': 'tensorflow',
+            '.keras': 'tensorflow',
+        }
         framework = fw_map.get(ext)
 
     from werkzeug.utils import secure_filename
+
     upload_folder = current_app.config.get('UPLOAD_FOLDER', 'uploads')
     model_dir = os.path.join(upload_folder, 'models')
     os.makedirs(model_dir, exist_ok=True)
 
     try:
         model, error = ModelService.import_model(
-            user=user, name=name, model_type=model_type,
-            framework=framework, description=description,
-            version=version, hyperparameters=hyperparameters,
-            metrics=metrics, is_public=is_public,
+            user=user,
+            name=name,
+            model_type=model_type,
+            framework=framework,
+            description=description,
+            version=version,
+            hyperparameters=hyperparameters,
+            metrics=metrics,
+            is_public=is_public,
         )
         if error:
             return jsonify({'success': False, 'message': error}), 400
 
         original_name = secure_filename(file.filename)
-        unique_name = f"{model.uuid}_{original_name}"
+        unique_name = f'{model.uuid}_{original_name}'
         file_path = os.path.join(model_dir, unique_name)
         file.save(file_path)
         file_size = os.path.getsize(file_path)
@@ -2256,14 +2328,16 @@ def import_model_confirm():
         model.updated_at = localnow()
         db.session.commit()
 
-        logger.info(f"模型导入确认完成: {model.name} v{model.version} (uuid={model.uuid})")
-        return jsonify({
-            'success': True,
-            'message': '模型导入成功！',
-            'data': model.to_dict(),
-        }), 201
+        logger.info(f'模型导入确认完成: {model.name} v{model.version} (uuid={model.uuid})')
+        return jsonify(
+            {
+                'success': True,
+                'message': '模型导入成功！',
+                'data': model.to_dict(),
+            }
+        ), 201
 
     except Exception as e:
         db.session.rollback()
-        logger.error(f"模型导入确认失败: {e}", exc_info=True)
+        logger.error(f'模型导入确认失败: {e}', exc_info=True)
         return jsonify({'success': False, 'message': f'导入失败: {str(e)}'}), 400

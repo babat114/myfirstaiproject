@@ -5,14 +5,14 @@
 消除跨 5+ 文件的重复文件读取逻辑
 ============================================
 """
+
 import os
 
 import numpy as np
 import pandas as pd
 
 
-def load_dataframe(file_path: str, file_format: str = None,
-                   nrows: int = None) -> pd.DataFrame | None:
+def load_dataframe(file_path: str, file_format: str = None, nrows: int = None) -> pd.DataFrame | None:
     """根据文件格式加载 DataFrame
 
     支持的格式: csv, xlsx, xls, json, parquet, txt (TSV), npy
@@ -60,6 +60,7 @@ def load_dataframe(file_path: str, file_format: str = None,
 # ---------------------------------------------------------------------------
 # 目标列类型自动判定 — 基于 sklearn 的 type_of_target (权威判定)
 # ---------------------------------------------------------------------------
+
 
 def detect_target_type(y: np.ndarray) -> str:
     """使用 sklearn 的 type_of_target 判定目标列类型
@@ -123,8 +124,7 @@ def _safe_float_encode(y) -> np.ndarray:
     return arr
 
 
-def preprocess_data(X: pd.DataFrame, y: pd.Series, task_type: str = 'classification'
-                    ) -> tuple[np.ndarray, np.ndarray]:
+def preprocess_data(X: pd.DataFrame, y: pd.Series, task_type: str = 'classification') -> tuple[np.ndarray, np.ndarray]:
     """通用数据预处理: 缺失值填充 + 分类编码 + 标准化
 
     关键修复 (GridSearchCV "mixed multiclass and continuous targets"):
@@ -146,11 +146,13 @@ def preprocess_data(X: pd.DataFrame, y: pd.Series, task_type: str = 'classificat
     num_cols = X.select_dtypes(include=[np.number]).columns
     if len(num_cols) > 0:
         from sklearn.impute import SimpleImputer
+
         X[num_cols] = SimpleImputer(strategy='mean').fit_transform(X[num_cols])
 
     cat_cols = X.select_dtypes(include=['object']).columns
     if len(cat_cols) > 0:
         from sklearn.preprocessing import LabelEncoder
+
         for col in cat_cols:
             X[col] = X[col].fillna('missing')
             X[col] = LabelEncoder().fit_transform(X[col].astype(str))
@@ -162,17 +164,11 @@ def preprocess_data(X: pd.DataFrame, y: pd.Series, task_type: str = 'classificat
         X = X.loc[valid_idx]
         y = y.loc[valid_idx]
         import logging
-        logging.getLogger('app').warning(
-            f'preprocess_data: 目标列包含 {nan_count} 个 NaN, 已移除对应行'
-        )
+
+        logging.getLogger('app').warning(f'preprocess_data: 目标列包含 {nan_count} 个 NaN, 已移除对应行')
 
     # ------ 3. 编码目标变量 ------
-    if task_type == 'classification':
-        # 强制编码 — 所有类型统一处理, 杜绝 float 残留
-        y = _safe_label_encode(y)
-    else:
-        # 回归任务: 保证 float64
-        y = _safe_float_encode(y)
+    y = _safe_label_encode(y) if task_type == 'classification' else _safe_float_encode(y)
 
     # ------ 4. 标准化 X ------
     X_scaled = StandardScaler().fit_transform(X).astype(np.float64)

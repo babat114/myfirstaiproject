@@ -4,6 +4,7 @@
 处理数据集的创建、查询、统计等业务逻辑
 ============================================
 """
+
 import os
 import uuid
 
@@ -24,27 +25,158 @@ from app.utils.helpers import paginate_query, sanitize_service_error
 # 关键词 → 分类映射 (按优先级排序)
 _CATEGORY_KEYWORDS = [
     # (关键词列表, 分类)
-    (['nlp', 'text', 'language', 'corpus', 'sentiment', 'word', 'document',
-      '自然语言', '文本', '语料', '情感', '词向量'], 'nlp'),
-    (['vision', 'image', 'mnist', 'fashion', 'cifar', 'cifar10', 'cifar100',
-      'photo', 'picture', 'pixel', '图像', '图片', '视觉', '手写'], 'vision'),
-    (['time_series', 'timeseries', 'temporal', 'stock', 'weather', 'temperature',
-      '时序', '时间序列', '股票', '天气', '传感器', 'sensor'], 'time_series'),
-    (['regression', 'reg', 'price', 'housing', 'california', 'boston',
-      'predict', 'forecast', '回归', '房价', '预测'], 'regression'),
-    (['cluster', 'clustering', 'blob', 'segment', 'group',
-      '聚类', '分群', '分段'], 'clustering'),
-    (['biology', 'bio', 'gene', 'cancer', 'breast', 'diabetes', 'disease',
-      'medical', 'health', 'patient', 'cell', 'protein', 'dna',
-      '医疗', '生物', '基因', '癌症', '疾病', '糖尿病'], 'biology'),
-    (['finance', 'fin', 'credit', 'loan', 'bank', 'income', 'census', 'adult',
-      'economic', 'financial', 'payment', 'salary', 'revenue',
-      '金融', '经济', '信贷', '银行', '收入', '贷款'], 'finance'),
-    (['synthetic', 'syn', 'generate', 'make_class', 'make_reg', 'artificial',
-      'fake', 'simulated', '合成', '生成', '人工', '模拟'], 'synthetic'),
-    (['classification', 'class', 'classify', 'binary', 'multiclass',
-      'label', 'target', 'category',
-      '分类', '二分类', '多分类', '标签'], 'classification'),
+    (
+        [
+            'nlp',
+            'text',
+            'language',
+            'corpus',
+            'sentiment',
+            'word',
+            'document',
+            '自然语言',
+            '文本',
+            '语料',
+            '情感',
+            '词向量',
+        ],
+        'nlp',
+    ),
+    (
+        [
+            'vision',
+            'image',
+            'mnist',
+            'fashion',
+            'cifar',
+            'cifar10',
+            'cifar100',
+            'photo',
+            'picture',
+            'pixel',
+            '图像',
+            '图片',
+            '视觉',
+            '手写',
+        ],
+        'vision',
+    ),
+    (
+        [
+            'time_series',
+            'timeseries',
+            'temporal',
+            'stock',
+            'weather',
+            'temperature',
+            '时序',
+            '时间序列',
+            '股票',
+            '天气',
+            '传感器',
+            'sensor',
+        ],
+        'time_series',
+    ),
+    (
+        [
+            'regression',
+            'reg',
+            'price',
+            'housing',
+            'california',
+            'boston',
+            'predict',
+            'forecast',
+            '回归',
+            '房价',
+            '预测',
+        ],
+        'regression',
+    ),
+    (['cluster', 'clustering', 'blob', 'segment', 'group', '聚类', '分群', '分段'], 'clustering'),
+    (
+        [
+            'biology',
+            'bio',
+            'gene',
+            'cancer',
+            'breast',
+            'diabetes',
+            'disease',
+            'medical',
+            'health',
+            'patient',
+            'cell',
+            'protein',
+            'dna',
+            '医疗',
+            '生物',
+            '基因',
+            '癌症',
+            '疾病',
+            '糖尿病',
+        ],
+        'biology',
+    ),
+    (
+        [
+            'finance',
+            'fin',
+            'credit',
+            'loan',
+            'bank',
+            'income',
+            'census',
+            'adult',
+            'economic',
+            'financial',
+            'payment',
+            'salary',
+            'revenue',
+            '金融',
+            '经济',
+            '信贷',
+            '银行',
+            '收入',
+            '贷款',
+        ],
+        'finance',
+    ),
+    (
+        [
+            'synthetic',
+            'syn',
+            'generate',
+            'make_class',
+            'make_reg',
+            'artificial',
+            'fake',
+            'simulated',
+            '合成',
+            '生成',
+            '人工',
+            '模拟',
+        ],
+        'synthetic',
+    ),
+    (
+        [
+            'classification',
+            'class',
+            'classify',
+            'binary',
+            'multiclass',
+            'label',
+            'target',
+            'category',
+            '分类',
+            '二分类',
+            '多分类',
+            '标签',
+        ],
+        'classification',
+    ),
 ]
 
 
@@ -79,8 +211,7 @@ def _infer_category(name: str, df, file_ext: str) -> str:
         len(df.columns)
 
         # 图像数据: 大量列+像素列名
-        pixel_cols = sum(1 for c in df.columns
-                        if str(c).lower().startswith(('pixel', 'px')))
+        pixel_cols = sum(1 for c in df.columns if str(c).lower().startswith(('pixel', 'px')))
         if pixel_cols > 10:
             return 'vision'
 
@@ -106,12 +237,15 @@ class DatasetService:
 
     # MIME 类型白名单 (与允许的扩展名对应)
     ALLOWED_MIMETYPES = {
-        'text/csv', 'application/csv', 'text/plain',
+        'text/csv',
+        'application/csv',
+        'text/plain',
         'application/json',
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         'application/vnd.ms-excel',
         'application/octet-stream',  # parquet
-        'image/jpeg', 'image/png',
+        'image/jpeg',
+        'image/png',
         'application/x-npy',
     }
 
@@ -127,8 +261,7 @@ class DatasetService:
             是否允许上传
         """
         # 1. 扩展名检查
-        ext_ok = '.' in filename and \
-                 filename.rsplit('.', 1)[1].lower() in DatasetService.ALLOWED_EXTENSIONS
+        ext_ok = '.' in filename and filename.rsplit('.', 1)[1].lower() in DatasetService.ALLOWED_EXTENSIONS
         if not ext_ok:
             return False
 
@@ -139,18 +272,22 @@ class DatasetService:
                 # Content-Type 为空 — 无法验证 MIME, 但扩展名已通过检查
                 # 在调试模式下记录警告, 生产模式下允许通过 (保守策略)
                 pass
-            elif mime not in DatasetService.ALLOWED_MIMETYPES:
-                # 部分 CSV 文件可能被识别为 application/csv
-                if not mime.startswith('text/') and mime != 'application/json':
-                    return False
+            elif mime not in DatasetService.ALLOWED_MIMETYPES and not mime.startswith('text/') and mime != 'application/json':
+                return False
 
         return True
 
     @staticmethod
-    def create_dataset(user: User, name: str, file: FileStorage,
-                       description: str = None, category: str = 'other',
-                       tags: list = None, is_public: bool = False,
-                       upload_folder: str = None) -> tuple[Dataset | None, str | None]:
+    def create_dataset(
+        user: User,
+        name: str,
+        file: FileStorage,
+        description: str = None,
+        category: str = 'other',
+        tags: list = None,
+        is_public: bool = False,
+        upload_folder: str = None,
+    ) -> tuple[Dataset | None, str | None]:
         """
         创建新数据集并上传文件
 
@@ -166,7 +303,7 @@ class DatasetService:
         # 生成安全文件名
         original_filename = secure_filename(file.filename)
         file_ext = original_filename.rsplit('.', 1)[1].lower()
-        unique_name = f"{uuid.uuid4().hex}.{file_ext}"
+        unique_name = f'{uuid.uuid4().hex}.{file_ext}'
 
         # 确定保存路径
         if upload_folder is None:
@@ -205,7 +342,7 @@ class DatasetService:
             try:
                 _analyze_dataset_file(dataset, file_path, file_ext)
             except Exception as parse_err:
-                logger.warning(f"数据集自动解析失败 (非致命): {parse_err}")
+                logger.warning(f'数据集自动解析失败 (非致命): {parse_err}')
 
             db.session.commit()
 
@@ -213,8 +350,10 @@ class DatasetService:
             dashboard_cache.invalidate('dataset_stats:')
             dashboard_cache.invalidate('dashboard:')
 
-            logger.info(f"数据集创建成功: {name} ({file_size} bytes, "
-                        f"{dataset.row_count}行x{dataset.column_count}列) by {user.username}")
+            logger.info(
+                f'数据集创建成功: {name} ({file_size} bytes, '
+                f'{dataset.row_count}行x{dataset.column_count}列) by {user.username}'
+            )
             return dataset, None
 
         except Exception as e:
@@ -232,9 +371,7 @@ class DatasetService:
     @staticmethod
     def get_dataset_by_uuid(dataset_uuid: str) -> Dataset | None:
         """根据 UUID 获取数据集"""
-        return db.session.execute(
-            db.select(Dataset).filter_by(uuid=dataset_uuid)
-        ).scalar_one_or_none()
+        return db.session.execute(db.select(Dataset).filter_by(uuid=dataset_uuid)).scalar_one_or_none()
 
     @staticmethod
     def update_dataset(dataset: Dataset, data: dict) -> tuple[bool, str | None]:
@@ -244,10 +381,7 @@ class DatasetService:
         Returns:
             (success, error_message)
         """
-        allowed_fields = {
-            'name', 'description', 'version', 'category',
-            'is_public', 'tags'
-        }
+        allowed_fields = {'name', 'description', 'version', 'category', 'is_public', 'tags'}
 
         try:
             for field, value in data.items():
@@ -285,7 +419,7 @@ class DatasetService:
             dashboard_cache.invalidate('dataset_stats:')
             dashboard_cache.invalidate('dashboard:')
 
-            logger.info(f"数据集已删除: {dataset.name}")
+            logger.info(f'数据集已删除: {dataset.name}')
             return True, None
 
         except Exception as e:
@@ -315,11 +449,12 @@ class DatasetService:
         # 生成新文件名 (避免冲突)
         file_ext = dataset.file_format
         new_uuid = uuid.uuid4().hex
-        unique_filename = f"{new_uuid}.{file_ext}"
+        unique_filename = f'{new_uuid}.{file_ext}'
 
         # 确定保存路径
         try:
             from flask import current_app
+
             upload_folder = current_app.config['UPLOAD_FOLDER']
         except RuntimeError:
             upload_folder = os.path.join(os.path.dirname(__file__), '..', '..', 'uploads')
@@ -356,7 +491,7 @@ class DatasetService:
             dashboard_cache.invalidate('dataset_stats:')
             dashboard_cache.invalidate('dashboard:')
 
-            logger.info(f"数据集已复制: {dataset.name} -> {user.username} (id={new_dataset.id})")
+            logger.info(f'数据集已复制: {dataset.name} -> {user.username} (id={new_dataset.id})')
             return new_dataset, None
 
         except Exception as e:
@@ -367,10 +502,15 @@ class DatasetService:
             return None, sanitize_service_error(e, '复制数据集失败')
 
     @staticmethod
-    def list_datasets(page: int = 1, per_page: int = 15,
-                      category: str = None, owner_id: int = None,
-                      public_only: bool = False, include_public: bool = False,
-                      search: str = None) -> dict:
+    def list_datasets(
+        page: int = 1,
+        per_page: int = 15,
+        category: str = None,
+        owner_id: int = None,
+        public_only: bool = False,
+        include_public: bool = False,
+        search: str = None,
+    ) -> dict:
         """
         获取数据集列表 (支持筛选和搜索)
 
@@ -392,6 +532,7 @@ class DatasetService:
             if include_public:
                 # 用户自己的数据集 + 其他用户的公开数据集
                 from sqlalchemy import or_
+
                 query = query.filter(
                     or_(Dataset.owner_id == owner_id, Dataset.is_public == True)  # noqa: E712
                 )
@@ -433,15 +574,13 @@ class DatasetService:
 
         # 按类别聚合
         category_rows = db.session.execute(
-            _filtered_query(Dataset.category, func.count(Dataset.id))
-            .group_by(Dataset.category)
+            _filtered_query(Dataset.category, func.count(Dataset.id)).group_by(Dataset.category)
         ).all()
         category_counts = {row[0]: row[1] for row in category_rows}
 
         # 按格式聚合
         format_rows = db.session.execute(
-            _filtered_query(Dataset.file_format, func.count(Dataset.id))
-            .group_by(Dataset.file_format)
+            _filtered_query(Dataset.file_format, func.count(Dataset.id)).group_by(Dataset.file_format)
         ).all()
         format_counts = {row[0]: row[1] for row in format_rows}
 
@@ -458,7 +597,7 @@ class DatasetService:
         result = {
             'total_count': total_count,
             'total_size_bytes': total_size,
-            'total_size_gb': round(total_size / (1024 ** 3), 2),
+            'total_size_gb': round(total_size / (1024**3), 2),
             'categories': category_counts,
             'formats': format_counts,
             'public_count': public_count or 0,
@@ -468,6 +607,7 @@ class DatasetService:
 
 
 # ============ 数据集文件自动解析 ============
+
 
 def _analyze_dataset_file(dataset, file_path: str, file_ext: str):
     """自动解析数据集文件，提取行列数、列名等统计信息"""
@@ -482,6 +622,7 @@ def _analyze_dataset_file(dataset, file_path: str, file_ext: str):
 
     # 构建摘要：列名 + 类型 + 缺失值
     import json
+
     summary = {
         'columns': list(df.columns),
         'dtypes': {col: str(dtype) for col, dtype in df.dtypes.items()},

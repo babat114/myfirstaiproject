@@ -2,6 +2,7 @@
 scikit-learn 训练器
 支持分类、回归和聚类任务，涵盖常用算法
 """
+
 import contextlib
 import logging
 import os
@@ -34,30 +35,30 @@ _nlp_logger = logging.getLogger(__name__)
 # 分类器 — 预测离散类别标签
 # ===================================================================
 _CLASSIFIERS = {
-    'random_forest': ('sklearn.ensemble', 'RandomForestClassifier'),        # 随机森林分类器 - 集成多棵决策树投票
+    'random_forest': ('sklearn.ensemble', 'RandomForestClassifier'),  # 随机森林分类器 - 集成多棵决策树投票
     'logistic_regression': ('sklearn.linear_model', 'LogisticRegression'),  # 逻辑回归 - 线性分类器, 输出类别概率
-    'svm': ('sklearn.svm', 'SVC'),                                          # 支持向量机 - 寻找最大间隔超平面
-    'knn': ('sklearn.neighbors', 'KNeighborsClassifier'),                   # K近邻 - 基于距离度量的懒惰学习
-    'gradient_boosting': ('sklearn.ensemble', 'GradientBoostingClassifier'),# 梯度提升树 - 逐步拟合残差的集成方法
-    'decision_tree': ('sklearn.tree', 'DecisionTreeClassifier'),            # 决策树 - 树形规则分裂, 可解释性强
+    'svm': ('sklearn.svm', 'SVC'),  # 支持向量机 - 寻找最大间隔超平面
+    'knn': ('sklearn.neighbors', 'KNeighborsClassifier'),  # K近邻 - 基于距离度量的懒惰学习
+    'gradient_boosting': ('sklearn.ensemble', 'GradientBoostingClassifier'),  # 梯度提升树 - 逐步拟合残差的集成方法
+    'decision_tree': ('sklearn.tree', 'DecisionTreeClassifier'),  # 决策树 - 树形规则分裂, 可解释性强
 }
 
 # 回归器 — 预测连续数值
 _REGRESSORS = {
-    'linear_regression': ('sklearn.linear_model', 'LinearRegression'),              # 线性回归 - 最小二乘法拟合
-    'ridge': ('sklearn.linear_model', 'Ridge'),                                     # 岭回归 - L2正则化线性回归
-    'random_forest_regressor': ('sklearn.ensemble', 'RandomForestRegressor'),       # 随机森林回归器
-    'svr': ('sklearn.svm', 'SVR'),                                                  # 支持向量回归 - epsilon不敏感损失
-    'gradient_boosting_regressor': ('sklearn.ensemble', 'GradientBoostingRegressor'),# 梯度提升回归器
-    'knn_regressor': ('sklearn.neighbors', 'KNeighborsRegressor'),                  # K近邻回归器 - 基于距离的回归
+    'linear_regression': ('sklearn.linear_model', 'LinearRegression'),  # 线性回归 - 最小二乘法拟合
+    'ridge': ('sklearn.linear_model', 'Ridge'),  # 岭回归 - L2正则化线性回归
+    'random_forest_regressor': ('sklearn.ensemble', 'RandomForestRegressor'),  # 随机森林回归器
+    'svr': ('sklearn.svm', 'SVR'),  # 支持向量回归 - epsilon不敏感损失
+    'gradient_boosting_regressor': ('sklearn.ensemble', 'GradientBoostingRegressor'),  # 梯度提升回归器
+    'knn_regressor': ('sklearn.neighbors', 'KNeighborsRegressor'),  # K近邻回归器 - 基于距离的回归
 }
 
 # 聚类器 — 无监督学习, 发现数据内在分组结构
 _CLUSTERERS = {
-    'kmeans':              ('sklearn.cluster', 'KMeans'),                       # K-Means — 基于质心的划分聚类
-    'dbscan':              ('sklearn.cluster', 'DBSCAN'),                       # DBSCAN — 基于密度的空间聚类
-    'agglomerative':  ('sklearn.cluster', 'AgglomerativeClustering'),     # 层次聚类 — 自底向上合并
-    'minibatch_kmeans':    ('sklearn.cluster', 'MiniBatchKMeans'),              # MiniBatch K-Means — 小批量增量聚类
+    'kmeans': ('sklearn.cluster', 'KMeans'),  # K-Means — 基于质心的划分聚类
+    'dbscan': ('sklearn.cluster', 'DBSCAN'),  # DBSCAN — 基于密度的空间聚类
+    'agglomerative': ('sklearn.cluster', 'AgglomerativeClustering'),  # 层次聚类 — 自底向上合并
+    'minibatch_kmeans': ('sklearn.cluster', 'MiniBatchKMeans'),  # MiniBatch K-Means — 小批量增量聚类
 }
 
 
@@ -75,6 +76,7 @@ _CLS_TO_REG = {
 def _import_model(module_path: str, class_name: str):
     """动态导入 sklearn 模型类"""
     import importlib
+
     module = importlib.import_module(module_path)
     return getattr(module, class_name)
 
@@ -96,19 +98,25 @@ class SklearnTrainer(BaseTrainer):
 
     # 闭环模型 (无法增量训练) — 只应做 1 轮 fit，多轮 epoch 毫无意义
     _CLOSED_FORM_ALGOS = {
-        'linear_regression', 'ridge', 'logistic_regression',
-        'svm', 'svr', 'knn', 'knn_regressor',
-        'kmeans', 'dbscan', 'agglomerative', 'minibatch_kmeans',
+        'linear_regression',
+        'ridge',
+        'logistic_regression',
+        'svm',
+        'svr',
+        'knn',
+        'knn_regressor',
+        'kmeans',
+        'dbscan',
+        'agglomerative',
+        'minibatch_kmeans',
         'decision_tree',  # 决策树一次fit完全生长，多轮重复无意义
     }
 
     # 需要正则化防过拟合的算法默认参数
     # class_weight='balanced' 自动补偿类别不平衡 (对不支持该参数的算法跳过)
     _REGULARIZE_DEFAULTS = {
-        'decision_tree': {'max_depth': 10, 'min_samples_split': 10, 'min_samples_leaf': 5,
-                          'class_weight': 'balanced'},
-        'random_forest': {'max_depth': 15, 'min_samples_leaf': 5,
-                          'class_weight': 'balanced'},
+        'decision_tree': {'max_depth': 10, 'min_samples_split': 10, 'min_samples_leaf': 5, 'class_weight': 'balanced'},
+        'random_forest': {'max_depth': 15, 'min_samples_leaf': 5, 'class_weight': 'balanced'},
         'random_forest_regressor': {'max_depth': 15, 'min_samples_leaf': 5},
         'gradient_boosting': {'max_depth': 5, 'min_samples_leaf': 10},
         'gradient_boosting_regressor': {'max_depth': 5, 'min_samples_leaf': 10},
@@ -208,9 +216,7 @@ class SklearnTrainer(BaseTrainer):
         # ── StandardScaler + 类别平衡 ──
         self._apply_scaler_and_balance()
 
-        self.callback.on_log(
-            f'训练集: {len(self._X_train)} 样本, 测试集: {len(self._X_test)} 样本'
-        )
+        self.callback.on_log(f'训练集: {len(self._X_train)} 样本, 测试集: {len(self._X_test)} 样本')
 
     # ── 数据加载步骤 1: 读取文件 ──
 
@@ -274,21 +280,15 @@ class SklearnTrainer(BaseTrainer):
             X[num_cols_after] = self._scaler.fit_transform(X[num_cols_after])
 
         # 划分训练/测试集 (无 y, 无分层)
-        self._X_train, self._X_test = train_test_split(
-            X, test_size=self.test_size, random_state=self.random_state
-        )
+        self._X_train, self._X_test = train_test_split(X, test_size=self.test_size, random_state=self.random_state)
         # 如果保留了 y, 对齐划分用于 ARI/NMI
         if self._y_full is not None:
-            _, self._y_test = train_test_split(
-                self._y_full, test_size=self.test_size, random_state=self.random_state
-            )
+            _, self._y_test = train_test_split(self._y_full, test_size=self.test_size, random_state=self.random_state)
             self._y_train = None
         else:
             self._y_train = self._y_test = None
 
-        self.callback.on_log(
-            f'训练集: {len(self._X_train)} 样本, 测试集: {len(self._X_test)} 样本'
-        )
+        self.callback.on_log(f'训练集: {len(self._X_train)} 样本, 测试集: {len(self._X_test)} 样本')
 
     # ── 数据加载步骤 3: NLP 文本检测 ──
 
@@ -301,10 +301,11 @@ class SklearnTrainer(BaseTrainer):
         nlp_text_col = None
         ds_category = getattr(self.dataset, 'category', None)
         _nlp_logger.info(
-            '[DEBUG] NLP check: dataset.category=%r, dataset.id=%s, '
-            'X.columns=%s, task_type=%s',
-            ds_category, getattr(self.dataset, 'id', '?'),
-            list(X.columns)[:8], self.task_type,
+            '[DEBUG] NLP check: dataset.category=%r, dataset.id=%s, X.columns=%s, task_type=%s',
+            ds_category,
+            getattr(self.dataset, 'id', '?'),
+            list(X.columns)[:8],
+            self.task_type,
         )
 
         if ds_category == 'nlp':
@@ -317,9 +318,7 @@ class SklearnTrainer(BaseTrainer):
             if nlp_text_col is None and X.columns[0].startswith('tfidf_'):
                 _nlp_logger.info('[DEBUG] NLP: features already TF-IDF, skipping')
             elif nlp_text_col is None:
-                _nlp_logger.info(
-                    '[DEBUG] NLP: no text column found in %s', list(X.columns)
-                )
+                _nlp_logger.info('[DEBUG] NLP: no text column found in %s', list(X.columns))
 
         if nlp_text_col is None:
             return None, None, X
@@ -331,7 +330,9 @@ class SklearnTrainer(BaseTrainer):
 
         _nlp_logger.info(
             '[NLP] Detected text col "%s", will apply TfidfVectorizer '
-            'AFTER split (combined jieba+char tokenizer, max_features=%d)', nlp_text_col, _nlp_mf
+            'AFTER split (combined jieba+char tokenizer, max_features=%d)',
+            nlp_text_col,
+            _nlp_mf,
         )
         self.callback.on_log(
             f'[NLP] 检测到文本列 "{nlp_text_col}", TfidfVectorizer '
@@ -347,13 +348,13 @@ class SklearnTrainer(BaseTrainer):
         _adaptive_mf = max(100, min(_nlp_mf, _n_train_est // 2))
         if _adaptive_mf != _nlp_mf:
             self.callback.on_log(
-                f'[NLP] 自适应 max_features: {_nlp_mf} → {_adaptive_mf} '
-                f'(训练集约 {_n_train_est} 样本)'
+                f'[NLP] 自适应 max_features: {_nlp_mf} → {_adaptive_mf} (训练集约 {_n_train_est} 样本)'
             )
             _nlp_mf = _adaptive_mf
 
         # ── 配置 vectorizer (使用共享 NLP 预处理模块) ──
         from app.utils.nlp_preprocessing import create_vectorizer_config
+
         nlp_vectorizer_config = create_vectorizer_config(_nlp_mf, _nlp_min_df, _nlp_max_df)
 
         # 从特征矩阵中移除文本列 (稍后添加 TF-IDF 特征)
@@ -367,7 +368,7 @@ class SklearnTrainer(BaseTrainer):
         """保存类别标签 (人类可读)。"""
         try:
             unique_labels = y.dropna().unique()
-            self._class_labels = [str(l) for l in sorted(unique_labels, key=str)]
+            self._class_labels = [str(c) for c in sorted(unique_labels, key=str)]
             self.callback.on_log(f'[类别标签] {self._class_labels}')
         except Exception:
             self._class_labels = []
@@ -407,8 +408,8 @@ class SklearnTrainer(BaseTrainer):
                     X_test[col] = le.transform(X_test[col].astype(str))
                 except ValueError:
                     # 测试集中出现训练集未见的类别 — 映射到已知类
-                    X_test[col] = X_test[col].astype(str).apply(
-                        lambda x, le=le: x if x in le.classes_ else le.classes_[0]
+                    X_test[col] = (
+                        X_test[col].astype(str).apply(lambda x, le=le: x if x in le.classes_ else le.classes_[0])
                     )
                     X_test[col] = le.transform(X_test[col].astype(str))
 
@@ -436,21 +437,13 @@ class SklearnTrainer(BaseTrainer):
         if yt == 'continuous':
             reg_algo = _CLS_TO_REG.get(self.algorithm)
             if reg_algo:
-                self.callback.on_log(
-                    '[自动纠错] 目标列是连续值(float), '
-                    '但任务类型是 classification。'
-                )
-                self.callback.on_log(
-                    f'[自动纠错] 已自动切换: task_type → regression, '
-                    f'algorithm → {reg_algo}'
-                )
+                self.callback.on_log('[自动纠错] 目标列是连续值(float), 但任务类型是 classification。')
+                self.callback.on_log(f'[自动纠错] 已自动切换: task_type → regression, algorithm → {reg_algo}')
                 self.task_type = 'regression'
                 self.algorithm = reg_algo
                 if self.algorithm in self._CLOSED_FORM_ALGOS and self.total_epochs > 1:
                     self.total_epochs = 1
-                    self.callback.on_log(
-                        f'[自动纠错] {reg_algo} 是闭环模型，epochs 固定为 1'
-                    )
+                    self.callback.on_log(f'[自动纠错] {reg_algo} 是闭环模型，epochs 固定为 1')
             else:
                 self.callback.on_log(
                     f'[警告] 目标列是连续值，'
@@ -464,9 +457,7 @@ class SklearnTrainer(BaseTrainer):
                         self._y_test = le.transform(y_test.astype(str))
                     except ValueError:
                         self._y_test = le.transform(
-                            y_test.astype(str).apply(
-                                lambda x: x if x in le.classes_ else le.classes_[0]
-                            )
+                            y_test.astype(str).apply(lambda x: x if x in le.classes_ else le.classes_[0])
                         )
                 self._label_encoders['__target__'] = le
         elif y_train.dtype == 'object':
@@ -477,9 +468,7 @@ class SklearnTrainer(BaseTrainer):
                     self._y_test = le.transform(y_test.astype(str))
                 except ValueError:
                     self._y_test = le.transform(
-                        y_test.astype(str).apply(
-                            lambda x: x if x in le.classes_ else le.classes_[0]
-                        )
+                        y_test.astype(str).apply(lambda x: x if x in le.classes_ else le.classes_[0])
                     )
             self._label_encoders['__target__'] = le
 
@@ -494,26 +483,23 @@ class SklearnTrainer(BaseTrainer):
         if self.task_type == 'classification':
             try:
                 from collections import Counter
+
                 class_counts = Counter(y)
                 min_count = min(class_counts.values())
                 if min_count >= 2:
                     stratify_y = y
                 else:
-                    self.callback.on_log(
-                        f'警告: 最少类别样本数={min_count}, 无法分层采样, 使用随机划分'
-                    )
+                    self.callback.on_log(f'警告: 最少类别样本数={min_count}, 无法分层采样, 使用随机划分')
             except Exception:
                 pass
 
         self._X_train, self._X_test, self._y_train, self._y_test = train_test_split(
-            X, y, test_size=self.test_size, random_state=self.random_state,
-            stratify=stratify_y
+            X, y, test_size=self.test_size, random_state=self.random_state, stratify=stratify_y
         )
 
     # ── 数据加载步骤 7: TF-IDF 变换 (仅在训练集上拟合) ──
 
-    def _apply_tfidf_to_splits(self, nlp_texts: list,
-                               nlp_vectorizer_config: dict):
+    def _apply_tfidf_to_splits(self, nlp_texts: list, nlp_vectorizer_config: dict):
         """在训练集上拟合 TfidfVectorizer, 然后变换训练集和测试集。
 
         包含数据增强 (augment_factor > 1 时) 和自适应 max_features。
@@ -531,27 +517,21 @@ class SklearnTrainer(BaseTrainer):
         if _augment_factor > 1 and len(_train_texts) < 5000:
             try:
                 from app.utils.text_augment import augment_texts
+
                 _n_train_orig = len(_train_texts)
                 _y_train_list = list(self._y_train)
                 _train_texts, _y_train_aug = augment_texts(
-                    _train_texts, _y_train_list, factor=_augment_factor,
-                    seed=self.random_state
+                    _train_texts, _y_train_list, factor=_augment_factor, seed=self.random_state
                 )
                 _n_aug = len(_train_texts) - _n_train_orig
                 if _n_aug > 0:
                     # 扩展 X_train (空行, 因为文本列即将被 TF-IDF 替换)
-                    _aug_indices = list(range(
-                        self._X_train.index.max() + 1,
-                        self._X_train.index.max() + 1 + _n_aug
-                    ))
+                    _aug_indices = list(range(self._X_train.index.max() + 1, self._X_train.index.max() + 1 + _n_aug))
                     _aug_X = pd.DataFrame(
-                        np.zeros((_n_aug, self._X_train.shape[1])),
-                        index=_aug_indices, columns=self._X_train.columns
+                        np.zeros((_n_aug, self._X_train.shape[1])), index=_aug_indices, columns=self._X_train.columns
                     )
                     self._X_train = pd.concat([self._X_train, _aug_X], axis=0)
-                    self._y_train = np.concatenate([
-                        self._y_train, _y_train_aug[_n_train_orig:]
-                    ])
+                    self._y_train = np.concatenate([self._y_train, _y_train_aug[_n_train_orig:]])
                     # 更新 _train_indices 以包含新增的增强行索引
                     _train_indices = self._X_train.index.tolist()
                 self.callback.on_log(
@@ -569,10 +549,14 @@ class SklearnTrainer(BaseTrainer):
 
         _tfidf_cols = [f'tfidf_{i}' for i in range(_tfidf_train.shape[1])]
         _tfidf_train_df = pd.DataFrame.sparse.from_spmatrix(
-            _tfidf_train, columns=_tfidf_cols, index=_train_indices,
+            _tfidf_train,
+            columns=_tfidf_cols,
+            index=_train_indices,
         )
         _tfidf_test_df = pd.DataFrame.sparse.from_spmatrix(
-            _tfidf_test, columns=_tfidf_cols, index=_test_indices,
+            _tfidf_test,
+            columns=_tfidf_cols,
+            index=_test_indices,
         )
 
         self._X_train = pd.concat([self._X_train, _tfidf_train_df], axis=1)
@@ -582,8 +566,12 @@ class SklearnTrainer(BaseTrainer):
             f'[NLP] TF-IDF 完成: {len(_train_texts)}+{len(_test_texts)} 文本 '
             f'→ {_tfidf_train.shape[1]} 维特征 (仅在训练集上拟合)'
         )
-        _nlp_logger.info('[NLP] TF-IDF done: %d+%d texts -> %d features (fit on train only)',
-                         len(_train_texts), len(_test_texts), _tfidf_train.shape[1])
+        _nlp_logger.info(
+            '[NLP] TF-IDF done: %d+%d texts -> %d features (fit on train only)',
+            len(_train_texts),
+            len(_test_texts),
+            _tfidf_train.shape[1],
+        )
 
     # ── 数据加载步骤 8: StandardScaler + 类别平衡 ──
 
@@ -606,25 +594,20 @@ class SklearnTrainer(BaseTrainer):
         if tfidf_cols:
             n_tfidf = len(tfidf_cols)
             _nlp_logger.info(
-                '[NLP] Skipping StandardScaler for %d tfidf_* columns '
-                '(already L2-normalized by TfidfVectorizer)', n_tfidf
+                '[NLP] Skipping StandardScaler for %d tfidf_* columns (already L2-normalized by TfidfVectorizer)',
+                n_tfidf,
             )
             self.callback.on_log(
-                f'[NLP] 已跳过 StandardScaler for {n_tfidf} TF-IDF 特征列 '
-                f'(TfidfVectorizer 已做 L2 归一化)'
+                f'[NLP] 已跳过 StandardScaler for {n_tfidf} TF-IDF 特征列 (TfidfVectorizer 已做 L2 归一化)'
             )
 
         if len(non_tfidf_cols) > 0:
             self._scaler = StandardScaler()
-            self._X_train[non_tfidf_cols] = self._scaler.fit_transform(
-                self._X_train[non_tfidf_cols]
-            )
+            self._X_train[non_tfidf_cols] = self._scaler.fit_transform(self._X_train[non_tfidf_cols])
             # 测试集用训练集的 scaler 变换
             num_cols_test = [c for c in non_tfidf_cols if c in self._X_test.columns]
             if num_cols_test:
-                self._X_test[num_cols_test] = self._scaler.transform(
-                    self._X_test[num_cols_test]
-                )
+                self._X_test[num_cols_test] = self._scaler.transform(self._X_test[num_cols_test])
         else:
             # 无其他数值列 (纯 NLP 数据集), scaler 保持 None
             _nlp_logger.info('[NLP] No non-tfidf numeric columns, scaler is None')
@@ -646,22 +629,16 @@ class SklearnTrainer(BaseTrainer):
 
                 if _balance == 'smote':
                     sampler = SMOTE(random_state=self.random_state or 42)
-                    self._X_train, self._y_train = sampler.fit_resample(
-                        self._X_train, self._y_train
-                    )
+                    self._X_train, self._y_train = sampler.fit_resample(self._X_train, self._y_train)
                 elif _balance == 'undersample':
                     sampler = RandomUnderSampler(random_state=self.random_state or 42)
-                    self._X_train, self._y_train = sampler.fit_resample(
-                        self._X_train, self._y_train
-                    )
+                    self._X_train, self._y_train = sampler.fit_resample(self._X_train, self._y_train)
 
                 after = Counter(self._y_train)
                 # 恢复 DataFrame + 原始列名 (SMOTE/undersample 返回 numpy array)
                 self._X_train = pd.DataFrame(self._X_train, columns=_orig_cols)
                 self._y_train = pd.Series(self._y_train)
-                self.callback.on_log(
-                    f'[平衡] {_balance}: {dict(before)} → {dict(after)}'
-                )
+                self.callback.on_log(f'[平衡] {_balance}: {dict(before)} → {dict(after)}')
             except ImportError:
                 self.callback.on_log('[平衡] imbalanced-learn 未安装, 跳过重采样')
             except Exception as e:
@@ -687,10 +664,7 @@ class SklearnTrainer(BaseTrainer):
         model_cls = _import_model(module_path, class_name)
 
         # 获取算法特定参数, 过滤掉 None 值 (None 会覆盖 sklearn 默认值导致崩溃)
-        algo_params = {
-            k: v for k, v in self.hyperparams.get('algorithm_params', {}).items()
-            if v is not None
-        }
+        algo_params = {k: v for k, v in self.hyperparams.get('algorithm_params', {}).items() if v is not None}
 
         # 应用正则化默认值 (防过拟合) — 用户显式指定则不覆盖
         if self.algorithm in self._REGULARIZE_DEFAULTS:
@@ -703,10 +677,17 @@ class SklearnTrainer(BaseTrainer):
             )
 
         # warm_start: epochs > 1 时启用增量训练 (否则每轮 fit() 从零重建)
-        if self.total_epochs > 1 and module_path not in (
-            'sklearn.svm', 'sklearn.linear_model', 'sklearn.neighbors',
-            'sklearn.cluster',
-        ) and 'warm_start' not in algo_params:
+        if (
+            self.total_epochs > 1
+            and module_path
+            not in (
+                'sklearn.svm',
+                'sklearn.linear_model',
+                'sklearn.neighbors',
+                'sklearn.cluster',
+            )
+            and 'warm_start' not in algo_params
+        ):
             algo_params['warm_start'] = True
 
         try:
@@ -732,9 +713,7 @@ class SklearnTrainer(BaseTrainer):
                 else:
                     self._model.fit(self._X_train)
                     self._labels_train = self._model.labels_
-            return self._compute_metrics(
-                X=self._X_train, labels=self._labels_train, prefix='train_'
-            )
+            return self._compute_metrics(X=self._X_train, labels=self._labels_train, prefix='train_')
 
         # 计算渐进比例 (epoch 0 = 全量训练)
         progress = (epoch + 1) / max(self.total_epochs, 1)
@@ -765,8 +744,7 @@ class SklearnTrainer(BaseTrainer):
         # ---- 策略2: partial_fit 增量训练 (SGDClassifier 等) ----
         if hasattr(self._model, 'partial_fit'):
             if epoch == 0 and not hasattr(self._model, 'classes_'):
-                self._model.partial_fit(self._X_train, self._y_train,
-                                        classes=np.unique(self._y_train))
+                self._model.partial_fit(self._X_train, self._y_train, classes=np.unique(self._y_train))
             else:
                 # 每次用不同子集进行partial_fit
                 frac = 0.3
@@ -774,8 +752,7 @@ class SklearnTrainer(BaseTrainer):
                 n_samples = max(100, int(n_total * frac))
                 indices = np.random.RandomState(epoch).randint(0, n_total, n_samples)
                 self._model.partial_fit(
-                    self._safe_index(self._X_train, indices),
-                    self._safe_index(self._y_train, indices)
+                    self._safe_index(self._X_train, indices), self._safe_index(self._y_train, indices)
                 )
 
             n_total = len(self._X_train)
@@ -799,9 +776,7 @@ class SklearnTrainer(BaseTrainer):
         sample_size = max(100, int(n_total * eval_frac))
         sample_size = min(sample_size, n_total)
 
-        indices = np.random.RandomState(epoch * 7 + 13).choice(
-            n_total, size=sample_size, replace=False
-        )
+        indices = np.random.RandomState(epoch * 7 + 13).choice(n_total, size=sample_size, replace=False)
         X_subset = self._safe_index(self._X_train, indices)
         y_subset = self._safe_index(self._y_train, indices)
 
@@ -819,9 +794,7 @@ class SklearnTrainer(BaseTrainer):
             else:
                 self._model.fit(self._X_test)
                 test_labels = self._model.labels_
-            return self._compute_metrics(
-                X=self._X_test, labels=test_labels, prefix='test_'
-            )
+            return self._compute_metrics(X=self._X_test, labels=test_labels, prefix='test_')
         else:
             y_pred = self._model.predict(self._X_test)
             return self._compute_metrics(self._y_test, y_pred, prefix='test_')
@@ -842,9 +815,11 @@ class SklearnTrainer(BaseTrainer):
         cv_folds = int(self.hyperparams.get('cv_folds', 0))
         if cv_folds < 2:
             # Auto-compute: min(5, n_samples // 50), need at least 2
-            n_total = (len(self._X_train) + len(self._X_test)
-                       if hasattr(self, '_X_test') and self._X_test is not None
-                       else len(self._X_train))
+            n_total = (
+                len(self._X_train) + len(self._X_test)
+                if hasattr(self, '_X_test') and self._X_test is not None
+                else len(self._X_train)
+            )
             cv_folds = max(2, min(5, n_total // 50))
             self.callback.on_log(f'[CV] 自动设置 cv_folds={cv_folds} (n_samples={n_total})')
 
@@ -855,25 +830,33 @@ class SklearnTrainer(BaseTrainer):
 
             n_samples = len(y_full)
             if n_samples < 3 * cv_folds:
-                return {'error': f'样本量不足 ({n_samples} < {3*cv_folds})', 'cv_mean': 0,
-                        'cv_std': 0, 'cv_scores': [], 'cv_folds': cv_folds, 'n_samples': n_samples}
+                return {
+                    'error': f'样本量不足 ({n_samples} < {3 * cv_folds})',
+                    'cv_mean': 0,
+                    'cv_std': 0,
+                    'cv_scores': [],
+                    'cv_folds': cv_folds,
+                    'n_samples': n_samples,
+                }
 
             # 检查类别最少样本数
             from collections import Counter
+
             class_counts = Counter(y_full)
             min_count = min(class_counts.values())
             actual_folds = min(cv_folds, min_count, n_samples // 3)
             if actual_folds < 2:
-                return {'error': f'最少类别样本数={min_count}, 无法进行CV',
-                        'cv_mean': 0, 'cv_std': 0, 'cv_scores': [], 'cv_folds': cv_folds,
-                        'n_samples': n_samples}
+                return {
+                    'error': f'最少类别样本数={min_count}, 无法进行CV',
+                    'cv_mean': 0,
+                    'cv_std': 0,
+                    'cv_scores': [],
+                    'cv_folds': cv_folds,
+                    'n_samples': n_samples,
+                }
 
-            skf = StratifiedKFold(n_splits=actual_folds, shuffle=True,
-                                 random_state=self.random_state)
-            scores = cross_val_score(
-                self._model, X_full, y_full, cv=skf,
-                scoring='accuracy', n_jobs=1
-            )
+            skf = StratifiedKFold(n_splits=actual_folds, shuffle=True, random_state=self.random_state)
+            scores = cross_val_score(self._model, X_full, y_full, cv=skf, scoring='accuracy', n_jobs=1)
 
             return {
                 'cv_mean': float(np.mean(scores)),
@@ -884,8 +867,7 @@ class SklearnTrainer(BaseTrainer):
                 'error': None,
             }
         except Exception as e:
-            return {'error': str(e), 'cv_mean': 0, 'cv_std': 0,
-                    'cv_scores': [], 'cv_folds': cv_folds, 'n_samples': 0}
+            return {'error': str(e), 'cv_mean': 0, 'cv_std': 0, 'cv_scores': [], 'cv_folds': cv_folds, 'n_samples': 0}
 
     def save_model(self, path: str):
         """使用 pickle 保存模型 (含 NLP vectorizer + class_labels)"""
@@ -935,6 +917,7 @@ class SklearnTrainer(BaseTrainer):
     @staticmethod
     def load_checkpoint(output_dir: str) -> dict:
         import pickle
+
         ckpt_path = os.path.join(output_dir, 'checkpoint.pkl')
         if not os.path.exists(ckpt_path):
             return {}
@@ -961,8 +944,7 @@ class SklearnTrainer(BaseTrainer):
             return data.iloc[indices]
         return data[indices]
 
-    def _compute_metrics(self, y_true=None, y_pred=None, prefix: str = '',
-                         X=None, labels=None) -> dict:
+    def _compute_metrics(self, y_true=None, y_pred=None, prefix: str = '', X=None, labels=None) -> dict:
         """
         计算分类、回归和聚类任务的评估指标
 
@@ -994,12 +976,9 @@ class SklearnTrainer(BaseTrainer):
                 n_labels = len(unique_labels)
                 # 至少需要2个簇且不是所有点在同一簇才能计算
                 if n_labels >= 2 and n_labels < len(labels):
-                    metrics[f'{prefix}silhouette_score'] = round(
-                        float(silhouette_score(X, labels)), 4)
-                    metrics[f'{prefix}davies_bouldin_score'] = round(
-                        float(davies_bouldin_score(X, labels)), 4)
-                    metrics[f'{prefix}calinski_harabasz_score'] = round(
-                        float(calinski_harabasz_score(X, labels)), 4)
+                    metrics[f'{prefix}silhouette_score'] = round(float(silhouette_score(X, labels)), 4)
+                    metrics[f'{prefix}davies_bouldin_score'] = round(float(davies_bouldin_score(X, labels)), 4)
+                    metrics[f'{prefix}calinski_harabasz_score'] = round(float(calinski_harabasz_score(X, labels)), 4)
 
                 # KMeans 特有: 惯性 (簇内平方和)
                 if hasattr(self._model, 'inertia_'):
@@ -1009,9 +988,11 @@ class SklearnTrainer(BaseTrainer):
                 if self._y_test is not None and prefix == 'test_':
                     try:
                         metrics[f'{prefix}adjusted_rand_score'] = round(
-                            float(adjusted_rand_score(self._y_test, labels)), 4)
+                            float(adjusted_rand_score(self._y_test, labels)), 4
+                        )
                         metrics[f'{prefix}normalized_mutual_info_score'] = round(
-                            float(normalized_mutual_info_score(self._y_test, labels)), 4)
+                            float(normalized_mutual_info_score(self._y_test, labels)), 4
+                        )
                     except Exception:
                         pass
             except Exception:

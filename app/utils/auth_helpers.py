@@ -2,6 +2,7 @@
 认证辅助函数
 提供 API 和 Web 路由共用的用户获取逻辑
 """
+
 from flask import g, request
 from flask_login import current_user
 
@@ -33,6 +34,7 @@ def get_current_user():
 
     # 方式2: JWT Bearer Token (API 认证)
     from app.utils.jwt_helpers import get_user_from_jwt
+
     user = get_user_from_jwt()
     if user:
         g.current_user = user

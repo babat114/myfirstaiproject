@@ -4,6 +4,7 @@
 持久化 JWT Refresh Token 黑名单 (替代内存 dict)
 ============================================
 """
+
 from app import db
 from app._timezone import localnow
 

@@ -3,6 +3,7 @@
 消除 engine.py / training_service.py / hyperparameter_tuning.py 中分散的
 KMeans algorithm 参数冲突修复逻辑。
 """
+
 import json
 
 from app import logger
@@ -30,10 +31,7 @@ def fix_kmeans_algorithm(algorithm: str, hyperparams: dict = None, model=None) -
     if algorithm.lower() not in _KMEANS_ALGO_PARAMS:
         return algorithm
 
-    logger.warning(
-        f'检测到错误的algorithm值 "{algorithm}" (KMeans参数值), '
-        f'自动修正为 "kmeans"'
-    )
+    logger.warning(f'检测到错误的algorithm值 "{algorithm}" (KMeans参数值), 自动修正为 "kmeans"')
     corrected = 'kmeans'
 
     # 原地修复 hyperparams 字典

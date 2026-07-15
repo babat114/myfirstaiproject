@@ -4,6 +4,8 @@ TTL 内存缓存工具 v2.0
 基于 dict + 自动过期清理 + 容量限制 + 统计
 ============================================
 """
+
+import contextlib
 import threading
 import time
 from collections.abc import Callable
@@ -32,8 +34,7 @@ class TTLCache:
         stats = cache.stats  # {'hits': 42, 'misses': 5, 'size': 3, 'evictions': 0}
     """
 
-    def __init__(self, default_ttl: int = 60, max_size: int = 0,
-                 cleanup_interval: int = 60):
+    def __init__(self, default_ttl: int = 60, max_size: int = 0, cleanup_interval: int = 60):
         """初始化缓存
 
         Args:
@@ -115,6 +116,7 @@ class TTLCache:
             key: 缓存键 (默认 func.__qualname__)
             ttl: TTL 秒数
         """
+
         def decorator(func: Callable):
             cache_key = key or f'{func.__module__}.{func.__qualname__}'
 
@@ -128,11 +130,9 @@ class TTLCache:
                 return result
 
             wrapper.cache_invalidate = lambda: self.delete(cache_key)
-            wrapper.cache_refresh = lambda: (
-                self.delete(cache_key),
-                self.set(cache_key, func(), ttl=ttl)
-            )
+            wrapper.cache_refresh = lambda: (self.delete(cache_key), self.set(cache_key, func(), ttl=ttl))
             return wrapper
+
         return decorator
 
     # ── 统计 ─────────────────────────────────────────
@@ -178,16 +178,13 @@ class TTLCache:
 
     def _start_cleanup_thread(self, interval: int) -> None:
         """启动后台定期清理线程 (daemon, 不阻止进程退出)"""
+
         def _cleanup_loop():
             while not self._cleanup_stop.wait(interval):
-                try:
+                with contextlib.suppress(Exception):
                     self._cleanup_expired()
-                except Exception:
-                    pass  # 清理失败不应导致线程崩溃
 
-        self._cleanup_thread = threading.Thread(
-            target=_cleanup_loop, daemon=True, name='ttl-cache-cleanup'
-        )
+        self._cleanup_thread = threading.Thread(target=_cleanup_loop, daemon=True, name='ttl-cache-cleanup')
         self._cleanup_thread.start()
 
     def __del__(self):

@@ -1,0 +1,8 @@
+[flake8]
+max-line-length = 127
+max-complexity = 50
+extend-ignore =
+    # 复杂度检查 - 已有大量复杂函数, 后续重构时逐步降低
+    C901,
+    # f-string 内的逗号空格 (flase positive on f-string content)
+    E231,

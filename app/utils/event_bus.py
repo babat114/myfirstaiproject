@@ -3,6 +3,7 @@
 训练线程发布事件 → SSE 客户端订阅消费
 替代旧的 50 FPS DB轮询，实现真正的事件驱动推送
 """
+
 import json
 import queue
 import threading
@@ -47,11 +48,14 @@ class TrainingEventBus:
             event_type: 'progress' | 'log' | 'metrics' | 'status_change' | 'complete' | 'error'
             data: 事件负载
         """
-        message = json.dumps({
-            'type': event_type,
-            'job_id': job_id,
-            'data': data,
-        }, ensure_ascii=False)
+        message = json.dumps(
+            {
+                'type': event_type,
+                'job_id': job_id,
+                'data': data,
+            },
+            ensure_ascii=False,
+        )
 
         with self._sub_lock:
             subscribers = self._subscribers.get(job_id, set())
