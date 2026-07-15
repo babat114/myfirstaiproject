@@ -7,7 +7,7 @@ security:
     # Add known false-positives or accepted risks here
     # Format: vulnerability_id: reason for ignoring
 
-  continue-on-vulnerability: false
+  continue-on-vulnerability-error: false
 
   alerts:
     enabled: true
