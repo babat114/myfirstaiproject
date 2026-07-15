@@ -4,10 +4,11 @@
 JSON 接口 — 支持 JWT/Session/API Key 认证
 ============================================
 """
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, jsonify, request
+
 from app.services.comment_service import CommentService
-from app.utils.decorators import api_login_required
 from app.utils.auth_helpers import get_current_user
+from app.utils.decorators import api_login_required
 
 comments_api_bp = Blueprint('comments_api', __name__)
 

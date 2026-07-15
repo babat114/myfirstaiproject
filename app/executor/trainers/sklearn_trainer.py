@@ -2,16 +2,25 @@
 scikit-learn 训练器
 支持分类、回归和聚类任务，涵盖常用算法
 """
-import os
+import contextlib
 import logging
+import os
 import pickle
+
 import numpy as np
 import pandas as pd
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.impute import SimpleImputer
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
-from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+from sklearn.metrics import (
+    accuracy_score,
+    f1_score,
+    mean_absolute_error,
+    mean_squared_error,
+    precision_score,
+    r2_score,
+    recall_score,
+)
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.utils.multiclass import type_of_target
 
 from app.executor.trainers.base import BaseTrainer
@@ -399,7 +408,7 @@ class SklearnTrainer(BaseTrainer):
                 except ValueError:
                     # 测试集中出现训练集未见的类别 — 映射到已知类
                     X_test[col] = X_test[col].astype(str).apply(
-                        lambda x: x if x in le.classes_ else le.classes_[0]
+                        lambda x, le=le: x if x in le.classes_ else le.classes_[0]
                     )
                     X_test[col] = le.transform(X_test[col].astype(str))
 
@@ -428,8 +437,8 @@ class SklearnTrainer(BaseTrainer):
             reg_algo = _CLS_TO_REG.get(self.algorithm)
             if reg_algo:
                 self.callback.on_log(
-                    f'[自动纠错] 目标列是连续值(float), '
-                    f'但任务类型是 classification。'
+                    '[自动纠错] 目标列是连续值(float), '
+                    '但任务类型是 classification。'
                 )
                 self.callback.on_log(
                     f'[自动纠错] 已自动切换: task_type → regression, '
@@ -625,9 +634,10 @@ class SklearnTrainer(BaseTrainer):
         _balance = self.hyperparams.get('balance', None)
         if _balance and _balance != 'none' and self.task_type == 'classification':
             try:
+                from collections import Counter
+
                 from imblearn.over_sampling import SMOTE
                 from imblearn.under_sampling import RandomUnderSampler
-                from collections import Counter
 
                 before = Counter(self._y_train)
 
@@ -696,9 +706,8 @@ class SklearnTrainer(BaseTrainer):
         if self.total_epochs > 1 and module_path not in (
             'sklearn.svm', 'sklearn.linear_model', 'sklearn.neighbors',
             'sklearn.cluster',
-        ):
-            if 'warm_start' not in algo_params:
-                algo_params['warm_start'] = True
+        ) and 'warm_start' not in algo_params:
+            algo_params['warm_start'] = True
 
         try:
             self._model = model_cls(random_state=self.random_state, **algo_params)
@@ -827,8 +836,8 @@ class SklearnTrainer(BaseTrainer):
             dict with keys: cv_mean, cv_std, cv_scores, cv_folds, n_samples, error
             如果 CV 不可用 (样本太少/类别太少) 返回 error 说明原因
         """
-        from sklearn.model_selection import cross_val_score, StratifiedKFold
         import numpy as np
+        from sklearn.model_selection import StratifiedKFold, cross_val_score
 
         cv_folds = int(self.hyperparams.get('cv_folds', 0))
         if cv_folds < 2:
@@ -974,9 +983,12 @@ class SklearnTrainer(BaseTrainer):
             metrics = {}
             try:
                 from sklearn.metrics import (
-                    silhouette_score, davies_bouldin_score, calinski_harabasz_score
+                    adjusted_rand_score,
+                    calinski_harabasz_score,
+                    davies_bouldin_score,
+                    normalized_mutual_info_score,
+                    silhouette_score,
                 )
-                from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
 
                 unique_labels = set(labels)
                 n_labels = len(unique_labels)
@@ -1020,10 +1032,8 @@ class SklearnTrainer(BaseTrainer):
                 ('f1_macro', lambda: f1_score(y_true, y_pred, average='macro', zero_division=0)),
             ]:
                 full_name = f'{prefix}{name}'
-                try:
+                with contextlib.suppress(Exception):
                     metrics[full_name] = round(float(func()), 4)
-                except Exception:
-                    pass
         else:
             metrics[f'{prefix}mse'] = round(float(mean_squared_error(y_true, y_pred)), 4)
             metrics[f'{prefix}mae'] = round(float(mean_absolute_error(y_true, y_pred)), 4)

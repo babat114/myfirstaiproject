@@ -4,10 +4,10 @@
 支持 ONNX 导出和 Docker 部署包生成的后台进度跟踪
 ============================================
 """
-import uuid
 import threading
 import time
-from typing import Optional, Callable
+import uuid
+from collections.abc import Callable
 
 from app._timezone import localnow
 
@@ -77,7 +77,7 @@ class ExportTaskTracker:
             self._tasks[task_id] = task
         return task_id
 
-    def get_task(self, task_id: str) -> Optional[dict]:
+    def get_task(self, task_id: str) -> dict | None:
         """获取任务状态"""
         with self._lock:
             task = self._tasks.get(task_id)

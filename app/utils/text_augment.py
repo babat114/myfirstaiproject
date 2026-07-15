@@ -121,10 +121,7 @@ def random_char_delete(text: str, p: float = 0.15, rng: random.Random = None) ->
     if not kept:
         # Keep at least 30% of original length
         n_keep = max(1, int(len(chars) * 0.3))
-        if hasattr(rng, 'sample'):
-            kept = rng.sample(chars, n_keep)
-        else:
-            kept = random.sample(chars, n_keep)
+        kept = rng.sample(chars, n_keep) if hasattr(rng, 'sample') else random.sample(chars, n_keep)
 
     return ''.join(kept)
 
@@ -157,12 +154,12 @@ def augment_texts(texts, labels, factor=2, methods=None, seed=42):
     if methods is None:
         methods = ['synonym', 'delete']
 
-    rng = random.Random(seed)
+    random.Random(seed)
 
     aug_texts = list(texts)
     aug_labels = list(labels)
 
-    for i, (text, label) in enumerate(zip(texts, labels)):
+    for i, (text, label) in enumerate(zip(texts, labels, strict=False)):
         for v in range(factor - 1):
             method = methods[(i + v) % len(methods)]
             local_rng = random.Random(seed + i * 100 + v)

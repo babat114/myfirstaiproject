@@ -6,10 +6,12 @@ AI模型注册模型
 """
 import json
 import uuid
+
+from sqlalchemy import CheckConstraint
+
 from app import db
 from app._timezone import localnow
 from app.models.mixins import AccessControlMixin
-from sqlalchemy import CheckConstraint
 
 
 class ModelRecord(AccessControlMixin, db.Model):

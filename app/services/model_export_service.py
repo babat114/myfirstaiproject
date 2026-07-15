@@ -4,17 +4,12 @@
 支持 ONNX 格式转换、Docker 部署配置生成
 ============================================
 """
-import os
-import pickle
 import json
+import os
 import shutil
-import tempfile
-from datetime import datetime
-from app._timezone import localnow
-from typing import Optional, Tuple
-from flask import current_app
 
-from app import db, logger
+from app import logger
+from app._timezone import localnow
 from app.models.model_record import ModelRecord
 
 
@@ -188,7 +183,7 @@ services:
 '''
 
     @staticmethod
-    def export_onnx(model: ModelRecord) -> Tuple[bool, str, Optional[str]]:
+    def export_onnx(model: ModelRecord) -> tuple[bool, str, str | None]:
         """将模型导出为 ONNX 格式
 
         Returns:
@@ -204,7 +199,7 @@ services:
             metadata = {}
 
         framework = metadata.get('framework', 'sklearn')
-        task_type = metadata.get('task_type', model.model_type)
+        metadata.get('task_type', model.model_type)
         feature_count = metadata.get('input_dim', 10)
 
         export_dir = os.path.join('experiments', 'exports', model.uuid)
@@ -241,7 +236,6 @@ services:
         """sklearn → ONNX"""
         from skl2onnx import convert_sklearn
         from skl2onnx.common.data_types import FloatTensorType
-        import numpy as np
 
         initial_type = [('float_input', FloatTensorType([None, feature_count]))]
 
@@ -290,8 +284,8 @@ services:
     def _export_tf_onnx(model, metadata, feature_count, onnx_path):
         """TensorFlow/Keras → ONNX (tf2onnx)"""
         try:
-            import tf2onnx
             import tensorflow as tf
+            import tf2onnx
 
             # 加载 Keras 模型文件
             keras_path = model.model_file_path
@@ -310,7 +304,7 @@ services:
             return False, '缺少依赖: pip install tf2onnx', None
 
     @staticmethod
-    def generate_deployment_package(model: ModelRecord) -> Tuple[bool, str, Optional[str], Optional[str]]:
+    def generate_deployment_package(model: ModelRecord) -> tuple[bool, str, str | None, str | None]:
         """生成完整部署包 (Dockerfile + serve.py + requirements.txt + docker-compose.yml + README.md)
 
         所有文件打包到一个目录，方便一键部署。

@@ -2,18 +2,17 @@
 训练执行引擎
 基于 ThreadPoolExecutor 的轻量级训练调度器
 """
-import os
-import json
 import atexit
+import contextlib
+import json
+import os
 import threading
-from concurrent.futures import ThreadPoolExecutor, Future
-from datetime import datetime, timezone
+from concurrent.futures import Future, ThreadPoolExecutor
 
-from flask import current_app
 from app import db, logger
-from app.models.training_job import TrainingJob
 from app.models.dataset import Dataset
 from app.models.model_record import ModelRecord
+from app.models.training_job import TrainingJob
 
 
 class TrainingExecutor:
@@ -107,10 +106,8 @@ class TrainingExecutor:
                     db.session.commit()
                     logger.info(f'已恢复 {len(stale)} 个僵尸训练任务 (running→interrupted)')
             except Exception as e:
-                try:
+                with contextlib.suppress(Exception):
                     db.session.rollback()
-                except Exception:
-                    pass
                 logger.warning(f'僵尸任务恢复失败 (非致命): {e}')
 
         # 从数据库刷新 job 以避免 DetachedInstanceError
@@ -267,16 +264,12 @@ class TrainingExecutor:
                         job.append_log('[系统] 服务关闭，训练已暂停。重启后可恢复。')
                         db.session.commit()
                 except Exception:
-                    try:
+                    with contextlib.suppress(Exception):
                         db.session.rollback()
-                    except Exception:
-                        pass
 
         # 关闭线程池 (容忍 logger 已关闭的情况)
-        try:
+        with contextlib.suppress(Exception):
             self._pool.shutdown(wait=True, cancel_futures=False)
-        except Exception:
-            pass
 
     # ============ 私有方法 ============
 
@@ -342,10 +335,8 @@ class TrainingExecutor:
                 # 解析超参数
                 hyperparams = {}
                 if job.model and job.model.hyperparameters_json:
-                    try:
+                    with contextlib.suppress(json.JSONDecodeError, TypeError):
                         hyperparams = json.loads(job.model.hyperparameters_json)
-                    except (json.JSONDecodeError, TypeError):
-                        pass
 
                 # 决定使用哪个训练器
                 trainer_cls = self._resolve_trainer_class(job, hyperparams)

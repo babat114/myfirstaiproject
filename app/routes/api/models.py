@@ -4,17 +4,20 @@ AI模型 API
 RESTful JSON 接口
 ============================================
 """
-import os
-import json
-import re
+import contextlib
 import ipaddress
+import json
+import os
+from datetime import UTC
 from urllib.parse import urlparse
-from flask import Blueprint, request, jsonify, current_app
+
+from flask import Blueprint, current_app, jsonify, request
+
 from app import db, logger
 from app._timezone import localnow
 from app.services.model_service import ModelService
-from app.utils.decorators import api_login_required
 from app.utils.auth_helpers import get_current_user
+from app.utils.decorators import api_login_required
 
 models_api_bp = Blueprint('models_api', __name__)
 
@@ -492,10 +495,7 @@ def predict(model_uuid):
             return jsonify({'success': False, 'message': '请提供特征数据。'}), 400
 
         # features 可以是 [[v1,v2,...], ...] 或 [{col1:v1, col2:v2}, ...]
-        if isinstance(features[0], dict):
-            df = pd.DataFrame(features)
-        else:
-            df = pd.DataFrame(features)
+        df = pd.DataFrame(features) if isinstance(features[0], dict) else pd.DataFrame(features)
     else:
         file = request.files.get('file')
         if not file:
@@ -509,7 +509,6 @@ def predict(model_uuid):
         if mime.startswith('image/') or fmt in image_exts:
             # ── 图像文件 → CNN 特征提取 → DataFrame ──
             try:
-                import numpy as np
                 from app.services.feature_extractor import FeatureExtractor
                 image_data = file.read()
 
@@ -597,9 +596,10 @@ def predict_template(model_uuid):
       404:
         description: 模型不存在
     """
-    import io
     import csv
+    import io
     import json as _json
+
     from flask import Response
 
     model = ModelService.get_model_by_uuid(model_uuid)
@@ -686,8 +686,9 @@ def predict_export(model_uuid):
 
     认证: Session / JWT / API Key
     """
-    import io
     import csv
+    import io
+
     import pandas as pd
     from flask import Response
 
@@ -844,8 +845,9 @@ def evaluate(model_uuid):
     test_dataset = None
 
     if test_dataset_uuid:
-        from app.models.dataset import Dataset
         from sqlalchemy import select
+
+        from app.models.dataset import Dataset
         test_dataset = db.session.execute(select(Dataset).where(Dataset.uuid == test_dataset_uuid)).scalar_one_or_none()
         if not test_dataset:
             return jsonify({'success': False, 'message': '指定的测试数据集不存在。'}), 404
@@ -945,8 +947,6 @@ def quick_predict(model_uuid):
       200:
         description: "{prediction, confidence, probabilities, model_type, input_mode}"
 """
-    import pandas as pd
-    import numpy as np
 
     model = ModelService.get_model_by_uuid(model_uuid)
     if not model:
@@ -985,11 +985,10 @@ def quick_predict(model_uuid):
                 'message': '无法分析纯符号/数字文本，请输入有意义的中文或英文内容。',
             }), 400
 
-    from app.services.inference_service import ModelInferenceService
 
     input_mode = 'text' if text_input else 'features'
     hp = model.hyperparameters_dict
-    algo = hp.get('algorithm', '')
+    hp.get('algorithm', '')
 
     # ── 分发到专用处理函数 ──
     if text_input:
@@ -1037,8 +1036,7 @@ def _format_quick_result(result: dict, task_type: str, input_text: str, input_mo
 def _handle_text_prediction(model, text_input, input_mode):
     """处理文本输入预测 — 分发到各 NLP/sklearn/关键词匹配路径"""
     import logging
-    import pandas as pd
-    import numpy as np
+
     from app.services.inference_service import ModelInferenceService
 
     log = logging.getLogger(__name__)
@@ -1112,8 +1110,9 @@ def _handle_text_prediction(model, text_input, input_mode):
 
 def _try_vectorizer_predict(model, metadata, text_input, task_type, input_mode, log):
     """尝试使用模型保存的 TF-IDF vectorizer 做文本→特征转换后预测。成功返回 Response, 失败返回 None。"""
-    import pandas as pd
     import numpy as np
+    import pandas as pd
+
     from app.services.inference_service import ModelInferenceService
 
     vectorizer = (metadata or {}).get('vectorizer')
@@ -1195,10 +1194,11 @@ def _try_keyword_match_predict(target_le, metadata, text_input, task_type, input
 
 def _handle_nlp_sentiment_predict(model, metadata, text_input, task_type, input_mode):
     """NLP 模型情感分析: vectorizer 优先, 失败则回退到内置情感词典"""
-    import pandas as pd
     import numpy as np
-    from app.services.inference_service import ModelInferenceService
+    import pandas as pd
+
     from app.services.feature_extractor import FeatureExtractor
+    from app.services.inference_service import ModelInferenceService
 
     # 优先使用 vectorizer
     vectorizer = (metadata or {}).get('vectorizer')
@@ -1284,6 +1284,7 @@ def _handle_nlp_sentiment_predict(model, metadata, text_input, task_type, input_
 def _handle_features_prediction(model, features_input, input_mode):
     """处理特征值输入预测"""
     import pandas as pd
+
     from app.services.inference_service import ModelInferenceService
 
     try:
@@ -1324,7 +1325,7 @@ def download_model_file(model_uuid):
       404:
         description: 模型文件不存在
     """
-    from flask import send_file, abort
+    from flask import send_file
 
     model = ModelService.get_model_by_uuid(model_uuid)
     if not model:
@@ -1583,10 +1584,7 @@ def export_async(model_uuid, export_type):
     tracker = ExportTaskTracker()
     task_id = tracker.create_task(model_uuid, export_type)
 
-    if export_type == 'onnx':
-        fn = ModelExportService.export_onnx
-    else:
-        fn = ModelExportService.generate_deployment_package
+    fn = ModelExportService.export_onnx if export_type == 'onnx' else ModelExportService.generate_deployment_package
 
     tracker.run_async(task_id, fn, model)
 
@@ -1821,10 +1819,7 @@ def _validate_deployment_url(url: str) -> bool:
         addr = ipaddress.ip_address(hostname)
         if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_multicast:
             return False
-        for net in _SSRF_BLOCKED_NETWORKS:
-            if addr in net:
-                return False
-        return True
+        return all(addr not in net for net in _SSRF_BLOCKED_NETWORKS)
     except ValueError:
         # hostname 不是有效IP → 域名, 允许 (部署到公网)
         return True
@@ -1850,9 +1845,9 @@ def deploy_health(model_uuid):
       200:
         description: "{status: healthy|unreachable|not_deployed, deploy_exists, container_info}"
     """
-    import urllib.request
-    import urllib.error
     import json as _json
+    import urllib.error
+    import urllib.request
 
     model = ModelService.get_model_by_uuid(model_uuid)
     if not model:
@@ -1923,14 +1918,14 @@ def deploy_health(model_uuid):
             status = 'unreachable'
             container_info['error'] = f'检查异常: {str(e)}'
 
-    from datetime import datetime, timezone
+    from datetime import datetime
     return jsonify({
         'success': True,
         'data': {
             'status': status,
             'deploy_exists': deploy_exists,
             'container_info': container_info,
-            'checked_at': datetime.now(timezone.utc).isoformat(),
+            'checked_at': datetime.now(UTC).isoformat(),
         }
     })
 
@@ -2054,8 +2049,9 @@ def import_model_preview():
     if not file or not file.filename:
         return jsonify({'success': False, 'message': '请选择模型文件。'}), 400
 
-    import tempfile
     import shutil as _su
+    import tempfile
+
     from app.services.model_recommender import ModelRecommender
 
     filename = file.filename
@@ -2094,7 +2090,7 @@ def import_model_preview():
                     extracted['existing_metadata'] = meta_data
                     extracted['framework'] = meta_data.get('framework')
                     extracted['model_type'] = meta_data.get('model_type')
-                    extracted['metadata_fields'] = [k for k in meta_data.keys()
+                    extracted['metadata_fields'] = [k for k in meta_data
                                                     if not k.startswith('_') and k != 'model_file_path']
                     infer = meta_data.get('_inference_meta', {})
                     extracted['algorithm'] = infer.get('algorithm')
@@ -2151,10 +2147,8 @@ def import_model_preview():
         logger.error(f"导入预览失败: {e}", exc_info=True)
         return jsonify({'success': False, 'message': f'解析失败: {str(e)}'}), 400
     finally:
-        try:
+        with contextlib.suppress(Exception):
             _su.rmtree(temp_dir, ignore_errors=True)
-        except Exception:
-            pass
 
 
 @models_api_bp.route('/import/confirm', methods=['POST'])
@@ -2219,18 +2213,14 @@ def import_model_confirm():
     metrics = None
     metrics_raw = request.form.get('metrics')
     if metrics_raw:
-        try:
+        with contextlib.suppress(json.JSONDecodeError, TypeError):
             metrics = json.loads(metrics_raw)
-        except (json.JSONDecodeError, TypeError):
-            pass
 
     hyperparameters = None
     hp_raw = request.form.get('hyperparameters')
     if hp_raw:
-        try:
+        with contextlib.suppress(json.JSONDecodeError, TypeError):
             hyperparameters = json.loads(hp_raw)
-        except (json.JSONDecodeError, TypeError):
-            pass
 
     is_public = request.form.get('is_public') in ('true', 'True', '1', 'on')
 

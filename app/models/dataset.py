@@ -6,11 +6,12 @@
 """
 import os
 import uuid
-from app import db
-from app.models.mixins import AccessControlMixin
-from app._timezone import localnow
+
 from sqlalchemy import CheckConstraint
 
+from app import db
+from app._timezone import localnow
+from app.models.mixins import AccessControlMixin
 
 # 数据集分类映射 (数据库值 → 中文标签 + 图标)
 CATEGORY_LABELS = {

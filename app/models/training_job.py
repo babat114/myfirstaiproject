@@ -6,10 +6,12 @@
 """
 import json
 import uuid
+
+from sqlalchemy import CheckConstraint
+
 from app import db
 from app._timezone import localnow
 from app.models.mixins import AccessControlMixin
-from sqlalchemy import CheckConstraint
 
 
 class TrainingJob(AccessControlMixin, db.Model):

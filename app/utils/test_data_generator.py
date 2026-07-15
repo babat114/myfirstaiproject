@@ -10,9 +10,10 @@
 
 所有生成使用 seed=999 (训练时用seed=42), 确保可复现且独立于训练切分
 """
+import logging
+
 import numpy as np
 import pandas as pd
-import logging
 
 logger = logging.getLogger(__name__)
 

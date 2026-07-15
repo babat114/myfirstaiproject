@@ -6,8 +6,10 @@
 """
 import time
 from functools import wraps
-from flask import request, jsonify, g
+
+from flask import g, jsonify, request
 from flask_login import current_user
+
 from app.services.auth_service import AuthService
 
 
@@ -167,7 +169,7 @@ def rate_limit(max_calls: int = 60, period: int = 60):
                         'retry_after': retry_after,
                     }), 429
                 else:
-                    from flask import flash, redirect, render_template
+                    from flask import flash, redirect
                     flash(f'请求过于频繁，请在 {retry_after} 秒后重试。', 'warning')
                     return redirect(request.referrer or request.url)
 

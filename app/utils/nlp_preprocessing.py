@@ -11,6 +11,7 @@
 设计原则: 与训练器框架无关, 接受 DataFrame/ndarray, 返回处理后的数据
 """
 import logging
+
 import numpy as np
 import pandas as pd
 
@@ -34,8 +35,9 @@ def combined_tokenize(text: str):
     返回 jieba 词语 + 单个中文字符的列表。
     模块级函数 (必须可 pickle 以支持 TfidfVectorizer 序列化)。
     """
-    import jieba
     import re
+
+    import jieba
     words = list(jieba.cut(text))
     # 提取中文字符 unigram (U+4E00-U+9FFF 基本汉字 + U+3400-U+4DBF 扩展A)
     chars = re.findall(r'[㐀-鿿]', text)

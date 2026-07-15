@@ -4,10 +4,9 @@
 用户发表评论、删除评论 (需登录)
 ============================================
 """
-from flask import (
-    Blueprint, request, redirect, url_for, flash, jsonify
-)
-from flask_login import login_required, current_user
+from flask import Blueprint, flash, jsonify, redirect, request, url_for
+from flask_login import current_user, login_required
+
 from app.services.comment_service import CommentService
 
 comments_bp = Blueprint('comments', __name__)

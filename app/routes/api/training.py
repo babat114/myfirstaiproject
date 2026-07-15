@@ -4,12 +4,15 @@
 RESTful JSON 接口
 ============================================
 """
+import contextlib
 import json
-from flask import Blueprint, request, jsonify
+
+from flask import Blueprint, jsonify, request
+
 from app import logger
 from app.services.training_service import TrainingService
-from app.utils.decorators import api_login_required, rate_limit
 from app.utils.auth_helpers import get_current_user
+from app.utils.decorators import api_login_required, rate_limit
 
 training_api_bp = Blueprint('training_api', __name__)
 
@@ -633,17 +636,13 @@ def training_guidance(job_uuid):
     metrics_history = job.metrics_history or []
     final_metrics = {}
     if job.final_metrics_json:
-        try:
+        with contextlib.suppress(Exception):
             final_metrics = json.loads(job.final_metrics_json)
-        except Exception:
-            pass
 
     hyperparams = {}
     if job.model and job.model.hyperparameters_json:
-        try:
+        with contextlib.suppress(Exception):
             hyperparams = json.loads(job.model.hyperparameters_json)
-        except Exception:
-            pass
 
     guidance = ParameterGuidanceService.analyze_results(
         metrics_history=metrics_history,
@@ -762,8 +761,8 @@ def run_tuning():
       400:
         description: 参数无效
     """
-    from app.services.hyperparameter_tuning import HyperparameterTuningService
     from app.services.dataset_service import DatasetService
+    from app.services.hyperparameter_tuning import HyperparameterTuningService
 
     user = get_current_user()
     data = request.get_json(silent=True) or {}

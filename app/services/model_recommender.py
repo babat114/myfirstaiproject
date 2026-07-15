@@ -5,10 +5,9 @@
 支持规则推荐 (离线) 和 LLM 增强推荐 (可选)
 ============================================
 """
+import json
 import os
 import re
-import json
-from typing import Optional
 
 from app import logger
 
@@ -149,7 +148,7 @@ class ModelRecommender:
         return result
 
     @classmethod
-    def recommend_with_llm(cls, info: dict) -> Optional[dict]:
+    def recommend_with_llm(cls, info: dict) -> dict | None:
         """LLM 增强推荐 — 适用于有 API Key 的场景
 
         生成更自然、更准确的中文名称和描述。
@@ -278,7 +277,7 @@ class ModelRecommender:
     # ══════════════════════════════════════════════════════
 
     @classmethod
-    def _detect_domain(cls, info: dict) -> Optional[str]:
+    def _detect_domain(cls, info: dict) -> str | None:
         """从特征名、算法名、类别标签推断领域"""
         search_text = ''
 
@@ -316,7 +315,7 @@ class ModelRecommender:
         return None
 
     @classmethod
-    def _clean_filename(cls, filename: str) -> Optional[str]:
+    def _clean_filename(cls, filename: str) -> str | None:
         """从文件名提取可读名称: 去掉 uuid 前缀和扩展名"""
         if not filename:
             return None
@@ -338,7 +337,7 @@ class ModelRecommender:
         return name
 
     @classmethod
-    def _shorten_generic(cls, algo: str) -> Optional[str]:
+    def _shorten_generic(cls, algo: str) -> str | None:
         """通用算法名缩写: CamelCase → 空格分隔"""
         if not algo:
             return None
@@ -505,16 +504,10 @@ def generate_enhanced_description(
     elif task_type == 'clustering':
         use_items.append('模型输出每个样本所属的簇编号')
 
-    if use_items:
-        usage = '使用方式：' + '，'.join(use_items) + '。'
-    else:
-        usage = '使用方式：输入特征数据，获取预测结果。'
+    usage = '使用方式：' + '，'.join(use_items) + '。' if use_items else '使用方式：输入特征数据，获取预测结果。'
 
     # ── 算法原理 ──
-    if algo_desc:
-        algo_section = f'使用{algo_cn_name}算法训练 - {algo_desc}'
-    else:
-        algo_section = f'使用{algo_cn_name}算法训练'
+    algo_section = f'使用{algo_cn_name}算法训练 - {algo_desc}' if algo_desc else f'使用{algo_cn_name}算法训练'
 
     return f'{scene}\n{usage}\n\n{algo_section}'
 

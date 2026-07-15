@@ -5,20 +5,19 @@
 ============================================
 """
 import re
-from typing import Optional, Tuple, List
+
 from sqlalchemy.orm import joinedload
+
 from app import db, logger
-from app.utils.helpers import paginate_query
 from app.models.comment import Comment
 from app.models.model_record import ModelRecord
 from app.models.user import User
-from app._timezone import localnow
-
+from app.utils.helpers import paginate_query
 
 # ============ 内容审核关键词库 ============
 # 命中以下任一模式 → 自动屏蔽评论 (is_visible=False)
 
-_BANNED_PATTERNS: List[str] = [
+_BANNED_PATTERNS: list[str] = [
     # 英文攻击性词汇
     # 无歧义的词用子串匹配 (捕获 fuckyou/shithead/bullshit 等拼接形式)
     r'fuck',           # 无合法英文单词包含 "fuck"
@@ -70,7 +69,7 @@ class CommentService:
     # ============ 内容审核 ============
 
     @staticmethod
-    def _moderate_content(content: str) -> Tuple[bool, Optional[str]]:
+    def _moderate_content(content: str) -> tuple[bool, str | None]:
         """
         审核评论内容
 
@@ -106,7 +105,7 @@ class CommentService:
         model_id: int,
         content: str,
         parent_id: int = None,
-    ) -> Tuple[Optional[Comment], Optional[str]]:
+    ) -> tuple[Comment | None, str | None]:
         """
         添加评论 (含自动审核)
 
@@ -170,7 +169,7 @@ class CommentService:
         comment_id: int,
         user: User,
         permanent: bool = False,
-    ) -> Tuple[bool, Optional[str]]:
+    ) -> tuple[bool, str | None]:
         """
         删除评论
 
@@ -214,7 +213,7 @@ class CommentService:
     def restore_comment(
         comment_id: int,
         user: User,
-    ) -> Tuple[bool, Optional[str]]:
+    ) -> tuple[bool, str | None]:
         """管理员恢复被屏蔽的评论"""
         if not user.is_admin:
             return False, '需要管理员权限。'
@@ -239,7 +238,7 @@ class CommentService:
     @staticmethod
     def get_comments_for_model(
         model_id: int,
-        user: Optional[User] = None,
+        user: User | None = None,
         page: int = 1,
         per_page: int = 20,
         include_hidden: bool = False,
@@ -281,19 +280,19 @@ class CommentService:
     @staticmethod
     def get_replies_for_comment(
         parent_id: int,
-        user: Optional[User] = None,
+        user: User | None = None,
     ) -> list:
         """获取某条评论的所有可见回复"""
         from sqlalchemy import select
         stmt = select(Comment).where(Comment.parent_id == parent_id)
 
         if not (user and user.is_admin):
-            stmt = stmt.where(Comment.is_visible == True)
+            stmt = stmt.where(Comment.is_visible)
 
         stmt = stmt.order_by(Comment.created_at.asc())
         return [c.to_dict() for c in db.session.execute(stmt).scalars().all()]
 
     @staticmethod
-    def get_comment_by_id(comment_id: int) -> Optional[Comment]:
+    def get_comment_by_id(comment_id: int) -> Comment | None:
         """根据ID获取评论"""
         return db.session.get(Comment, comment_id)

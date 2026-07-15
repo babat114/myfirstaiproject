@@ -2,8 +2,9 @@
 认证辅助函数
 提供 API 和 Web 路由共用的用户获取逻辑
 """
-from flask import request, g
+from flask import g, request
 from flask_login import current_user
+
 from app.services.auth_service import AuthService
 
 

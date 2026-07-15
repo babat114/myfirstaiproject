@@ -3,10 +3,10 @@
 训练线程发布事件 → SSE 客户端订阅消费
 替代旧的 50 FPS DB轮询，实现真正的事件驱动推送
 """
+import json
 import queue
 import threading
-import json
-from typing import Optional
+
 from app import logger
 
 
@@ -87,7 +87,7 @@ class TrainingEventBus:
 
 
 # 全局单例
-_event_bus: Optional[TrainingEventBus] = None
+_event_bus: TrainingEventBus | None = None
 
 
 def get_event_bus() -> TrainingEventBus:

@@ -4,9 +4,11 @@
 处理用户注册、登录、注销和个人资料
 ============================================
 """
-from flask import Blueprint, render_template, request, redirect, url_for, flash
-from flask_login import login_user, logout_user, login_required, current_user
 from urllib.parse import urlparse
+
+from flask import Blueprint, flash, redirect, render_template, request, url_for
+from flask_login import current_user, login_required, login_user, logout_user
+
 from app.services.auth_service import AuthService
 from app.utils.decorators import rate_limit
 

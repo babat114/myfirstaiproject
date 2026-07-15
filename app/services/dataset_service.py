@@ -6,19 +6,18 @@
 """
 import os
 import uuid
-from datetime import datetime
-from typing import Optional, Tuple
-from app._timezone import localnow
-from werkzeug.utils import secure_filename
+
 from flask import current_app
+from sqlalchemy.orm import joinedload
 from werkzeug.datastructures import FileStorage
+from werkzeug.utils import secure_filename
+
 from app import db, logger
+from app._timezone import localnow
 from app.models.dataset import Dataset
 from app.models.user import User
 from app.utils.cache import dashboard_cache
 from app.utils.helpers import paginate_query, sanitize_service_error
-from sqlalchemy.orm import joinedload
-
 
 # ========== 智能分类推断 ==========
 
@@ -76,8 +75,8 @@ def _infer_category(name: str, df, file_ext: str) -> str:
                     return category
 
         # 3. 数据特征推断
-        num_cols = len(df.select_dtypes(include=['number']).columns)
-        total_cols = len(df.columns)
+        len(df.select_dtypes(include=['number']).columns)
+        len(df.columns)
 
         # 图像数据: 大量列+像素列名
         pixel_cols = sum(1 for c in df.columns
@@ -151,7 +150,7 @@ class DatasetService:
     def create_dataset(user: User, name: str, file: FileStorage,
                        description: str = None, category: str = 'other',
                        tags: list = None, is_public: bool = False,
-                       upload_folder: str = None) -> Tuple[Optional[Dataset], Optional[str]]:
+                       upload_folder: str = None) -> tuple[Dataset | None, str | None]:
         """
         创建新数据集并上传文件
 
@@ -226,19 +225,19 @@ class DatasetService:
             return None, sanitize_service_error(e, '数据集创建失败')
 
     @staticmethod
-    def get_dataset_by_id(dataset_id: int) -> Optional[Dataset]:
+    def get_dataset_by_id(dataset_id: int) -> Dataset | None:
         """根据 ID 获取数据集"""
         return db.session.get(Dataset, dataset_id)
 
     @staticmethod
-    def get_dataset_by_uuid(dataset_uuid: str) -> Optional[Dataset]:
+    def get_dataset_by_uuid(dataset_uuid: str) -> Dataset | None:
         """根据 UUID 获取数据集"""
         return db.session.execute(
             db.select(Dataset).filter_by(uuid=dataset_uuid)
         ).scalar_one_or_none()
 
     @staticmethod
-    def update_dataset(dataset: Dataset, data: dict) -> Tuple[bool, Optional[str]]:
+    def update_dataset(dataset: Dataset, data: dict) -> tuple[bool, str | None]:
         """
         更新数据集元数据
 
@@ -269,7 +268,7 @@ class DatasetService:
             return False, sanitize_service_error(e, '更新数据集失败')
 
     @staticmethod
-    def delete_dataset(dataset: Dataset) -> Tuple[bool, Optional[str]]:
+    def delete_dataset(dataset: Dataset) -> tuple[bool, str | None]:
         """
         删除数据集及其文件
 
@@ -294,7 +293,7 @@ class DatasetService:
             return False, sanitize_service_error(e, '删除数据集失败')
 
     @staticmethod
-    def copy_dataset_to_user(dataset: Dataset, user: User) -> Tuple[Optional[Dataset], Optional[str]]:
+    def copy_dataset_to_user(dataset: Dataset, user: User) -> tuple[Dataset | None, str | None]:
         """
         将公开数据集复制到目标用户的名下
 
@@ -419,7 +418,7 @@ class DatasetService:
 
         使用 SQL GROUP BY 聚合, O(k) 内存 (k=类别数), 而非 O(n) 全量加载。
         """
-        from sqlalchemy import func, or_
+        from sqlalchemy import func
 
         cache_key = f'dataset_stats:{user_id or "all"}'
         cached = dashboard_cache.get(cache_key)
@@ -451,7 +450,7 @@ class DatasetService:
             _filtered_query(
                 func.count(Dataset.id),
                 func.coalesce(func.sum(Dataset.file_size), 0),
-                func.sum(db.case((Dataset.is_public == True, 1), else_=0)),
+                func.sum(db.case((Dataset.is_public, 1), else_=0)),
             )
         ).one()
         total_count, total_size, public_count = agg_row[0], agg_row[1], agg_row[2]

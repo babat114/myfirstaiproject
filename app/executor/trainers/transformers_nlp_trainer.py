@@ -10,9 +10,11 @@ v2 改进 (2026-06-20):
   - 每个 epoch 后报告 train + val 双指标
 ============================================
 """
-import os
-import json
+import contextlib
 import copy
+import json
+import os
+
 import numpy as np
 import pandas as pd
 
@@ -53,7 +55,7 @@ def _ensure_hf_access():
 
 def _download_model(model_name: str):
     """下载预训练模型 (含tokenizer + model)，自动重试镜像"""
-    from transformers import AutoTokenizer, AutoModelForSequenceClassification
+    from transformers import AutoTokenizer
 
     _ensure_hf_access()
 
@@ -200,7 +202,7 @@ class TransformersNLPTrainer(BaseTrainer):
         )
 
         # DataLoader
-        from torch.utils.data import TensorDataset, DataLoader
+        from torch.utils.data import DataLoader, TensorDataset
         train_ds = TensorDataset(
             train_enc['input_ids'], train_enc['attention_mask'],
             torch.tensor(y_train, dtype=torch.long)
@@ -221,8 +223,7 @@ class TransformersNLPTrainer(BaseTrainer):
 
     def build_model(self):
         import torch
-        from transformers import AutoModelForSequenceClassification
-        from transformers import get_linear_schedule_with_warmup
+        from transformers import AutoModelForSequenceClassification, get_linear_schedule_with_warmup
 
         # 确保模型可下载 (国内自动切镜像)
         _ensure_hf_access()
@@ -346,7 +347,7 @@ class TransformersNLPTrainer(BaseTrainer):
     def evaluate(self) -> dict:
         """最终评估: 恢复最佳模型 → 在测试集上计算最终指标"""
         import torch
-        from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+        from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 
         # —— 恢复早停最佳模型 ——
         if self._best_model_state is not None:
@@ -377,10 +378,8 @@ class TransformersNLPTrainer(BaseTrainer):
             ('f1_macro', lambda: f1_score(all_labels, all_preds, average='macro', zero_division=0)),
         ]:
             full_name = f'test_{name}'
-            try:
+            with contextlib.suppress(Exception):
                 result[full_name] = round(float(func()), 4)
-            except Exception:
-                pass
 
         if self._stopped_early:
             result['early_stopped'] = True

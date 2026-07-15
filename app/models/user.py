@@ -4,9 +4,9 @@
 管理用户账户、角色和认证信息
 ============================================
 """
-from datetime import datetime
 from flask_login import UserMixin
-from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
+
 from app import db, login_manager
 from app._timezone import localnow
 
@@ -108,9 +108,7 @@ class User(UserMixin, db.Model):
     @property
     def is_locked(self) -> bool:
         """检查账号是否处于锁定状态"""
-        if self.locked_until and self.locked_until > localnow():
-            return True
-        return False
+        return bool(self.locked_until and self.locked_until > localnow())
 
     def reset_lockout(self):
         """重置登录失败计数和锁定状态 (成功登录后调用)"""

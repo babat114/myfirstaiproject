@@ -11,14 +11,14 @@ v2 改进 (2026-06-05):
   - train + val 双指标报告
   - 更安全默认值: lr=1e-4, dropout=0.5, wd=1e-3
 """
+import json
 import os
 import pickle
+
 import numpy as np
 import pandas as pd
-import json
 
 from app.executor.trainers.base import BaseTrainer
-
 
 # ============ Keras 延迟导入 ============
 _keras_imported = None
@@ -126,9 +126,9 @@ class KerasTrainer(BaseTrainer):
 
     def load_data(self):
         tf = _ensure_tf()
-        from sklearn.model_selection import train_test_split
-        from sklearn.preprocessing import StandardScaler, LabelEncoder
         from sklearn.impute import SimpleImputer
+        from sklearn.model_selection import train_test_split
+        from sklearn.preprocessing import LabelEncoder, StandardScaler
 
         file_path = self.dataset.file_path
         if not os.path.exists(file_path):
@@ -221,7 +221,7 @@ class KerasTrainer(BaseTrainer):
         model = tf.keras.Sequential()
         model.add(tf.keras.layers.Input(shape=(self._input_dim,)))
 
-        for i, units in enumerate(self.hidden_layers):
+        for _i, units in enumerate(self.hidden_layers):
             model.add(tf.keras.layers.Dense(
                 units, activation='relu',
                 kernel_regularizer=tf.keras.regularizers.l2(self.weight_decay)
@@ -303,13 +303,16 @@ class KerasTrainer(BaseTrainer):
 
     def evaluate(self) -> dict:
         """最终评估: 在测试集上计算指标"""
-        from sklearn.metrics import (accuracy_score, precision_score, recall_score,
-                                      f1_score, r2_score, mean_squared_error)
+        from sklearn.metrics import (
+            accuracy_score,
+            f1_score,
+            mean_squared_error,
+            precision_score,
+            r2_score,
+            recall_score,
+        )
 
-        if self.task_type == 'classification':
-            y_test = self._y_test.astype('int64')
-        else:
-            y_test = self._y_test.astype('float32')
+        y_test = self._y_test.astype('int64') if self.task_type == 'classification' else self._y_test.astype('float32')
 
         y_pred_raw = self._model.predict(self._X_test, verbose=0)
 
@@ -337,7 +340,7 @@ class KerasTrainer(BaseTrainer):
         return result
 
     def save_model(self, path: str):
-        tf = _ensure_tf()
+        _ensure_tf()
         os.makedirs(os.path.dirname(path), exist_ok=True)
 
         self._model.save(path + '.keras')
@@ -368,7 +371,7 @@ class KerasTrainer(BaseTrainer):
         """保存 Keras 训练快照: 模型权重 + 优化器权重 + epoch"""
         if self._model is None:
             return
-        tf = _ensure_tf()
+        _ensure_tf()
         os.makedirs(self.output_dir, exist_ok=True)
 
         ckpt_dir = os.path.join(self.output_dir, 'checkpoint.keras')
@@ -393,7 +396,7 @@ class KerasTrainer(BaseTrainer):
         meta_path = os.path.join(output_dir, 'checkpoint_meta.json')
         if not os.path.exists(meta_path):
             return {}
-        with open(meta_path, 'r') as f:
+        with open(meta_path) as f:
             meta = json.load(f)
         return {
             'epoch': meta.get('epoch', 0),

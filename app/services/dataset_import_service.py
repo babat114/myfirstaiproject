@@ -4,18 +4,17 @@
 支持从 sklearn、UCI、OpenML 等源导入经典数据集
 ============================================
 """
-import os
-import json
 import hashlib
-import pandas as pd
+import json
+import os
+
 import numpy as np
-from datetime import datetime
-from app._timezone import localnow
-from typing import Optional, Tuple
+import pandas as pd
+
 from app import db, logger
+from app._timezone import localnow
 from app.models.dataset import Dataset
 from app.models.user import User
-
 
 # ===================================================================
 # 内置可导入的公开数据集目录 (15个数据集)
@@ -248,7 +247,7 @@ class DatasetImportService:
         return sorted(categories)
 
     @staticmethod
-    def import_dataset(user: User, dataset_key: str, name: str = None) -> Tuple[Optional[Dataset], Optional[str]]:
+    def import_dataset(user: User, dataset_key: str, name: str = None) -> tuple[Dataset | None, str | None]:
         """
         导入公开数据集到用户的文件系统
 
@@ -283,11 +282,10 @@ class DatasetImportService:
 
             # 计算文件大小和哈希 (分块读取，避免大文件 OOM)
             file_size = os.path.getsize(file_path)
-            _md5 = hashlib.md5()
+            _md5 = hashlib.md5(usedforsecurity=False)
             with open(file_path, 'rb') as _f:
                 for _chunk in iter(lambda: _f.read(8192), b''):
                     _md5.update(_chunk)
-            file_hash = _md5.hexdigest()
 
             # 生成摘要
             summary = {
@@ -370,7 +368,7 @@ class DatasetImportService:
         """加载 sklearn 生成式数据集 (make_classification/make_blobs/make_moons/make_regression)"""
         X, y = generator_fn()
         feat_names = [f'feature_{i}' for i in range(X.shape[1])]
-        target_vals = y.astype(target_dtype) if target_dtype == str else y
+        target_vals = y.astype(target_dtype) if isinstance(target_dtype, type) and issubclass(target_dtype, str) else y
         return DatasetImportService._build_sklearn_df(X, feat_names, target_vals)
 
     # ── sklearn 加载器注册表 ──
@@ -378,7 +376,6 @@ class DatasetImportService:
     @staticmethod
     def _load_sklearn_dataset(loader: str):
         """根据 loader 名称分发到对应 sklearn 加载逻辑"""
-        import numpy as np
         from sklearn import datasets
 
         # 内置数据集 — 统一模式
@@ -473,7 +470,6 @@ class DatasetImportService:
     @staticmethod
     def _load_uci_dataset(loader: str):
         """加载 UCI 数据集"""
-        import numpy as np
         if loader == 'fetch_wine_quality':
             try:
                 url = 'https://archive.ics.uci.edu/ml/machine-learning-databases/wine-quality/winequality-red.csv'
@@ -502,7 +498,7 @@ class DatasetImportService:
         return None, None
 
     @staticmethod
-    def _load_dataset(key: str, info: dict) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
+    def _load_dataset(key: str, info: dict) -> tuple[pd.DataFrame | None, str | None]:
         """从源加载数据集，返回 (DataFrame, target_column)
 
         通过注册表模式分发: sklearn 内置/生成式/openml → _load_sklearn_dataset
@@ -522,7 +518,7 @@ class DatasetImportService:
     def import_from_url(user: User, url: str, name: str,
                         file_format: str = 'csv',
                         target_column: str = None,
-                        description: str = None) -> Tuple[Optional[Dataset], Optional[str]]:
+                        description: str = None) -> tuple[Dataset | None, str | None]:
         """
         从URL导入数据集 (支持 Kaggle raw URL 等)
 
@@ -538,9 +534,10 @@ class DatasetImportService:
             (Dataset, error_message)
         """
         try:
-            import requests
-            from urllib.parse import urlparse
             import ipaddress
+            from urllib.parse import urlparse
+
+            import requests
 
             # SSRF 防护: 验证 URL 不指向内网/私有地址
             _SSRF_BLOCKED = [
@@ -575,7 +572,7 @@ class DatasetImportService:
             resp.raise_for_status()
 
             # 生成文件名
-            content_hash = hashlib.md5(url.encode()).hexdigest()[:12]
+            content_hash = hashlib.md5(url.encode(), usedforsecurity=False).hexdigest()[:12]
             ext = file_format if file_format in ('csv', 'json', 'xlsx', 'parquet') else 'csv'
             filename = f'imported_{content_hash}_{localnow().strftime("%Y%m%d_%H%M%S")}.{ext}'
 
@@ -584,7 +581,7 @@ class DatasetImportService:
             file_path = os.path.join(upload_dir, filename)
 
             # 保存文件 (分块写入 + 分块哈希, 避免大文件 OOM)
-            file_hash = hashlib.md5()
+            file_hash = hashlib.md5(usedforsecurity=False)
             with open(file_path, 'wb') as f:
                 for chunk in resp.iter_content(chunk_size=8192):
                     f.write(chunk)
@@ -654,7 +651,7 @@ class DatasetImportService:
     @staticmethod
     def import_from_kaggle(user: User, dataset_path: str, name: str,
                            target_column: str = None,
-                           description: str = None) -> Tuple[Optional[Dataset], Optional[str]]:
+                           description: str = None) -> tuple[Dataset | None, str | None]:
         """
         从 Kaggle 数据集导入 (需要已配置 kaggle credentials)
 
@@ -675,7 +672,7 @@ class DatasetImportService:
 
             # 查找 CSV 文件
             csv_files = []
-            for root, dirs, files in os.walk(download_path):
+            for root, _dirs, files in os.walk(download_path):
                 for f in files:
                     if f.endswith('.csv'):
                         csv_files.append(os.path.join(root, f))

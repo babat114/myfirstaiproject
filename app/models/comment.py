@@ -4,7 +4,6 @@
 管理公开模型的用户评论区 — 支持审核、回复、删除
 ============================================
 """
-from datetime import datetime
 from app import db
 from app._timezone import localnow
 

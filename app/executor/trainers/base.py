@@ -2,10 +2,9 @@
 训练器抽象基类
 定义所有训练器必须实现的接口
 """
-import threading
 import os
+import threading
 from abc import ABC, abstractmethod
-from datetime import datetime, timezone
 
 from app.executor.callbacks import TrainingCallback
 
@@ -95,13 +94,7 @@ class BaseTrainer(ABC):
 
     # ============ 检查点 (子类可选重写) ============
 
-    def save_checkpoint(self):
-        """保存训练快照到磁盘。
-
-        子类可重写以保存框架特定状态 (optimizer/scheduler/epoch)。
-        默认实现不做任何事 (sklearn单epoch算法无需检查点)。
-        检查点文件写入 experiments/{uuid}/checkpoint.*
-        """
+    def save_checkpoint(self):  # noqa: B027
         pass
 
     @staticmethod
@@ -116,13 +109,7 @@ class BaseTrainer(ABC):
         """
         return {}
 
-    def restore_checkpoint(self, ckpt: dict):
-        """将检查点状态恢复到当前模型 — 在 build_model() 之后调用。
-
-        ckpt 是 load_checkpoint() 的返回值。
-        默认实现: 无操作 (sklearn 单epoch算法无需恢复)。
-        子类可重写以恢复模型权重/优化器状态/调度器状态。
-        """
+    def restore_checkpoint(self, ckpt: dict):  # noqa: B027
         pass
 
     @staticmethod
@@ -275,7 +262,7 @@ class BaseTrainer(ABC):
 
         except Exception as e:
             # —— 异常时保存检查点以便恢复 ——
-            self.callback.on_log(f'[检查点] 训练异常, 正在保存快照...')
+            self.callback.on_log('[检查点] 训练异常, 正在保存快照...')
             try:
                 self.save_checkpoint()
             except Exception as ckpt_err:

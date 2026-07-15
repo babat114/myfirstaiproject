@@ -6,10 +6,10 @@
 import json
 import os
 import pickle
-from datetime import datetime
+
 from app import db, logger
-from app.models.training_job import TrainingJob
 from app._timezone import localnow
+from app.models.training_job import TrainingJob
 
 
 class TrainingCallback:
@@ -91,7 +91,7 @@ class TrainingCallback:
             return
         job.status = 'running'
         job.started_at = self._localnow()
-        job.append_log(f'[启动] 训练任务开始')
+        job.append_log('[启动] 训练任务开始')
         job.error_message = None
         db.session.commit()
         self._publish('status_change', {'status': 'running', 'message': '训练任务开始'})
@@ -106,7 +106,7 @@ class TrainingCallback:
         job.completed_at = self._localnow()
         if final_metrics:
             job.final_metrics_json = json.dumps(final_metrics, ensure_ascii=False)
-        job.append_log(f'[完成] 训练成功完成')
+        job.append_log('[完成] 训练成功完成')
         self._publish('status_change', {'status': 'completed', 'message': '训练成功完成'})
         if final_metrics:
             self._publish('metrics', {'final_metrics': final_metrics})
@@ -138,7 +138,7 @@ class TrainingCallback:
                             model.model_file_path = exp_model_pt
                         elif os.path.exists(exp_model_keras):
                             model.model_file_path = exp_model_keras
-                        job.append_log(f'[模型] 已更新关联模型指标')
+                        job.append_log('[模型] 已更新关联模型指标')
 
                         # ---- 自动独立测试集评估 ----
                         if final_metrics and job.dataset_id:
@@ -260,7 +260,7 @@ class TrainingCallback:
             return
         job.status = 'cancelled'
         job.completed_at = self._localnow()
-        job.append_log(f'[取消] 训练任务已取消')
+        job.append_log('[取消] 训练任务已取消')
         db.session.commit()
         self._publish('status_change', {'status': 'cancelled', 'message': '训练任务已取消'})
 

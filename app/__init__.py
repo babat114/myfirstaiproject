@@ -4,15 +4,18 @@ AI Model & Dataset Management Platform
 应用工厂 - 创建和配置 Flask 应用
 ============================================
 """
-import os
 import logging
+import os
+from datetime import UTC
+
+import colorlog
 from flask import Flask
-from flask_sqlalchemy import SQLAlchemy
+from flask_cors import CORS
 from flask_login import LoginManager
 from flask_migrate import Migrate
-from flask_cors import CORS
+from flask_sqlalchemy import SQLAlchemy
 from flask_wtf.csrf import CSRFProtect
-import colorlog
+
 from config import get_config
 
 # 初始化扩展 (不绑定到应用)
@@ -120,7 +123,7 @@ def configure_logging(app):
 def configure_assets(app):
     """配置 Flask-Assets 静态资源合并压缩 (仅生产环境)"""
     try:
-        from flask_assets import Environment, Bundle
+        from flask_assets import Bundle, Environment
         assets = Environment(app)
         # 仅生产环境启用压缩
         assets.debug = app.config.get('DEBUG', True)
@@ -146,11 +149,11 @@ def configure_assets(app):
 def register_blueprints(app):
     """注册所有蓝图 + CSRF 豁免"""
     from app.routes.auth import auth_bp
+    from app.routes.comments import comments_bp
     from app.routes.dashboard import dashboard_bp
     from app.routes.datasets import datasets_bp
     from app.routes.models import models_bp
     from app.routes.training import training_bp
-    from app.routes.comments import comments_bp
 
     # Web 页面路由
     app.register_blueprint(auth_bp, url_prefix='/auth')
@@ -162,12 +165,12 @@ def register_blueprints(app):
 
     # RESTful API 路由
     from app.routes.api.auth import auth_api_bp
+    from app.routes.api.comments import comments_api_bp
     from app.routes.api.datasets import datasets_api_bp
     from app.routes.api.models import models_api_bp
-    from app.routes.api.training import training_api_bp
     from app.routes.api.stream import stream_bp
+    from app.routes.api.training import training_api_bp
     from app.routes.api.users import users_api_bp
-    from app.routes.api.comments import comments_api_bp
 
     # API v1 (当前版本)
     app.register_blueprint(auth_api_bp, url_prefix='/api/v1/auth')
@@ -190,7 +193,7 @@ def register_blueprints(app):
 
 def register_home_route(app):
     """注册根路由: 已登录 → 仪表盘, 未登录 → 欢迎首页"""
-    from flask import redirect, url_for, render_template
+    from flask import redirect, render_template, url_for
     from flask_login import current_user
 
     @app.route('/')
@@ -232,9 +235,9 @@ def setup_api_compat_middleware(app):
 
 def register_error_handlers(app):
     """注册错误处理"""
-    from flask import render_template, jsonify, request, flash, redirect, url_for
-    from werkzeug.exceptions import HTTPException
+    from flask import flash, jsonify, redirect, render_template, request, url_for
     from flask_wtf.csrf import CSRFError
+    from werkzeug.exceptions import HTTPException
 
     @app.errorhandler(CSRFError)
     def handle_csrf_error(e):
@@ -327,8 +330,9 @@ def register_security_headers(app):
 
 def register_health_check(app):
     """注册健康检查端点 /health 和 /healthz (Kubernetes 兼容)"""
-    from flask import jsonify
     from datetime import datetime, timezone
+
+    from flask import jsonify
 
     @app.route('/health')
     @app.route('/healthz')
@@ -340,16 +344,13 @@ def register_health_check(app):
         except Exception as e:
             db_ok = False
             # 生产环境下仅返回通用错误信息, 不泄露数据库连接详情
-            if app.debug:
-                db_error = str(e)
-            else:
-                db_error = 'database unavailable'
+            db_error = str(e) if app.debug else 'database unavailable'
 
         status_code = 200 if db_ok else 503
         return jsonify({
             'status': 'healthy' if db_ok else 'unhealthy',
             'version': '1.0.0',
-            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'timestamp': datetime.now(UTC).isoformat(),
             'checks': {
                 'database': {
                     'status': 'ok' if db_ok else 'error',

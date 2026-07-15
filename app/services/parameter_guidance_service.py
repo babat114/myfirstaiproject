@@ -18,10 +18,7 @@
   - Kempner Institute: "Optimizing ML Workflows Workshop 2026"
   - Hyperopt → Optuna Migration Guide (Azure Databricks ML Runtime 16.4+)
 """
-import json
 import numpy as np
-from typing import Optional
-from app import logger
 
 
 class ParameterGuidanceService:
@@ -613,7 +610,7 @@ class ParameterGuidanceService:
         recent = history[-n_recent:]
 
         if task_type == 'regression':
-            train_key, test_key = 'train_r2', 'test_r2'
+            train_key, _test_key = 'train_r2', 'test_r2'
             train_vals = [m.get(train_key) for m in recent
                           if m.get(train_key) is not None]
             test_val = final_metrics.get('test_r2', final_metrics.get('r2'))
@@ -624,7 +621,7 @@ class ParameterGuidanceService:
         elif task_type == 'clustering':
             return {'overfitting': False, 'severity': 'none', 'gap': 0}
         else:
-            train_key, test_key = 'train_accuracy', 'test_accuracy'
+            train_key, _test_key = 'train_accuracy', 'test_accuracy'
             train_vals = [m.get(train_key) for m in recent
                           if m.get(train_key) is not None]
             test_val = final_metrics.get('test_accuracy', final_metrics.get('accuracy'))
@@ -734,16 +731,13 @@ class ParameterGuidanceService:
 
         if n < 3:
             # 单轮模型: 从最终指标反推收敛质量
-            if n >= 1:
-                entry = history[-1]
-            else:
-                entry = final_metrics
+            entry = history[-1] if n >= 1 else final_metrics
 
             if task_type == 'classification':
                 test_acc = entry.get('test_accuracy', entry.get('accuracy',
                                      final_metrics.get('test_accuracy',
                                      final_metrics.get('accuracy', 0))))
-                train_acc = entry.get('train_accuracy', test_acc)
+                entry.get('train_accuracy', test_acc)
                 if test_acc >= 0.90:  return 85.0  # 高准确率 → 收敛良好
                 elif test_acc >= 0.78: return 73.0  # 中等 → 可接受
                 elif test_acc >= 0.60: return 58.0  # 偏低 → 可能欠收敛
@@ -1833,10 +1827,9 @@ class ParameterGuidanceService:
           - 信号强 → C偏大(弱正则化), alpha偏小
           - 信号弱 → C偏小(强正则化), alpha偏大
         """
-        import math
 
         reg_bias = signal['regularization_bias']
-        ratio = signal['ratio']
+        signal['ratio']
 
         params = {'max_iter': 3000}
 
@@ -1964,7 +1957,7 @@ class ParameterGuidanceService:
         imbalanced = analysis.get('imbalanced', False)
         high_dim = analysis.get('high_dim', False)
         missing_rate = analysis.get('missing_rate', 0)
-        n_classes = analysis.get('n_classes', 0)
+        analysis.get('n_classes', 0)
 
         # ── 1. 连续缩放 ──
         scale = ParameterGuidanceService._continuous_scale(n_samples)
@@ -1973,6 +1966,7 @@ class ParameterGuidanceService:
         signal = ParameterGuidanceService._estimate_signal_quality(analysis)
 
         # ── 3. 算法感知参数生成 ──
+        tips = []
         algo_lower = algorithm.lower()
         if algo_lower in ParameterGuidanceService._TREE_ALGOS:
             params = ParameterGuidanceService._generate_tree_params(
@@ -2198,12 +2192,11 @@ class ParameterGuidanceService:
                 if 'n_estimators' in params:
                     params['n_estimators'] = min(500, int(params['n_estimators'] * 1.5))
                     param_changes['n_estimators'] = params['n_estimators']
-                if algo_lower.startswith('gradient'):
-                    if 'learning_rate' in params:
-                        params['learning_rate'] = round(params['learning_rate'] * 0.5, 5)
-                        n_est = params.get('n_estimators', 250)
-                        params['n_estimators'] = min(500, int(n_est * 1.5))
-                        param_changes['lr×0.5 + n_est×1.5'] = True
+                if algo_lower.startswith('gradient') and 'learning_rate' in params:
+                    params['learning_rate'] = round(params['learning_rate'] * 0.5, 5)
+                    n_est = params.get('n_estimators', 250)
+                    params['n_estimators'] = min(500, int(n_est * 1.5))
+                    param_changes['lr×0.5 + n_est×1.5'] = True
                 diagnosis.append({
                     'type': 'underfit',
                     'severity': 'medium',

@@ -4,8 +4,8 @@
 KMeans algorithm 参数冲突修复逻辑。
 """
 import json
-from app import logger
 
+from app import logger
 
 # KMeans 构造参数中与 ML 算法名冲突的参数值
 _KMEANS_ALGO_PARAMS = {'lloyd', 'elkan', 'auto', 'full'}

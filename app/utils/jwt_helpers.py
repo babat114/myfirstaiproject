@@ -5,20 +5,21 @@ JWT 认证工具
 ============================================
 """
 import uuid
-import jwt
-from datetime import datetime, timezone, timedelta
-from typing import Optional, Tuple, Dict, Any
-from flask import current_app
-from app import logger
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
+import jwt
+from flask import current_app
+
+from app import logger
 
 # ── Token 黑名单 (数据库持久化, 服务重启不丢失) ──
 
 
 def is_token_revoked(jti: str) -> bool:
     """检查 token jti 是否已被撤销 (数据库查询)"""
-    from app.models.revoked_token import RevokedToken
     from app import db
+    from app.models.revoked_token import RevokedToken
     return db.session.execute(
         db.select(RevokedToken.id).filter_by(jti=jti).limit(1)
     ).scalar() is not None
@@ -26,10 +27,10 @@ def is_token_revoked(jti: str) -> bool:
 
 def revoke_token(jti: str, exp_timestamp: float):
     """将 token jti 加入数据库黑名单, 有效期至 exp_timestamp"""
-    from app.models.revoked_token import RevokedToken
     from app import db
+    from app.models.revoked_token import RevokedToken
     try:
-        expires_at = datetime.fromtimestamp(exp_timestamp, tz=timezone.utc)
+        expires_at = datetime.fromtimestamp(exp_timestamp, tz=UTC)
         entry = RevokedToken(jti=jti, expires_at=expires_at)
         db.session.add(entry)
         db.session.commit()
@@ -41,12 +42,12 @@ def revoke_token(jti: str, exp_timestamp: float):
 
 def cleanup_expired_revocations():
     """清理过期的黑名单条目 (可由定时任务调用)"""
-    from app.models.revoked_token import RevokedToken
     from app import db
+    from app.models.revoked_token import RevokedToken
     try:
         db.session.execute(
             db.delete(RevokedToken).where(
-                RevokedToken.expires_at < datetime.now(timezone.utc)
+                RevokedToken.expires_at < datetime.now(UTC)
             )
         )
         db.session.commit()
@@ -87,7 +88,7 @@ def generate_access_token(user_id: int, username: str, role: str) -> str:
     Returns:
         编码后的 JWT 字符串
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     payload = {
         'sub': str(user_id),              # 用户ID — PyJWT 2.10+ 要求 sub 为字符串
         'username': username,             # 用户名 (方便日志/调试)
@@ -113,7 +114,7 @@ def generate_refresh_token(user_id: int, username: str, token_version: int = 1) 
     Returns:
         编码后的 JWT 字符串
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     payload = {
         'sub': str(user_id),              # PyJWT 2.10+ 要求 sub 为字符串
         'username': username,
@@ -128,7 +129,7 @@ def generate_refresh_token(user_id: int, username: str, token_version: int = 1) 
 
 
 def generate_token_pair(user_id: int, username: str, role: str,
-                        token_version: int = 1) -> Dict[str, str]:
+                        token_version: int = 1) -> dict[str, str]:
     """
     生成 Access + Refresh Token 对
 
@@ -143,7 +144,7 @@ def generate_token_pair(user_id: int, username: str, role: str,
     }
 
 
-def decode_token(token: str, expected_type: str = 'access') -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+def decode_token(token: str, expected_type: str = 'access') -> tuple[dict[str, Any] | None, str | None]:
     """
     解码并验证 JWT Token
 
@@ -169,12 +170,12 @@ def decode_token(token: str, expected_type: str = 'access') -> Tuple[Optional[Di
     return payload, None
 
 
-def decode_access_token(token: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+def decode_access_token(token: str) -> tuple[dict[str, Any] | None, str | None]:
     """解码 Access Token (便捷方法)"""
     return decode_token(token, expected_type='access')
 
 
-def decode_refresh_token(token: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+def decode_refresh_token(token: str) -> tuple[dict[str, Any] | None, str | None]:
     """解码 Refresh Token (便捷方法, 额外验证 token_version 和撤销状态)"""
     payload, error = decode_token(token, expected_type='refresh')
     if error:
@@ -190,8 +191,8 @@ def decode_refresh_token(token: str) -> Tuple[Optional[Dict[str, Any]], Optional
     if token_ver is not None:
         user_id = payload.get('sub')
         if user_id:
-            from app.models.user import User
             from app import db as _db
+            from app.models.user import User
             user = _db.session.get(User, int(user_id))
             if user and user.token_version != token_ver:
                 return None, 'Token 已失效 (密码已更改)，请重新登录。'
@@ -199,7 +200,7 @@ def decode_refresh_token(token: str) -> Tuple[Optional[Dict[str, Any]], Optional
     return payload, None
 
 
-def extract_token_from_header() -> Optional[str]:
+def extract_token_from_header() -> str | None:
     """
     从请求头提取 Bearer token
 
@@ -227,7 +228,7 @@ def extract_token_from_header() -> Optional[str]:
     return None
 
 
-def get_user_from_jwt() -> Optional[Any]:
+def get_user_from_jwt() -> Any | None:
     """
     从当前请求的 JWT Bearer token 中获取 User 对象
 
@@ -248,7 +249,7 @@ def get_user_from_jwt() -> Optional[Any]:
         return None
 
     # 延迟导入避免循环依赖
-    from app.models.user import User
     # sub 存储为字符串，查询时转为 int
     from app import db
+    from app.models.user import User
     return db.session.get(User, int(user_id))

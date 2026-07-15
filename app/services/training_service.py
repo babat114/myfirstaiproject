@@ -4,19 +4,18 @@
 管理AI模型训练任务的生命周期
 ============================================
 """
+import contextlib
 import json
-from datetime import datetime, timezone
-from typing import Optional, Tuple
+
+from sqlalchemy.orm import joinedload
+
 from app import db, logger
-from app._timezone import localnow
-from app.models.training_job import TrainingJob
 from app.models.dataset import Dataset
 from app.models.model_record import ModelRecord
+from app.models.training_job import TrainingJob
 from app.models.user import User
-from app.utils.algorithm_info import ALGORITHM_INFO
 from app.utils.cache import dashboard_cache
 from app.utils.helpers import paginate_query, sanitize_service_error
-from sqlalchemy.orm import joinedload
 
 
 class TrainingService:
@@ -33,7 +32,7 @@ class TrainingService:
                    algorithm: str = 'random_forest',
                    target_column: str = None,
                    test_size: float = 0.2,
-                   model_type: str = None) -> Tuple[Optional[TrainingJob], Optional[str]]:
+                   model_type: str = None) -> tuple[TrainingJob | None, str | None]:
         """
         创建新训练任务
 
@@ -131,7 +130,7 @@ class TrainingService:
             return None, sanitize_service_error(e, '创建训练任务失败')
 
     @staticmethod
-    def start_job(job: TrainingJob) -> Tuple[bool, Optional[str]]:
+    def start_job(job: TrainingJob) -> tuple[bool, str | None]:
         """启动训练任务 — 提交到训练执行引擎"""
         if job.status not in ('queued', 'paused'):
             return False, f'当前状态 ({job.status}) 无法启动训练。'
@@ -158,7 +157,7 @@ class TrainingService:
             return False, str(e)
 
     @staticmethod
-    def pause_job(job: TrainingJob) -> Tuple[bool, Optional[str]]:
+    def pause_job(job: TrainingJob) -> tuple[bool, str | None]:
         """暂停训练任务"""
         if job.status != 'running':
             return False, '只能暂停正在运行的任务。'
@@ -170,7 +169,7 @@ class TrainingService:
         return False, '暂停失败，任务可能不在活跃列表中。'
 
     @staticmethod
-    def resume_job(job: TrainingJob) -> Tuple[bool, Optional[str]]:
+    def resume_job(job: TrainingJob) -> tuple[bool, str | None]:
         """恢复训练任务"""
         if job.status != 'paused':
             return False, '只能恢复已暂停的任务。'
@@ -182,7 +181,7 @@ class TrainingService:
         return False, '恢复失败，任务可能不在活跃列表中。'
 
     @staticmethod
-    def complete_job(job: TrainingJob) -> Tuple[bool, Optional[str]]:
+    def complete_job(job: TrainingJob) -> tuple[bool, str | None]:
         """完成训练 (由训练线程自动调用，一般不手动触发)"""
         if job.status != 'running':
             return False, '只能完成正在运行的任务。'
@@ -196,7 +195,7 @@ class TrainingService:
         return True, None
 
     @staticmethod
-    def fail_job(job: TrainingJob, error: str) -> Tuple[bool, Optional[str]]:
+    def fail_job(job: TrainingJob, error: str) -> tuple[bool, str | None]:
         """标记训练失败"""
         job.fail(error)
         job.append_log(f'训练失败: {error}')
@@ -207,7 +206,7 @@ class TrainingService:
         return True, None
 
     @staticmethod
-    def cancel_job(job: TrainingJob) -> Tuple[bool, Optional[str]]:
+    def cancel_job(job: TrainingJob) -> tuple[bool, str | None]:
         """取消训练"""
         if job.is_finished:
             return False, '任务已结束，无法取消。'
@@ -243,7 +242,7 @@ class TrainingService:
         # created_at 保留原始创建时间, 不覆盖
 
     @staticmethod
-    def retrain_job(job: TrainingJob, new_params: dict = None) -> Tuple[bool, Optional[str]]:
+    def retrain_job(job: TrainingJob, new_params: dict = None) -> tuple[bool, str | None]:
         """重新训练 — 可选使用新参数, 重置任务状态为 queued 并提交到执行引擎
 
         适用状态: failed, cancelled, completed, paused
@@ -324,7 +323,7 @@ class TrainingService:
 
     @staticmethod
     def update_progress(job: TrainingJob, epoch: int, step: int,
-                        metrics: dict = None) -> Tuple[bool, Optional[str]]:
+                        metrics: dict = None) -> tuple[bool, str | None]:
         """更新训练进度"""
         if job.status != 'running':
             return False, '任务未在运行中。'
@@ -334,7 +333,7 @@ class TrainingService:
         return True, None
 
     @staticmethod
-    def get_job_by_id(job_id: int) -> Optional[TrainingJob]:
+    def get_job_by_id(job_id: int) -> TrainingJob | None:
         """根据 ID 获取任务 (预加载关联对象, 避免模板中 DetachedInstanceError)"""
         from sqlalchemy.orm import joinedload
         return db.session.execute(
@@ -348,7 +347,7 @@ class TrainingService:
         ).scalar_one_or_none()
 
     @staticmethod
-    def get_job_by_uuid(job_uuid: str) -> Optional[TrainingJob]:
+    def get_job_by_uuid(job_uuid: str) -> TrainingJob | None:
         """根据 UUID 获取任务 (预加载关联对象, 避免 N+1)"""
         from sqlalchemy.orm import joinedload
         return db.session.execute(
@@ -362,7 +361,7 @@ class TrainingService:
         ).scalar_one_or_none()
 
     @staticmethod
-    def delete_job(job: TrainingJob) -> Tuple[bool, Optional[str]]:
+    def delete_job(job: TrainingJob) -> tuple[bool, str | None]:
         """删除训练任务"""
         try:
             db.session.delete(job)
@@ -455,10 +454,8 @@ class TrainingService:
         for field, cast in numeric_fields.items():
             raw = (form_data.get(field) or '').strip()
             if raw:
-                try:
+                with contextlib.suppress(ValueError, TypeError):
                     extra[field] = cast(raw)
-                except (ValueError, TypeError):
-                    pass
 
         hl_raw = (form_data.get('hidden_layers_str') or '').strip()
         if hl_raw:

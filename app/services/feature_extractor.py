@@ -11,11 +11,10 @@ v2.1 优化:
   - 经典 CV 增强: LBP 纹理 + ORB 关键点统计
 ============================================
 """
-import os
 import io
 import logging
+
 import numpy as np
-from typing import Optional, Tuple, List
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +39,7 @@ class FeatureExtractor:
     @staticmethod
     def extract_text_features(
         text: str, n_features: int, language: str = 'zh'
-    ) -> Tuple[Optional[np.ndarray], Optional[str]]:
+    ) -> tuple[np.ndarray | None, str | None]:
         """
         将文本转换为 TF-IDF 特征向量, 截断/填充至目标维度
 
@@ -122,7 +121,7 @@ class FeatureExtractor:
     def extract_image_features(
         image_data: bytes, n_features: int,
         multi_scale: bool = True
-    ) -> Tuple[Optional[np.ndarray], Optional[str]]:
+    ) -> tuple[np.ndarray | None, str | None]:
         """
         从图像字节数据中提取特征向量
 
@@ -154,7 +153,7 @@ class FeatureExtractor:
     @staticmethod
     def _extract_with_cnn(
         image_data: bytes, n_features: int, multi_scale: bool = True
-    ) -> Tuple[Optional[np.ndarray], Optional[str]]:
+    ) -> tuple[np.ndarray | None, str | None]:
         """使用预训练 ResNet-18 提取多尺度特征 (3尺度→平均池化→L2归一化)
 
         多尺度策略:
@@ -168,8 +167,8 @@ class FeatureExtractor:
         """
         try:
             import torch
-            from torchvision import models, transforms
             from PIL import Image
+            from torchvision import models, transforms
 
             # 懒加载模型 (只加载一次)
             if FeatureExtractor._cnn_model is None:
@@ -255,7 +254,7 @@ class FeatureExtractor:
     @staticmethod
     def _extract_with_classical_cv(
         image_data: bytes, n_features: int
-    ) -> Tuple[Optional[np.ndarray], Optional[str]]:
+    ) -> tuple[np.ndarray | None, str | None]:
         """回退方案: 使用 HOG + LBP 纹理 + 颜色直方图 + ORB关键点统计
 
         增强说明 (v2.1):
@@ -267,8 +266,8 @@ class FeatureExtractor:
         """
         try:
             from PIL import Image
-            from skimage.feature import hog, local_binary_pattern
             from skimage import exposure
+            from skimage.feature import hog, local_binary_pattern
 
             img = Image.open(io.BytesIO(image_data)).convert('L')  # 灰度
 
@@ -510,7 +509,7 @@ class FeatureExtractor:
     @staticmethod
     def batch_compare(
         image_data: bytes,
-        candidates: List[bytes],
+        candidates: list[bytes],
         n_features: int = 512,
         top_k: int = 5,
     ) -> dict:
@@ -579,7 +578,7 @@ class FeatureExtractor:
         }
 
     @staticmethod
-    def load_image_thumbnail(image_data: bytes, max_size: Tuple[int, int] = (224, 224)) -> Optional[bytes]:
+    def load_image_thumbnail(image_data: bytes, max_size: tuple[int, int] = (224, 224)) -> bytes | None:
         """
         生成缩略图用于前端预览 (返回 PNG bytes)
 

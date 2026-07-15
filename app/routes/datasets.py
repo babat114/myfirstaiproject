@@ -4,13 +4,13 @@
 数据集管理的页面路由
 ============================================
 """
+import contextlib
 import json
 import os
-from flask import (
-    Blueprint, render_template, request, redirect,
-    url_for, flash, current_app
-)
-from flask_login import login_required, current_user
+
+from flask import Blueprint, current_app, flash, redirect, render_template, request, url_for
+from flask_login import current_user, login_required
+
 from app.services.dataset_service import DatasetService
 
 datasets_bp = Blueprint('datasets', __name__)
@@ -174,10 +174,8 @@ def dataset_detail(dataset_id):
     # 解析 summary_json
     summary = {}
     if dataset.summary_json:
-        try:
+        with contextlib.suppress(json.JSONDecodeError, TypeError):
             summary = json.loads(dataset.summary_json) if isinstance(dataset.summary_json, str) else dataset.summary_json
-        except (json.JSONDecodeError, TypeError):
-            pass
 
     return render_template(
         'datasets/detail.html',

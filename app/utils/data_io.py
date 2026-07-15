@@ -6,13 +6,13 @@
 ============================================
 """
 import os
-import pandas as pd
+
 import numpy as np
-from typing import Optional, Tuple
+import pandas as pd
 
 
 def load_dataframe(file_path: str, file_format: str = None,
-                   nrows: int = None) -> Optional[pd.DataFrame]:
+                   nrows: int = None) -> pd.DataFrame | None:
     """根据文件格式加载 DataFrame
 
     支持的格式: csv, xlsx, xls, json, parquet, txt (TSV), npy
@@ -101,10 +101,7 @@ def _safe_label_encode(y) -> np.ndarray:
     """
     from sklearn.preprocessing import LabelEncoder
 
-    if isinstance(y, np.ndarray):
-        y_series = pd.Series(y)
-    else:
-        y_series = y
+    y_series = pd.Series(y) if isinstance(y, np.ndarray) else y
 
     # 转为字符串 — 处理 float / int / object 混排
     y_str = y_series.astype(str).values
@@ -127,7 +124,7 @@ def _safe_float_encode(y) -> np.ndarray:
 
 
 def preprocess_data(X: pd.DataFrame, y: pd.Series, task_type: str = 'classification'
-                    ) -> Tuple[np.ndarray, np.ndarray]:
+                    ) -> tuple[np.ndarray, np.ndarray]:
     """通用数据预处理: 缺失值填充 + 分类编码 + 标准化
 
     关键修复 (GridSearchCV "mixed multiclass and continuous targets"):

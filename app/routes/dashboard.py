@@ -4,8 +4,9 @@
 首页和数据总览
 ============================================
 """
-from flask import Blueprint, render_template, flash, redirect, url_for
-from flask_login import login_required, current_user
+from flask import Blueprint, flash, redirect, render_template, url_for
+from flask_login import current_user, login_required
+
 from app.services.dataset_service import DatasetService
 from app.services.model_service import ModelService
 from app.services.training_service import TrainingService

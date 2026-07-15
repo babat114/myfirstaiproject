@@ -6,11 +6,11 @@
 """
 import hashlib
 import secrets
-from datetime import datetime
-from typing import Optional, Tuple
-from app._timezone import localnow
+
 from sqlalchemy import or_
+
 from app import db, logger
+from app._timezone import localnow
 from app.models.user import User
 
 
@@ -19,7 +19,7 @@ class AuthService:
 
     @staticmethod
     def _validate_password_strength(password: str, username: str = None,
-                                     email: str = None) -> Optional[str]:
+                                     email: str = None) -> str | None:
         """验证密码强度，返回错误消息或 None
 
         要求: 10+ 字符, 含大小写+数字+特殊字符, 不包含用户名/邮箱
@@ -46,7 +46,7 @@ class AuthService:
 
     @staticmethod
     def register(username: str, email: str, password: str,
-                 full_name: str = None) -> Tuple[Optional[User], Optional[str]]:
+                 full_name: str = None) -> tuple[User | None, str | None]:
         """
         注册新用户
 
@@ -95,7 +95,7 @@ class AuthService:
             return None, sanitize_service_error(e, '注册用户失败')
 
     @staticmethod
-    def login(login_id: str, password: str) -> Tuple[Optional[User], Optional[str]]:
+    def login(login_id: str, password: str) -> tuple[User | None, str | None]:
         """
         用户登录
 
@@ -142,7 +142,7 @@ class AuthService:
         return user, None
 
     @staticmethod
-    def update_profile(user: User, data: dict) -> Tuple[bool, Optional[str]]:
+    def update_profile(user: User, data: dict) -> tuple[bool, str | None]:
         """
         更新用户资料
 
@@ -171,7 +171,7 @@ class AuthService:
 
     @staticmethod
     def change_password(user: User, old_password: str,
-                        new_password: str) -> Tuple[bool, Optional[str]]:
+                        new_password: str) -> tuple[bool, str | None]:
         """
         修改密码
 
@@ -206,7 +206,7 @@ class AuthService:
         return raw_key
 
     @staticmethod
-    def get_user_by_api_key(api_key: str) -> Optional[User]:
+    def get_user_by_api_key(api_key: str) -> User | None:
         """
         通过 API 密钥获取用户 (用于 API 认证)
 
@@ -249,7 +249,7 @@ class AuthService:
         return paginate_query(stmt, page, per_page, item_key='users', transform_fn=lambda x: x.to_dict())
 
     @staticmethod
-    def login_jwt(login_id: str, password: str) -> Tuple[Optional[dict], Optional[str], int]:
+    def login_jwt(login_id: str, password: str) -> tuple[dict | None, str | None, int]:
         """
         JWT 登录 — 验证凭据并返回 Token 对
 
@@ -272,7 +272,7 @@ class AuthService:
         return tokens, None, 200
 
     @staticmethod
-    def refresh_jwt(refresh_token: str) -> Tuple[Optional[dict], Optional[str], int]:
+    def refresh_jwt(refresh_token: str) -> tuple[dict | None, str | None, int]:
         """
         使用 Refresh Token 刷新 Access Token
 
@@ -282,8 +282,8 @@ class AuthService:
         Returns:
             (new_token_pair, error_message, status_code)
         """
-        from app.utils.jwt_helpers import decode_refresh_token, generate_token_pair, revoke_token
         from app.models.user import User
+        from app.utils.jwt_helpers import decode_refresh_token, generate_token_pair, revoke_token
 
         payload, error = decode_refresh_token(refresh_token)
         if error:

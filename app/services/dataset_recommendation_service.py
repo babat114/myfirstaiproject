@@ -5,9 +5,10 @@
 ============================================
 """
 import os
+
 import numpy as np
 import pandas as pd
-from typing import Optional
+
 from app import logger
 
 
@@ -87,7 +88,7 @@ class DatasetAnalyzer:
             return {'error': str(e)}
 
     @staticmethod
-    def _load(df_path: str, fmt: str) -> Optional[pd.DataFrame]:
+    def _load(df_path: str, fmt: str) -> pd.DataFrame | None:
         from app.utils.data_io import load_dataframe
         # 加载最多 100000 行以准确分析数据集特征，避免因采样不足导致推荐偏差
         return load_dataframe(df_path, fmt, nrows=100000)
@@ -167,23 +168,21 @@ class DatasetRecommendationService:
             analysis['n_samples'] = known_n_samples
 
         # 基础信息
-        n_samples = analysis['n_samples']
-        n_features = analysis['n_features']
+        analysis['n_samples']
+        analysis['n_features']
         target_type = analysis.get('target_type', 'categorical')
         n_classes = analysis.get('n_classes', 0)
         text_heavy = analysis.get('text_heavy', False)
-        imbalanced = analysis.get('imbalanced', False)
-        mostly_numeric = analysis.get('mostly_numeric', True)
-        high_dim = analysis.get('high_dim', False)
-        wide = analysis.get('wide_data', False)
-        missing_rate = analysis.get('missing_rate', 0)
+        analysis.get('imbalanced', False)
+        analysis.get('mostly_numeric', True)
+        analysis.get('high_dim', False)
+        analysis.get('wide_data', False)
+        analysis.get('missing_rate', 0)
 
-        recommendations = []
 
         # 确定最佳模型类型
         if text_heavy:
             primary_type = 'nlp'
-            confidence = 0.85
             reason = f'检测到{analysis.get("text_column_count", 0)}个文本列，适合NLP处理'
             types = [
                 {'model_type': 'nlp', 'confidence': 0.85, 'reason': reason},
@@ -266,7 +265,6 @@ class DatasetRecommendationService:
                     {'algorithm': 'knn_regressor', 'display': 'KNN Regressor', 'confidence': 0.60, 'reason': '简单非参数方法'},
                 ]
         elif target_type == 'categorical':
-            is_binary = n_classes == 2
             if n_samples > 5000 and not imbalanced:
                 algorithms = [
                     {'algorithm': 'random_forest', 'display': 'Random Forest', 'confidence': 0.90, 'reason': '综合性能最佳'},
@@ -300,7 +298,7 @@ class DatasetRecommendationService:
     @staticmethod
     def _recommend_frameworks(analysis, text_heavy) -> list:
         n_samples = analysis['n_samples']
-        n_features = analysis['n_features']
+        analysis['n_features']
         high_dim = analysis.get('high_dim', False)
 
         frameworks = [
@@ -320,8 +318,8 @@ class DatasetRecommendationService:
         """根据数据集特征推荐超参数预设"""
         n_samples = analysis['n_samples']
         n_features = analysis['n_features']
-        n_classes = analysis.get('n_classes', 0)
-        target_type = analysis.get('target_type', 'categorical')
+        analysis.get('n_classes', 0)
+        analysis.get('target_type', 'categorical')
         imbalanced = analysis.get('imbalanced', False)
 
         params = {}

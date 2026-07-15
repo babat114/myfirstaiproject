@@ -11,19 +11,20 @@ v5 新增:
   9. 前端进度条 + 关键帧信息实时展示
 ============================================
 """
-import os
+import contextlib
+import threading
 import time
 import uuid
-import threading
+from collections.abc import Callable
+from datetime import datetime
+
 import numpy as np
 import pandas as pd
-from datetime import datetime
-from app._timezone import localnow
-from typing import Optional, Tuple, Dict, Callable
+
 from app import db, logger
-from app.models.training_job import TrainingJob
+from app._timezone import localnow
 from app.models.dataset import Dataset
-from app.models.model_record import ModelRecord
+from app.models.training_job import TrainingJob
 from app.models.user import User
 
 
@@ -177,7 +178,7 @@ class TuningProgressTracker:
 
 
 # 全局单例
-_tuning_tracker: Optional[TuningProgressTracker] = None
+_tuning_tracker: TuningProgressTracker | None = None
 
 
 def get_tuning_tracker() -> TuningProgressTracker:
@@ -440,8 +441,8 @@ def _prepare_xy(df: pd.DataFrame, target_column: str):
 
 def _impute_and_encode_X(X: pd.DataFrame) -> np.ndarray:
     """对X做缺失值填充 + 分类编码 + 标准化, 返回 float64 numpy array"""
-    from sklearn.preprocessing import StandardScaler, LabelEncoder
     from sklearn.impute import SimpleImputer
+    from sklearn.preprocessing import LabelEncoder, StandardScaler
 
     X = X.copy()
 
@@ -471,10 +472,7 @@ def _prepare_y_for_classification(y_raw) -> np.ndarray:
     """
     from sklearn.preprocessing import LabelEncoder
 
-    if isinstance(y_raw, np.ndarray):
-        s = pd.Series(y_raw)
-    else:
-        s = y_raw
+    s = pd.Series(y_raw) if isinstance(y_raw, np.ndarray) else y_raw
 
     # 处理inf: 转为特殊字符串 '__inf__' / '__ninf__'
     s = s.copy()
@@ -525,10 +523,7 @@ def _prepare_data_robust(df, target_column, task_type):
     # 聚类路径: 无监督学习, 不需要y
     # ================================================================
     if task_type == 'clustering':
-        if target_column and target_column in df.columns:
-            X = df.drop(columns=[target_column])
-        else:
-            X = df.copy()
+        X = df.drop(columns=[target_column]) if target_column and target_column in df.columns else df.copy()
         X_scaled = _impute_and_encode_X(X)
         return X_scaled, None, 'clustering', 'silhouette'
 
@@ -556,7 +551,7 @@ def _prepare_data_robust(df, target_column, task_type):
 
     # ---- Step 2: 分离 X / y ----
     X, y_raw, target_column = _prepare_xy(df, target_column)
-    n_samples = len(X)
+    len(X)
 
     # ---- Step 3: 编码 X ----
     X_scaled = _impute_and_encode_X(X)
@@ -597,10 +592,7 @@ def _prepare_data_robust(df, target_column, task_type):
         return X_scaled, y_encoded, 'classification', 'accuracy'
 
     # 情况C: 一切正常 — 确保 scoring 匹配
-    if task_type == 'classification':
-        scoring = 'accuracy'
-    else:
-        scoring = 'neg_mean_squared_error'
+    scoring = 'accuracy' if task_type == 'classification' else 'neg_mean_squared_error'
 
     return X_scaled, y_encoded, task_type, scoring
 
@@ -618,9 +610,7 @@ def _create_model(algorithm: str, task_type: str, is_mlp: bool = False,
     Args:
         random_state: 随机种子 (None=真随机, int=可复现)
     """
-    from app.executor.trainers.sklearn_trainer import (
-        _CLASSIFIERS, _REGRESSORS, _CLUSTERERS, _import_model
-    )
+    from app.executor.trainers.sklearn_trainer import _CLASSIFIERS, _CLUSTERERS, _REGRESSORS, _import_model
 
     # MLP 特殊处理
     if is_mlp:
@@ -796,10 +786,8 @@ def _make_progress_scorer(actual_scoring, total_steps: int, progress_callback: C
                 score_val = 0.0
 
         # 更新进度
-        try:
+        with contextlib.suppress(Exception):
             progress_callback(counter[0], total_steps, None, score_val)
-        except Exception:
-            pass
 
         return score_val
 
@@ -834,8 +822,8 @@ def _manual_clustering_search(base_model, param_grid, X,
     Returns:
         dict: 兼容 GridSearchCV cv_results_ 的格式, 可直接传入 _build_result
     """
-    from sklearn.model_selection import ParameterGrid
     from sklearn.metrics import silhouette_score
+    from sklearn.model_selection import ParameterGrid
 
     param_list = list(ParameterGrid(param_grid))
     n_combinations = len(param_list)
@@ -905,10 +893,7 @@ def _manual_clustering_search(base_model, param_grid, X,
                     raise ValueError('无法获取聚类标签')
 
             # silhouette_score — 用于评分的子样本 (避免 O(n²) 在全量数据上爆炸)
-            if n_samples > MAX_SCORE_SAMPLES:
-                labels = labels_all[score_indices]
-            else:
-                labels = labels_all
+            labels = labels_all[score_indices] if n_samples > MAX_SCORE_SAMPLES else labels_all
 
             unique_labels = set(labels)
             n_unique = len(unique_labels)
@@ -938,10 +923,8 @@ def _manual_clustering_search(base_model, param_grid, X,
 
         # 进度回调 — 每完成一个参数组合就推送
         if progress_callback:
-            try:
+            with contextlib.suppress(Exception):
                 progress_callback(step, n_combinations, current_params, score)
-            except Exception:
-                pass
 
     # 按分数降序排列 (最佳排第1)
     results.sort(key=lambda x: x['mean_score'], reverse=True)
@@ -1185,7 +1168,7 @@ class HyperparameterTuningService:
                         cv: int = 5, n_jobs: int = 2,
                         verbose: int = 1,
                         progress_callback: Callable = None,
-                        random_state: int = None) -> Dict:
+                        random_state: int = None) -> dict:
         """运行 GridSearchCV 超参数搜索
 
         策略: 最多尝试 3 次 (分类 → 回归 → 聚类),
@@ -1253,7 +1236,7 @@ class HyperparameterTuningService:
 
         last_error = None
 
-        for attempt_idx, (try_task, try_scoring, try_algo) in enumerate(attempts):
+        for attempt_idx, (try_task, _try_scoring, try_algo) in enumerate(attempts):
             try:
                 # ---- 加载数据 ----
                 df = _load_dataset_file(dataset)
@@ -1278,10 +1261,7 @@ class HyperparameterTuningService:
 
                 # 再次检查 search space (可能在修正后变化)
                 final_is_clustering = (final_task == 'clustering')
-                if final_is_clustering:
-                    final_param_grid = SEARCH_SPACES.get(try_algo, param_grid)
-                else:
-                    final_param_grid = param_grid
+                final_param_grid = SEARCH_SPACES.get(try_algo, param_grid) if final_is_clustering else param_grid
 
                 # ---- 验证样本数 ----
                 n_samples = len(X)
@@ -1358,10 +1338,10 @@ class HyperparameterTuningService:
                           scoring: str = 'accuracy', cv: int = 5,
                           n_jobs: int = 2,
                           progress_callback: Callable = None,
-                          random_state: int = None) -> Dict:
+                          random_state: int = None) -> dict:
         """运行 RandomizedSearchCV — 与 GridSearchCV 相同的多层防御策略"""
+        from scipy.stats import loguniform, randint
         from sklearn.model_selection import RandomizedSearchCV
-        from scipy.stats import randint, loguniform
 
         is_mlp = (algorithm == 'mlp')
         is_clustering = (task_type == 'clustering' or algorithm in _CLUSTERING_ALGOS)
@@ -1425,7 +1405,7 @@ class HyperparameterTuningService:
 
         last_error = None
 
-        for attempt_idx, (try_task, try_scoring, try_algo) in enumerate(attempts):
+        for attempt_idx, (try_task, _try_scoring, try_algo) in enumerate(attempts):
             try:
                 df = _load_dataset_file(dataset)
                 if df is None:
@@ -1510,16 +1490,13 @@ class HyperparameterTuningService:
                     )
                 else:
                     # ── 监督学习路径 ──
-                    if final_is_clustering:
-                        actual_scoring = _clustering_scorer
-                    else:
-                        actual_scoring = final_scoring
+                    actual_scoring = _clustering_scorer if final_is_clustering else final_scoring
 
                     # 进度回调 → n_jobs=1 + 委托式评分器
                     if progress_callback is not None:
                         from sklearn.model_selection import ParameterGrid
                         param_list = list(ParameterGrid(param_distributions))
-                        n_combos_r = len(param_list) if param_list else 0
+                        len(param_list) if param_list else 0
                         total_steps_r = min(n_iter, 100) * effective_cv
                         scoring_for_rnd = _make_progress_scorer(
                             actual_scoring, total_steps_r, progress_callback
@@ -1591,7 +1568,7 @@ class HyperparameterTuningService:
                               tuning_method: str = 'grid',
                               n_iter: int = 30, cv: int = 5,
                               epochs: int = 0,
-                              random_state: int = None) -> Tuple[Optional[TrainingJob], Optional[Dict], Optional[str]]:
+                              random_state: int = None) -> tuple[TrainingJob | None, dict | None, str | None]:
         """运行超参数搜索并创建使用最佳参数的训练任务
 
         当 algorithm='auto' 时, 自动遍历该任务类型的所有适用算法,
@@ -1951,7 +1928,7 @@ class HyperparameterTuningService:
             tuning_id (str): SSE 订阅用 UUID
         """
         import time as _time
-        from sklearn.model_selection import ParameterGrid
+
 
         tuning_id = str(uuid.uuid4())[:8]
         tracker = get_tuning_tracker()
@@ -1989,7 +1966,7 @@ class HyperparameterTuningService:
                                    f'▶ [{idx+1}/{len(algo_list)}] {label} ({algo}) 开始搜索...')
 
                     # 内部 progress 回调 — 更新全局步数 + 当前算法信息
-                    def algo_progress_cb(step, total, params, score):
+                    def algo_progress_cb(step, total, params, score, _label=label, _algo=algo):
                         nonlocal global_step
                         global_step += 1
                         tracker.update(
@@ -2001,7 +1978,7 @@ class HyperparameterTuningService:
                         s = tracker.get(tuning_id)
                         if s and s.get('best_params_so_far') is not None:
                             bp = dict(s['best_params_so_far'])
-                            bp['_current_algo'] = f'{label} ({algo})'
+                            bp['_current_algo'] = f'{_label} ({_algo})'
                             with tracker._lock:
                                 if tuning_id in tracker._sessions:
                                     tracker._sessions[tuning_id]['best_params_so_far'] = bp
@@ -2095,7 +2072,7 @@ class HyperparameterTuningService:
                                f'🏆 最优: {overall_best_algo} '
                                f'score={overall_best_score:.4f}')
                 tracker.add_log(tuning_id,
-                               f'📊 算法排名: ' + ', '.join(
+                               '📊 算法排名: ' + ', '.join(
                                    f'{r["label"]}({r["best_score"]:.4f})'
                                    for r in algo_results[:5]))
 

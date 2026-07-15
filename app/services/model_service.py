@@ -5,20 +5,18 @@ AI模型服务
 ============================================
 """
 import os
-import uuid
-from datetime import datetime
-from typing import Optional, Tuple
-from app._timezone import localnow
-from werkzeug.utils import secure_filename
-from werkzeug.datastructures import FileStorage
+
 from flask import current_app
+from sqlalchemy.orm import joinedload
+from werkzeug.datastructures import FileStorage
+from werkzeug.utils import secure_filename
+
 from app import db, logger
+from app._timezone import localnow
 from app.models.model_record import ModelRecord
 from app.models.user import User
 from app.utils.cache import dashboard_cache, leaderboard_cache
 from app.utils.helpers import paginate_query, sanitize_service_error
-from sqlalchemy.orm import joinedload
-
 
 # ═══════════════════════════════════════════════════════════════
 # 模型卡片生成 — 安全转义工具 (提取自 generate_model_card)
@@ -94,7 +92,7 @@ class ModelService:
     def create_model(user: User, name: str, model_type: str = 'other',
                      framework: str = None, description: str = None,
                      version: str = '1.0.0', hyperparameters: dict = None,
-                     is_public: bool = False) -> Tuple[Optional[ModelRecord], Optional[str]]:
+                     is_public: bool = False) -> tuple[ModelRecord | None, str | None]:
         """
         注册新AI模型
 
@@ -130,7 +128,7 @@ class ModelService:
 
     @staticmethod
     def upload_model_file(model: ModelRecord, file: FileStorage,
-                          upload_folder: str = None) -> Tuple[bool, Optional[str]]:
+                          upload_folder: str = None) -> tuple[bool, str | None]:
         """
         上传模型权重文件
 
@@ -138,7 +136,7 @@ class ModelService:
             (success, error_message)
         """
         if not ModelService.allowed_file(file.filename, file_storage=file):
-            return False, f'不支持的模型文件格式。'
+            return False, '不支持的模型文件格式。'
 
         if upload_folder is None:
             upload_folder = current_app.config['UPLOAD_FOLDER']
@@ -174,7 +172,7 @@ class ModelService:
             return False, sanitize_service_error(e, '模型文件上传失败')
 
     @staticmethod
-    def update_metrics(model: ModelRecord, metrics: dict) -> Tuple[bool, Optional[str]]:
+    def update_metrics(model: ModelRecord, metrics: dict) -> tuple[bool, str | None]:
         """
         更新模型性能指标
 
@@ -191,7 +189,7 @@ class ModelService:
             return False, sanitize_service_error(e, '更新模型指标失败')
 
     @staticmethod
-    def get_model_by_id(model_id: int) -> Optional[ModelRecord]:
+    def get_model_by_id(model_id: int) -> ModelRecord | None:
         """根据 ID 获取模型 (预加载 owner 避免详情页 N+1)"""
         return db.session.execute(
             db.select(ModelRecord).filter_by(id=model_id)
@@ -199,7 +197,7 @@ class ModelService:
         ).scalar_one_or_none()
 
     @staticmethod
-    def get_model_by_uuid(model_uuid: str) -> Optional[ModelRecord]:
+    def get_model_by_uuid(model_uuid: str) -> ModelRecord | None:
         """根据 UUID 获取模型 (预加载 owner 避免详情页 N+1)"""
         return db.session.execute(
             db.select(ModelRecord).filter_by(uuid=model_uuid)
@@ -207,7 +205,7 @@ class ModelService:
         ).scalar_one_or_none()
 
     @staticmethod
-    def update_model(model: ModelRecord, data: dict) -> Tuple[bool, Optional[str]]:
+    def update_model(model: ModelRecord, data: dict) -> tuple[bool, str | None]:
         """更新模型信息"""
         allowed_fields = {
             'name', 'description', 'version', 'model_type',
@@ -233,7 +231,7 @@ class ModelService:
             return False, sanitize_service_error(e, '更新模型失败')
 
     @staticmethod
-    def delete_model(model: ModelRecord) -> Tuple[bool, Optional[str]]:
+    def delete_model(model: ModelRecord) -> tuple[bool, str | None]:
         """删除模型及其文件 — 先解除关联训练任务的外键约束"""
         try:
             from app.models.training_job import TrainingJob
@@ -279,7 +277,7 @@ class ModelService:
                      framework: str = None, description: str = None,
                      version: str = '1.0.0', hyperparameters: dict = None,
                      metrics: dict = None, model_file_path: str = None,
-                     is_public: bool = False) -> Tuple[Optional[ModelRecord], Optional[str]]:
+                     is_public: bool = False) -> tuple[ModelRecord | None, str | None]:
         """导入模型 — 从已有模型文件创建完整 ModelRecord
 
         与 create_model 的区别:
@@ -467,7 +465,7 @@ class ModelService:
         agg_row = db.session.execute(
             _filtered_query(
                 func.count(ModelRecord.id),
-                func.sum(db.case((ModelRecord.is_public == True, 1), else_=0)),
+                func.sum(db.case((ModelRecord.is_public, 1), else_=0)),
                 func.sum(db.case((ModelRecord.status == 'deployed', 1), else_=0)),
                 func.avg(ModelRecord.accuracy),
                 func.max(ModelRecord.accuracy),
@@ -832,7 +830,7 @@ applications requiring automated predictions based on structured data{nlp_hint}.
         else:
             section += '\n\n*No hyperparameter information available.*'
 
-        section += f'''
+        section += '''
 
 ### Training Duration
 
@@ -885,7 +883,7 @@ applications requiring automated predictions based on structured data{nlp_hint}.
         if model.file_size:
             section += f'\n- **File Size**: {model.file_size_mb} MB'
 
-        section += f'''
+        section += '''
 
 ## Input Features'''
 

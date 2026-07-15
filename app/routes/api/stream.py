@@ -7,9 +7,10 @@ import json
 import queue
 import threading
 
-from flask import Blueprint, request, Response, jsonify, current_app
-from flask_login import login_required, current_user
-from app import db, logger
+from flask import Blueprint, Response, current_app, jsonify
+from flask_login import current_user, login_required
+
+from app import db
 from app.models.training_job import TrainingJob
 from app.services.training_service import TrainingService
 
@@ -184,7 +185,7 @@ def training_stream(job_id):
                     yield f"data: {msg}\n\n"
                 except queue.Empty:
                     # 心跳 — 保持连接，检测断线
-                    yield f": heartbeat\n\n"
+                    yield ": heartbeat\n\n"
 
                     # 心跳时检查任务是否已结束
                     db.session.commit()

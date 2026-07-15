@@ -5,11 +5,10 @@ AI模型 Web 路由
 ============================================
 """
 import json
-from flask import (
-    Blueprint, render_template, request, redirect,
-    url_for, flash, current_app
-)
-from flask_login import login_required, current_user
+
+from flask import Blueprint, current_app, flash, redirect, render_template, request, url_for
+from flask_login import current_user, login_required
+
 from app.services.model_service import ModelService
 
 models_bp = Blueprint('models', __name__)
@@ -116,7 +115,7 @@ def create_model():
         hyperparams = {}
         hp_keys = request.form.getlist('hp_key[]')
         hp_values = request.form.getlist('hp_value[]')
-        for k, v in zip(hp_keys, hp_values):
+        for k, v in zip(hp_keys, hp_values, strict=False):
             if k.strip() and v.strip():
                 try:
                     hyperparams[k.strip()] = float(v.strip()) if '.' in v else int(v.strip())
@@ -206,7 +205,7 @@ def edit_model(model_id):
         hp_keys = request.form.getlist('hp_key[]')
         hp_values = request.form.getlist('hp_value[]')
         hyperparams = {}
-        for k, v in zip(hp_keys, hp_values):
+        for k, v in zip(hp_keys, hp_values, strict=False):
             if k.strip() and v.strip():
                 try:
                     hyperparams[k.strip()] = float(v.strip()) if '.' in v else int(v.strip())
@@ -421,7 +420,7 @@ def _build_model_hints(model, metadata, hyperparams, feature_names):
     # ── 按模型类型构建输入指导 ──
     if model.model_type == 'nlp':
         # 输入长度建议
-        text_column = (metadata or {}).get('text_column', '')
+        (metadata or {}).get('text_column', '')
         max_len = (metadata or {}).get('max_length', 0)
 
         hints['input_guide'] = {
@@ -580,7 +579,6 @@ def test_model(model_id):
             else:
                 try:
                     import pandas as pd
-                    import numpy as np
                     # 优先使用训练时保存的 TF-IDF vectorizer
                     _, _md, _, _le = ModelInferenceService.load_model(model)
                     _vec = (_md or {}).get('vectorizer')
@@ -621,8 +619,10 @@ def test_model(model_id):
             else:
                 try:
                     from app.services.feature_extractor import FeatureExtractor
+                    _, _md, _, _le = ModelInferenceService.load_model(model)
+                    _fn = (_md or {}).get('feature_names', [])
                     image_data = img_file.read()
-                    n_features = len(feature_names) if feature_names else 100
+                    n_features = len(_fn) if _fn else 100
                     features, feat_error = FeatureExtractor.extract_image_features(
                         image_data, max(n_features, 10)
                     )
@@ -632,7 +632,7 @@ def test_model(model_id):
                         import pandas as pd
                         df = pd.DataFrame(
                             features,
-                            columns=[feature_names[i] if i < len(feature_names)
+                            columns=[_fn[i] if i < len(_fn)
                                      else f'feature_{i}'
                                      for i in range(features.shape[1])]
                         )

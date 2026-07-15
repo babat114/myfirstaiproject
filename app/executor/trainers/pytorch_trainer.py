@@ -10,15 +10,14 @@ v3 改进 (2026-06-05):
   - 每个 epoch 后报告 train + val 双指标，避免误导
   - 更安全默认值: lr=1e-4, dropout=0.5, weight_decay=1e-3
 """
+import copy
 import os
 import pickle
+
 import numpy as np
 import pandas as pd
-import json
-import copy
 
 from app.executor.trainers.base import BaseTrainer
-
 
 # ============ PyTorch 延迟导入 ============
 # 延迟导入策略: 仅在首次使用时加载 torch，避免非 GPU 环境加载失败
@@ -227,9 +226,9 @@ class PyTorchTrainer(BaseTrainer):
 
     def load_data(self):
         torch, nn, optim, DataLoader, TensorDataset = _ensure_torch()
-        from sklearn.model_selection import train_test_split
-        from sklearn.preprocessing import StandardScaler, LabelEncoder
         from sklearn.impute import SimpleImputer
+        from sklearn.model_selection import train_test_split
+        from sklearn.preprocessing import LabelEncoder, StandardScaler
 
         self._device = self._get_device()
         self.callback.on_log(f'设备: {self._device}')
@@ -266,7 +265,9 @@ class PyTorchTrainer(BaseTrainer):
 
         if ds_category == 'nlp':
             from app.utils.nlp_preprocessing import (
-                detect_nlp_text_column, create_vectorizer_config, extract_class_labels,
+                create_vectorizer_config,
+                detect_nlp_text_column,
+                extract_class_labels,
             )
             self._nlp_text_col = detect_nlp_text_column(X, ds_category)
             if self._nlp_text_col:
@@ -516,8 +517,6 @@ class PyTorchTrainer(BaseTrainer):
         self._model.eval()
         total_loss = 0.0
         correct = total = 0
-        all_preds = []
-        all_labels = []
 
         with torch.no_grad():
             for batch_x, batch_y in loader:
@@ -616,8 +615,14 @@ class PyTorchTrainer(BaseTrainer):
     def evaluate(self) -> dict:
         """最终评估: 恢复最佳模型 → 在测试集上计算最终指标"""
         torch, _, _, _, _ = _ensure_torch()
-        from sklearn.metrics import (accuracy_score, precision_score, recall_score,
-                                      f1_score, r2_score, mean_squared_error)
+        from sklearn.metrics import (
+            accuracy_score,
+            f1_score,
+            mean_squared_error,
+            precision_score,
+            r2_score,
+            recall_score,
+        )
 
         # —— 恢复早停最佳模型 ——
         if self._best_model_state is not None:

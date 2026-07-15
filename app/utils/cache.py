@@ -4,10 +4,11 @@ TTL 内存缓存工具 v2.0
 基于 dict + 自动过期清理 + 容量限制 + 统计
 ============================================
 """
-import time
 import threading
+import time
+from collections.abc import Callable
 from functools import wraps
-from typing import Any, Callable, Optional
+from typing import Any
 
 
 class TTLCache:
@@ -51,14 +52,14 @@ class TTLCache:
         self._evictions = 0
 
         # 后台清理线程
-        self._cleanup_thread: Optional[threading.Thread] = None
+        self._cleanup_thread: threading.Thread | None = None
         self._cleanup_stop = threading.Event()
         if cleanup_interval > 0:
             self._start_cleanup_thread(cleanup_interval)
 
     # ── 核心 API ──────────────────────────────────────
 
-    def get(self, key: str) -> Optional[Any]:
+    def get(self, key: str) -> Any | None:
         """获取缓存值，过期返回 None"""
         with self._lock:
             entry = self._store.get(key)
@@ -79,9 +80,8 @@ class TTLCache:
         expires_at = time.monotonic() + ttl
         with self._lock:
             # 容量检查: 驱逐最早过期的条目
-            if self.max_size > 0 and len(self._store) >= self.max_size:
-                if key not in self._store:
-                    self._evict_oldest()
+            if self.max_size > 0 and len(self._store) >= self.max_size and key not in self._store:
+                self._evict_oldest()
             self._store[key] = (value, expires_at)
 
     def delete(self, key: str) -> bool:

@@ -5,14 +5,14 @@
 支持 sklearn / PyTorch / HuggingFace Transformers 模型
 ============================================
 """
-import os
 import json
+import os
 import pickle
+
 import numpy as np
 import pandas as pd
-from typing import Optional, Tuple
-from flask import current_app
-from app import db, logger
+
+from app import logger
 from app.models.model_record import ModelRecord
 
 
@@ -32,7 +32,7 @@ class ModelInferenceService:
     """
 
     @staticmethod
-    def load_model(model: ModelRecord) -> Tuple[Optional[object], Optional[dict], Optional[object], Optional[str]]:
+    def load_model(model: ModelRecord) -> tuple[object | None, dict | None, object | None, str | None]:
         """
         加载模型文件及其元数据
 
@@ -101,7 +101,7 @@ class ModelInferenceService:
                     meta_path = os.path.join(nlp_dir, 'metadata.json')
                     metadata = {}
                     if os.path.exists(meta_path):
-                        with open(meta_path, 'r', encoding='utf-8') as f:
+                        with open(meta_path, encoding='utf-8') as f:
                             metadata = json.load(f)
                     metadata['framework'] = 'transformers'
                     metadata['task_type'] = metadata.get('task_type', 'classification')
@@ -267,10 +267,7 @@ class ModelInferenceService:
 
             # 处理缺失值
             _means = data.mean(numeric_only=True)
-            if len(_means) > 0:
-                data = data.fillna(_means)
-            else:
-                data = data.fillna(0)
+            data = data.fillna(_means) if len(_means) > 0 else data.fillna(0)
             for col in data.select_dtypes(include=['object']).columns:
                 data[col] = data[col].fillna(data[col].mode()[0] if len(data[col].mode()) > 0 else 'unknown')
 
@@ -289,7 +286,7 @@ class ModelInferenceService:
                                 f'{unknown_vals[:5]}... (列={col})'
                             )
                         data[col] = data[col].apply(
-                            lambda x: x if x in known_classes else le.classes_[0]
+                            lambda x, known_classes=known_classes, le=le: x if x in known_classes else le.classes_[0]
                         )
                         data[col] = le.transform(data[col])
                     except Exception as e:
@@ -383,7 +380,6 @@ class ModelInferenceService:
 
             elif framework == 'tensorflow':
                 # TensorFlow/Keras 模型预测
-                import tensorflow as tf
                 X = data.values.astype('float32')
                 # Keras predict() — 分类模型末层含 softmax, 输出概率; 回归模型输出原始值
                 outputs = model_obj.predict(X, verbose=0)
@@ -449,7 +445,7 @@ class ModelInferenceService:
                     probabilities = []
                     for i in range(len(predictions)):
                         probs_list = []
-                        for j, idx in enumerate(top_indices[i]):
+                        for _j, idx in enumerate(top_indices[i]):
                             # 优先使用解码后的标签名, 回退到索引
                             class_label = (
                                 decoded_labels[int(idx)]
@@ -484,7 +480,7 @@ class ModelInferenceService:
         tokenizer,
         metadata: dict,
         text: str,
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """单文本快速预测 — 专用于 Transformer NLP 模型
 
         在 quick-predict API 中替代不存在 TransformersNLPTrainer.predict_single(),
@@ -557,13 +553,18 @@ class ModelInferenceService:
 
         返回完整的评估报告，包含混淆矩阵数据等
         """
-        import pandas as pd
         from sklearn.metrics import (
-            accuracy_score, precision_score, recall_score, f1_score,
-            confusion_matrix, classification_report,
-            mean_squared_error, mean_absolute_error, r2_score
+            accuracy_score,
+            classification_report,
+            confusion_matrix,
+            f1_score,
+            mean_absolute_error,
+            mean_squared_error,
+            precision_score,
+            r2_score,
+            recall_score,
         )
-        from app.models.dataset import Dataset
+
 
         model_obj, metadata, tokenizer, error = ModelInferenceService.load_model(model)
         if error:
@@ -586,7 +587,7 @@ class ModelInferenceService:
             from app.utils.data_io import load_dataframe
             df = load_dataframe(eval_dataset.file_path, eval_dataset.file_format.lower())
             if df is None:
-                return {'success': False, 'error': f'不支持的数据格式或文件已损坏'}
+                return {'success': False, 'error': '不支持的数据格式或文件已损坏'}
 
             # 获取目标列: 优先用测试集的summary_json, 再回退到训练超参数
             hyperparams = model.hyperparameters_dict
@@ -637,8 +638,8 @@ class ModelInferenceService:
 
             if task_type == 'classification':
                 # 确保 y_true 和 y_pred 在同一个编码空间中比较
-                from sklearn.preprocessing import LabelEncoder
                 import numpy as np
+                from sklearn.preprocessing import LabelEncoder
                 if y_true.dtype == 'object' or isinstance(y_true.iloc[0], str):
                     le = LabelEncoder()
                     all_labels = np.unique(list(y_true.astype(str)) + [str(p) for p in y_pred])

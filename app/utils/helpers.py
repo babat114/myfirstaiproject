@@ -4,15 +4,17 @@
 通用的格式转换、验证和工具方法
 ============================================
 """
-import json
 import hashlib
-from datetime import datetime, timezone, timedelta
+import json
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 # 北京时区 (UTC+8) — 保留供外部引用
 BEIJING_TZ = timezone(timedelta(hours=8))
 
 # 统一使用 _timezone 模块的 localnow，避免重复实现
+import contextlib
+
 from app._timezone import localnow  # noqa: E402, F401 — re-export for backward compatibility
 
 
@@ -60,7 +62,7 @@ def generate_file_hash(filepath: str, algorithm: str = 'sha256') -> str | None:
             for chunk in iter(lambda: f.read(8192), b''):
                 h.update(chunk)
         return h.hexdigest()
-    except (IOError, OSError):
+    except OSError:
         return None
 
 
@@ -173,10 +175,8 @@ def parse_form_params(form_data: dict, int_fields: set = None, float_fields: set
             except (ValueError, TypeError):
                 pass  # 跳过无效数值
         elif key_lower in int_fields:
-            try:
+            with contextlib.suppress(ValueError, TypeError):
                 result[key] = int(val)
-            except (ValueError, TypeError):
-                pass
         else:
             # 保持字符串 — 避免误转 "00123" → 123、ID字段丢失前导零
             result[key] = val
@@ -282,6 +282,7 @@ def paginate_query(query, page: int = 1, per_page: int = 20,
         {'items': [...], 'total': int, 'pages': int, 'current_page': int, 'has_next': bool, 'has_prev': bool}
     """
     from sqlalchemy import Select
+
     from app import db as _app_db
 
     if isinstance(query, Select):
@@ -290,10 +291,7 @@ def paginate_query(query, page: int = 1, per_page: int = 20,
         pagination = query.paginate(page=page, per_page=per_page, error_out=False)
 
     items = pagination.items
-    if transform_fn:
-        items = [transform_fn(i) for i in items]
-    else:
-        items = list(items)
+    items = [transform_fn(i) for i in items] if transform_fn else list(items)
 
     return {
         item_key: items,

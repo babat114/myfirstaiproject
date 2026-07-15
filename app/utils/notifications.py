@@ -15,12 +15,12 @@ Usage::
 import json
 import logging
 import smtplib
-import time
 import threading
-from email.mime.text import MIMEText
+import time
 from email.mime.multipart import MIMEMultipart
-from urllib.request import Request, urlopen
+from email.mime.text import MIMEText
 from urllib.error import URLError
+from urllib.request import Request, urlopen
 
 logger = logging.getLogger(__name__)
 

@@ -4,16 +4,20 @@
 训练任务管理的页面路由
 ============================================
 """
+import contextlib
 import json
-from flask import Blueprint, render_template, request, redirect, url_for, flash, session
-from flask_login import login_required, current_user
-from app import db
-from app.services.training_service import TrainingService
+import logging
+
+from flask import Blueprint, flash, redirect, render_template, request, session, url_for
+from flask_login import current_user, login_required
+
 from app.services.dataset_service import DatasetService
+from app.services.training_service import TrainingService
 from app.utils.decorators import rate_limit
 from app.utils.helpers import parse_form_params
 
 training_bp = Blueprint('training', __name__)
+logger = logging.getLogger(__name__)
 
 
 @training_bp.route('/')
@@ -366,7 +370,7 @@ def retrain_job_with_params(job_id):
         msg = '已使用原参数重新训练！'
     else:
         success, error = TrainingService.retrain_job(job, new_params=new_params)
-        msg = f'已使用新参数重新训练！'
+        msg = '已使用新参数重新训练！'
 
     if success:
         flash(msg, 'success')
@@ -384,7 +388,8 @@ def gridsearch_retrain(job_id):
     AJAX 请求: 启动后台调优, 返回 {tuning_id, redirect_url}
     传统表单: 同步执行, redirect到详情页
     """
-    from flask import request, jsonify
+    from flask import jsonify, request
+
     from app.services.hyperparameter_tuning import HyperparameterTuningService
 
     job = TrainingService.get_job_by_id(job_id)
@@ -439,7 +444,7 @@ def gridsearch_retrain(job_id):
 
     # ---- 同步模式 (传统表单提交, 兼容旧行为) ----
     if is_mlp:
-        flash(f'正在对 PyTorch MLP 运行超参数搜索 (sklearn代理)...', 'info')
+        flash('正在对 PyTorch MLP 运行超参数搜索 (sklearn代理)...', 'info')
     else:
         flash(f'正在对 {algorithm} 运行 GridSearchCV 自动调优...', 'info')
 
@@ -500,7 +505,8 @@ def apply_tuning_result(job_id):
     接收 JSON: {tuning_id, ...}
     从 TuningProgressTracker 读取结果, 应用到训练任务.
     """
-    from flask import request, jsonify
+    from flask import jsonify, request
+
     from app.services.hyperparameter_tuning import get_tuning_tracker
 
     job = TrainingService.get_job_by_id(job_id)
@@ -553,7 +559,8 @@ def apply_tuning_result(job_id):
 def hyperparameter_tuning():
     """超参数自动调优页面"""
     from flask import jsonify
-    from app.services.hyperparameter_tuning import HyperparameterTuningService, SEARCH_SPACES
+
+    from app.services.hyperparameter_tuning import SEARCH_SPACES, HyperparameterTuningService
 
     datasets_result = DatasetService.list_datasets(
         owner_id=current_user.id, per_page=100, include_public=True
@@ -599,7 +606,6 @@ def hyperparameter_tuning():
         tuning_method = request.form.get('tuning_method', 'random')
         n_iter = request.form.get('n_iter', 30, type=int)
         cv = request.form.get('cv', 5, type=int)
-        start_training = request.form.get('start_training') == 'on'
         action = request.form.get('action', '')
 
         # ── 调优完成 → 创建训练任务 ──
@@ -623,14 +629,11 @@ def hyperparameter_tuning():
                 cpu_cores = request.form.get('cpu_cores', 1, type=int)
                 memory_gb = request.form.get('memory_gb', 4.0, type=float)
                 extra_hparams = {}
-                try:
+                with contextlib.suppress(json.JSONDecodeError, TypeError):
                     extra_hparams = json.loads(request.form.get('extra_hparams_json', '{}'))
-                except (json.JSONDecodeError, TypeError):
-                    pass
 
-                if best_params:
-                    if isinstance(extra_hparams, dict):
-                        extra_hparams.update(best_params)
+                if best_params and isinstance(extra_hparams, dict):
+                    extra_hparams.update(best_params)
 
                 job, job_error = TrainingService.create_job(
                     user=current_user,

@@ -4,10 +4,11 @@ JWT 认证 API
 RESTful 认证接口 — 登录获取 Token、刷新 Token
 ============================================
 """
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, jsonify, request
+
 from app.services.auth_service import AuthService
-from app.utils.decorators import api_login_required, rate_limit
 from app.utils.auth_helpers import get_current_user
+from app.utils.decorators import api_login_required, rate_limit
 
 auth_api_bp = Blueprint('auth_api', __name__)
 
